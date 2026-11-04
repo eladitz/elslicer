@@ -7,6 +7,7 @@ SIGNING="$HOME/Library/Application Support/Itzkin Signing"
 pkill -x OrcaSlicer 2>/dev/null || true
 rm -rf "$APP"
 cp -R "$ROOT/build/arm64/OrcaSlicer/OrcaSlicer.app" "$APP"
+rsync -a "$ROOT/resources/" "$APP/Contents/Resources/"
 /usr/libexec/PlistBuddy -c 'Set CFBundleIdentifier com.itzkin.elslicer' "$APP/Contents/Info.plist"
 xattr -cr "$APP"
 KEYCHAIN=$(ls "$SIGNING"/signing.keychain* | head -1)

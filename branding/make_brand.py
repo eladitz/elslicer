@@ -145,7 +145,9 @@ def write_bitmaps(out):
         rel = f"resources/web/homepage/img/{name}.png"
         original = subprocess.run(["git", "-C", str(ROOT), "show", f"v2.5.0-rc:{rel}"], capture_output=True)
         if original.returncode == 0:
-            subprocess.run(["magick", "png:-", "-modulate", "100,100,137", str(ROOT / rel)], input=original.stdout, check=True)
+            # Flat icons take the light brand colour outright, or they turn too dark to see.
+            look = ["-fill", "#9A9BF2", "-colorize", "100"] if name in ("i4", "i5") else ["-modulate", "100,100,137"]
+            subprocess.run(["magick", "png:-", *look, str(ROOT / rel)], input=original.stdout, check=True)
 
     master = out / "icon_1024.png"
     render(icon, master, 1024)
