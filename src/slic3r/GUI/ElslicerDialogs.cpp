@@ -528,9 +528,16 @@ private:
         }
         m_previous_preset = wxGetApp().preset_bundle->prints.get_selected_preset_name();
 
+        const DynamicPrintConfig &current = wxGetApp().preset_bundle->prints.get_edited_preset().config;
         DynamicPrintConfig config;
-        for (const auto &[key, value] : m_changes)
-            config.set_deserialize_strict(key, value);
+        for (const auto &[key, value] : m_changes) {
+            // List settings keep one value per nozzle, so every nozzle gets the new value.
+            std::string text = value;
+            if (const auto *list = dynamic_cast<const ConfigOptionVectorBase *>(current.option(key)))
+                for (size_t i = 1; i < list->size(); ++i)
+                    text += "," + value;
+            config.set_deserialize_strict(key, text);
+        }
         tab->load_config(config);
 
         char stamp[32];

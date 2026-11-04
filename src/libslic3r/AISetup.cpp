@@ -41,7 +41,9 @@ CheckedChange check_change(const std::string &key, const std::string &value, dou
     }
 
     const ConfigOptionType type = def->type;
-    if (type == coFloat || type == coInt || type == coPercent) {
+    // Speeds are lists with one value per nozzle. AI setup gives them one value, and
+    // the app copies it to every nozzle when applying.
+    if (type == coFloat || type == coFloats || type == coInt || type == coPercent) {
         const double requested = std::strtod(value.c_str(), nullptr);
         double low  = double(def->min);
         double high = double(def->max);
