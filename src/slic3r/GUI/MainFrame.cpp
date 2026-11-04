@@ -509,7 +509,7 @@ DPIFrame(NULL, wxID_ANY, "", wxDefaultPosition, wxDefaultSize, BORDERLESS_FRAME_
     default:
     case GUI_App::EAppMode::Editor:
         m_taskbar_icon = std::make_unique<OrcaSlicerTaskBarIcon>(wxTBI_DOCK);
-        m_taskbar_icon->SetIcon(wxIcon(Slic3r::var("OrcaSlicer-mac_256px.ico"), wxBITMAP_TYPE_ICO), "OrcaSlicer");
+        m_taskbar_icon->SetIcon(wxIcon(Slic3r::var("OrcaSlicer-mac_256px.ico"), wxBITMAP_TYPE_ICO), "Elslicer");
         break;
     case GUI_App::EAppMode::GCodeViewer:
         break;
@@ -2692,7 +2692,7 @@ void MainFrame::update_side_button_style()
     StateColor m_btn_bg_enable = StateColor(
         std::pair<wxColour, int>(wxColour(0, 137, 123), StateColor::Pressed),
         std::pair<wxColour, int>(wxColour(48, 221, 112), StateColor::Hovered),
-        std::pair<wxColour, int>(wxColour(0, 150, 136), StateColor::Normal)
+        std::pair<wxColour, int>(wxColour(91, 91, 214), StateColor::Normal)
     );
 
     // m_publish_btn->SetMinSize(wxSize(FromDIP(125), FromDIP(24)));
@@ -2962,7 +2962,7 @@ wxMenu* MainFrame::generate_help_menu()
         });
 
     // Report a bug
-    //append_menu_item(helpMenu, wxID_ANY, _L("Report Bug(TODO)"), _L("Report a bug of OrcaSlicer"),
+    //append_menu_item(helpMenu, wxID_ANY, _L("Report Bug(TODO)"), _L("Report a bug of Elslicer"),
     //    [](wxCommandEvent&) {
     //        //TODO
     //    });
@@ -3870,7 +3870,7 @@ void MainFrame::init_menubar_as_editor()
         [](wxCommandEvent&) { show_ai_setup_dialog(); }, "", nullptr, []() { return true; }, this);
     append_menu_item(elslicer_menu, wxID_ANY, _L("Continue Print From Layer") + dots, _L("Make a G-code file that continues a failed print"),
         [](wxCommandEvent&) { show_resume_dialog(); }, "", nullptr, []() { return true; }, this);
-    m_menubar->Append(elslicer_menu, wxString::Format("&%s", "Elslicer"));
+    m_menubar->Append(elslicer_menu, wxString::Format("&%s", _L("Print Tools")));
     if (helpMenu)
         m_menubar->Append(helpMenu, wxString::Format("&%s", _L("Help")));
     SetMenuBar(m_menubar);

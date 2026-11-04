@@ -63,8 +63,8 @@ body
 /*-----Right Top MenuBtn-----*/
 .MenuItem:hover
 {
-	border-color: #00675b;
-	background-color: #223C3C;
+	border-color: #3D3DA8;
+	background-color: #2B2B4D;
 }
 
 .FileImg
@@ -82,7 +82,7 @@ body
 
 .CT_Item:hover
 {
-	background-color:#00675b; /*ORCA color*/
+	background-color:#3D3DA8; /*ORCA color*/
 }
 
 /*----User Manual------*/
@@ -134,7 +134,7 @@ body
 /*--- Account rows and account menu ---*/
 :root
 {
-	--row-hover            : #223C3C;
+	--row-hover            : #2B2B4D;
 	--warn-color           : #F07E4A;
 	--account-avatar-bg    : #3A3A40;
 	--account-avatar-glyph : #7E8785;
@@ -143,7 +143,7 @@ body
 	--account-meta         : #949494;
 	--account-border       : #4A4A51;
 	--account-divider      : #3A3A42;
-	--account-action       : #26A69A;
+	--account-action       : #7C7DEB;
 	--account-danger       : #FF6A6A;
 	--account-danger-bg    : rgba(225, 71, 71, 0.16);
 	--account-warn-bg      : rgba(240, 126, 74, 0.16);  /*----var(--warn-color) at 16%----*/
@@ -152,3 +152,5 @@ body
 	--account-menu-shadow  : 0 10px 28px rgba(0, 0, 0, 0.45);
 }
 } /* @media (invalid-condition) */
+/* Elslicer: Orca's online account service isn't offered. */
+#LoginArea, .BtnItem[menu="orca_cloud"], .BtnItem[onClick*="orcaslicer.com"], .BtnShortcut[onClick*="orcaslicer.com"] { display: none !important; }

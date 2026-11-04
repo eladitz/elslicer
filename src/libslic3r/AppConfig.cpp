@@ -107,11 +107,8 @@ std::string AppConfig::get_hms_host()
 
 bool AppConfig::get_stealth_mode()
 {
-    // always return true when user did not finish setup wizard yet
-    if (!get_bool("firstguide","finish")) {
-        return true;
-    }
-    return get_bool("stealth_mode");
+    // Elslicer has no online account, so Orca's cloud features stay off.
+    return true;
 }
 
 bool AppConfig::get_hide_login_side_panel()

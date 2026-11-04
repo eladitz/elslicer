@@ -339,7 +339,7 @@ nlohmann::json color_picker_ui_strings()
         {"Color Picker", _u8L("Color Picker")},
         {"Basic Colors", _u8L("Basic Colors")},
         // TRN: Keep the brand name "Orca" unchanged; translate only the palette descriptor.
-        {"Orca Palette", _u8L("Orca Palette")},
+        {"Orca Palette", _u8L("Elslicer Palette")},
         // TRN: Keep the standard/brand name "RAL" unchanged.
         {"RAL Classic", _u8L("RAL Classic")},
         {"Gradients", _u8L("Gradients")},

@@ -139,6 +139,14 @@ def write_bitmaps(out):
         target = ROOT / "resources/web/image" / name
         render(icon, target, size_of(target))
 
+    # Orca's teal home page icons, shifted to the brand hue. Always from the original,
+    # so running this twice doesn't shift them twice.
+    for name in ("d", "i2", "i4", "i5", "i6"):
+        rel = f"resources/web/homepage/img/{name}.png"
+        original = subprocess.run(["git", "-C", str(ROOT), "show", f"v2.5.0-rc:{rel}"], capture_output=True)
+        if original.returncode == 0:
+            subprocess.run(["magick", "png:-", "-modulate", "100,100,137", str(ROOT / rel)], input=original.stdout, check=True)
+
     master = out / "icon_1024.png"
     render(icon, master, 1024)
     for name, sizes in (("OrcaSlicer.ico", "256,128,64,48,32,16"), ("OrcaSlicerTitle.ico", "256,64,32,16"), ("OrcaSlicer-mac_256px.ico", "256")):

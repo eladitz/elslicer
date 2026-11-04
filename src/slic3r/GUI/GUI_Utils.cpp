@@ -337,8 +337,8 @@ void update_dark_ui(wxWindow* window)
 
 void update_dark_config()
 {
-    wxSystemAppearance app = wxSystemSettings::GetAppearance();
-    GUI::wxGetApp().app_config->set("dark_color_mode", app.IsDark() ? "1" : "0");
+    // Elslicer is dark only, whatever the system is set to.
+    GUI::wxGetApp().app_config->set("dark_color_mode", "1");
     wxGetApp().Update_dark_mode_flag();
 }
 

@@ -88,7 +88,7 @@ assert.equal(ctx.filterTabs([{ id: "prepare", title: " Prepare" }], "prepare").l
 // (no group headers, no actions-vs-settings discrimination).
 const pool = [
     { id: "c1", title: "Layer Height", source: "Quality", group: "Quality : Layers", input: "" },
-    { id: "s1", title: "Go to layer (percent)", source: "OrcaSlicer", group: "Commands", input: "percent" },
+    { id: "s1", title: "Go to layer (percent)", source: "Elslicer", group: "Commands", input: "percent" },
     { id: "c2", title: "Top Surface Layers", source: "Quality", group: "Quality : Layers", input: "" }
 ];
 assert.deepEqual(ctx.searchActions(pool, ""), pool, "an empty query returns the pool unchanged");
@@ -119,7 +119,7 @@ assert.equal(ctx.searchActions(restrictedSettings, "Arachne").length, 0,
 
 const pluginPool = [
     { id: "plugin-action", title: "Optimize G-code", source: "Gcode Optimizer", group: "", kind: "plugin" },
-    { id: "command-action", title: "Open Preferences", source: "OrcaSlicer", group: "Commands", kind: "command" }
+    { id: "command-action", title: "Open Preferences", source: "Elslicer", group: "Commands", kind: "command" }
 ];
 assert.deepEqual(ctx.searchActions(pluginPool, "plugin").map(function (a) { return a.id; }), ["plugin-action"],
     "the plugin kind makes runnable plugin actions searchable by plugin");
@@ -143,8 +143,8 @@ assert.equal(ctx.searchActions(perfectPool, "recent")[0].id, "recent",
 // Within a perfect match, the row-name (title) outranks the header (group): the action whose TITLE
 // contains the needle perfectly beats the action whose GROUP does, both being contiguous matches.
 const titleFirstPool = [
-    { id: "grp", title: "Delete Selected", source: "OrcaSlicer", group: "Object", input: "" },
-    { id: "t", title: "Object Preview", source: "OrcaSlicer", group: "View", input: "" }
+    { id: "grp", title: "Delete Selected", source: "Elslicer", group: "Object", input: "" },
+    { id: "t", title: "Object Preview", source: "Elslicer", group: "View", input: "" }
 ];
 assert.equal(ctx.searchActions(titleFirstPool, "object")[0].id, "t",
     "a perfect title match ranks above an equally-perfect group match");
@@ -152,7 +152,7 @@ assert.equal(ctx.searchActions(titleFirstPool, "object")[0].id, "t",
 // Highlighting: the needle is matched as a whole word / most-contiguous run, so "orient" lights up the
 // whole word in "Auto-Orient" instead of the stray "o" of "Auto" plus "rient" (greedy-leftmost).
 const orientPool = [
-    { id: "ao", title: "Auto-Orient", source: "OrcaSlicer", group: "Object", input: "" }
+    { id: "ao", title: "Auto-Orient", source: "Elslicer", group: "Object", input: "" }
 ];
 ctx.searchActions(orientPool, "orient");
 assert.deepEqual(ctx.matchIndex.ao.title, [[5, 11]],
@@ -233,7 +233,7 @@ const zhPool = [
     { id: "rev", title: "反转偶数层悬垂方向", full_label: "悬垂反转", source: "工艺 : 质量 : 悬垂",
       title_en: "Reverse on even", full_label_en: "Overhang reversal", source_en: "Process : Quality : Overhangs",
       group: "", input: "" },
-    { id: "slice", title: "切片并预览", source: "OrcaSlicer", group: "切片和导出",
+    { id: "slice", title: "切片并预览", source: "Elslicer", group: "切片和导出",
       title_en: "Slice and Preview", group_en: "Slice & Export", input: "" },
     { id: "brim", title: "Brim宽度", source: "工艺 : 其他 : Brim", source_en: "Process : Others : Brim",
       group: "", input: "" }
@@ -312,7 +312,7 @@ assert.deepEqual(ctx.englishBreadcrumb(zhInner[0], ctx.matchIndex.inner), { text
 
 // actionCategory: a command/dynamic action's group is its category; a setting uses the top-level
 // source segment; every plugin shares one header; a category-less action falls back to "Other".
-assert.equal(ctx.actionCategory({ id: "c", group: "Help", source: "OrcaSlicer", kind: "command" }), "Help",
+assert.equal(ctx.actionCategory({ id: "c", group: "Help", source: "Elslicer", kind: "command" }), "Help",
     "a command's group is its category");
 assert.equal(ctx.actionCategory({ id: "s", group: "", source: "Process : Quality : Layers", kind: "command" }), "Process",
     "a setting's category is the top-level source segment");
@@ -333,9 +333,9 @@ assert.equal(ctx.actionCategory({ id: "x", group: "", source: "", kind: "command
 // each group (the pool arrives frecency-sorted).
 const groupPool = [
     { id: "q1", title: "Q1", source: "Quality", group: "Quality", kind: "command" },
-    { id: "h1", title: "H1", source: "OrcaSlicer", group: "Help", kind: "command" },
+    { id: "h1", title: "H1", source: "Elslicer", group: "Help", kind: "command" },
     { id: "p1", title: "P1", source: "Process : A", group: "", kind: "command" },
-    { id: "h2", title: "H2", source: "OrcaSlicer", group: "Help", kind: "command" }
+    { id: "h2", title: "H2", source: "Elslicer", group: "Help", kind: "command" }
 ];
 assert.deepEqual(ctx.groupActions(groupPool).map(function (a) { return a.id; }), ["h1", "h2", "p1", "q1"],
     "groups are alphabetical and each group keeps its incoming order");
@@ -343,7 +343,7 @@ assert.deepEqual(ctx.groupActions(groupPool).map(function (a) { return a.id; }),
 // commandList (the main-phase list) delegates to the ranked search for a typed query and returns
 // recents + the category-grouped pool for an empty query.
 const mixed = [
-    { id: "cmd", title: "Slice", source: "OrcaSlicer", group: "Commands", kind: "command", input: "" },
+    { id: "cmd", title: "Slice", source: "Elslicer", group: "Commands", kind: "command", input: "" },
     { id: "set", title: "Sparse Infill Density", source: "Quality", group: "Quality", kind: "command", input: "" }
 ];
 assert.equal(ctx.commandList(mixed, [], "sli")[0].id, "cmd",
@@ -359,8 +359,8 @@ assert.deepEqual(ctx.commandList(mixed, [mixed[1]], "").map(function (a) { retur
 // a typed query or an empty list yields no headers. Uses a computed grouped list so the recents
 // hoist and the category ordering are exercised together.
 const sectionPool = [
-    { id: "cmd", title: "Slice", source: "OrcaSlicer", group: "Commands", kind: "command" },
-    { id: "help", title: "Shortcuts", source: "OrcaSlicer", group: "Help", kind: "command" },
+    { id: "cmd", title: "Slice", source: "Elslicer", group: "Commands", kind: "command" },
+    { id: "help", title: "Shortcuts", source: "Elslicer", group: "Help", kind: "command" },
     { id: "set", title: "Infill", source: "Quality", group: "Quality", kind: "command" }
 ];
 const sectionList = ctx.commandList(sectionPool, [sectionPool[0]], "");
@@ -531,7 +531,7 @@ const modePool = [
     { id: "a1", title: "Top Surface Layers", source: "Quality", group: "Quality : Layers", mode: "advanced" },
     { id: "a2", title: "Advanced Detection", source: "Quality", group: "Quality", mode: "simple" },
     { id: "a3", title: "Retraction Length", source: "Process", group: "Process : Quality", mode: "expert" },
-    { id: "a4", title: "Slice", source: "OrcaSlicer", group: "Commands", mode: "simple" }
+    { id: "a4", title: "Slice", source: "Elslicer", group: "Commands", mode: "simple" }
 ];
 var adv = ctx.searchActions(modePool, "advanced");
 assert.deepEqual(adv.map(function (a) { return a.id; }), ["a2", "a1"],

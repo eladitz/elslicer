@@ -5,8 +5,8 @@
   --line: #34363c;
   --text: #ececee;
   --muted: #a0a2a9;
-  --accent: #2fb67c;
-  --accent-text: #08130e;
+  --accent: #5b5bd6;
+  --accent-text: #ffffff;
   --warn: #e0a83c;
   --bad: #ef6a5f;
 }
@@ -34,7 +34,7 @@ button {
 button:hover:not(:disabled) { background: #383a41; }
 button:disabled { opacity: .45; cursor: default; }
 button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); font-weight: 600; }
-button.primary:hover:not(:disabled) { background: #3cc98c; }
+button.primary:hover:not(:disabled) { background: #6d6de0; }
 input[type=text], input[type=number], input[type=password], select, textarea {
   font: inherit; color: var(--text); background: #16171a; border: 1px solid var(--line);
   border-radius: 6px; padding: 7px 10px;
