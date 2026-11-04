@@ -525,6 +525,9 @@ bool Flashforge::fetch_material_slots(std::vector<FlashforgeMaterialSlot>& slots
     if (!request_local_api_json("detail", json{{"serialNumber", m_serial_number}, {"checkCode", m_check_code}}.dump(), body, msg))
         return false;
 
+    // Elslicer: printers report slots differently, so the raw answer helps when one lists none.
+    BOOST_LOG_TRIVIAL(info) << "Flashforge printer details: " << body;
+
     if (!parse_material_slots(body, slots, supports_material_station)) {
         msg = _(L("Flashforge returned an invalid JSON response."));
         return false;

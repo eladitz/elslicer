@@ -3368,7 +3368,7 @@ Sidebar::Sidebar(Plater *parent)
 
     ams_btn = new ScalableButton(p->m_panel_filament_title, wxID_ANY, "ams_fila_sync", wxEmptyString, wxDefaultSize, wxDefaultPosition,
                                                  wxBU_EXACTFIT | wxNO_BORDER, false, 16); // ORCA match icon size with other icons as 16x16
-    ams_btn->SetToolTip(_L("Synchronize filament list from AMS"));
+    ams_btn->SetToolTip(_L("Get the filaments loaded on the printer"));
     ams_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent &e) {
         sync_ams_list();
     });
@@ -3802,6 +3802,114 @@ void Sidebar::remove_unused_filament_combos(const size_t current_extruder_count)
     }
 }
 
+// Elslicer: the settings holding this printer's Flashforge connection. It may be saved on a
+// copy of the profile rather than the one in use, so other profiles of the model count too.
+static DynamicPrintConfig *flashforge_connection()
+{
+    const auto is_flashforge = [](const DynamicPrintConfig &config) {
+        const auto *host_type = config.option<ConfigOptionEnum<PrintHostType>>("host_type");
+        return host_type != nullptr && host_type->value == htFlashforge;
+    };
+    PresetBundle       &bundle = *wxGetApp().preset_bundle;
+    DynamicPrintConfig &edited = bundle.printers.get_edited_preset().config;
+    if (is_flashforge(edited))
+        return &edited;
+    const std::string model = edited.opt_string("printer_model");
+    for (Preset &preset : bundle.printers)
+        if (is_flashforge(preset.config) && preset.config.opt_string("printer_model") == model)
+            return &preset.config;
+    return nullptr;
+}
+
+// Elslicer: reads what's loaded on a Flashforge printer and sets the app's filaments to match.
+static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
+{
+    const wxString title = _L("Get Filaments From Printer");
+    const auto     tell  = [&title](const wxString &text) {
+        MessageDialog dlg(wxGetApp().plater(), text, title, wxOK);
+        dlg.ShowModal();
+    };
+
+    std::unique_ptr<PrintHost> host(PrintHost::get_print_host(&connection));
+    auto *flashforge = dynamic_cast<Flashforge *>(host.get());
+    if (flashforge == nullptr) {
+        tell(_L("This printer's connection can't report its filaments."));
+        return;
+    }
+
+    std::vector<FlashforgeMaterialSlot> slots;
+    wxString                            error;
+    if (!flashforge->fetch_material_slots(slots, nullptr, error)) {
+        tell(error.empty() ? _L("Couldn't reach the printer.") : error);
+        return;
+    }
+
+    PresetBundle &bundle = *wxGetApp().preset_bundle;
+    Plater       *plater = wxGetApp().plater();
+
+    int highest = 0;
+    for (const FlashforgeMaterialSlot &slot : slots)
+        if (slot.has_filament)
+            highest = std::max(highest, slot.slot_id);
+    if (highest < 1) {
+        tell(_L("The printer didn't report any loaded filament."));
+        return;
+    }
+    if (bundle.filament_presets.size() < size_t(highest)) {
+        for (size_t count = bundle.filament_presets.size() + 1; count <= size_t(highest); ++count)
+            bundle.set_num_filaments(unsigned(count), Plater::get_next_color_for_filament().GetAsString(wxC2S_HTML_SYNTAX).ToStdString());
+        plater->on_filament_count_change(size_t(highest));
+    }
+
+    const auto preset_for = [&bundle](const std::string &material, const std::string &current) {
+        const Preset *flashforge_match = nullptr, *other_match = nullptr;
+        for (const Preset &preset : bundle.filaments.get_presets()) {
+            if (!preset.is_visible || !preset.is_compatible || preset.is_default || !boost::iequals(preset.config.opt_string("filament_type", 0u), material))
+                continue;
+            if (preset.name == current)
+                return preset.name;
+            if (flashforge_match == nullptr && boost::istarts_with(preset.name, "Flashforge"))
+                flashforge_match = &preset;
+            if (other_match == nullptr)
+                other_match = &preset;
+        }
+        return flashforge_match ? flashforge_match->name : other_match ? other_match->name : std::string();
+    };
+
+    auto    *colours = bundle.project_config.option<ConfigOptionStrings>("filament_colour");
+    wxString report, unknown;
+    for (const FlashforgeMaterialSlot &slot : slots) {
+        if (!slot.has_filament || slot.slot_id < 1)
+            continue;
+        const size_t idx = size_t(slot.slot_id - 1);
+        if (colours != nullptr && idx < colours->values.size() && !slot.material_color.empty()) {
+            const std::string colour = slot.material_color.front() == '#' ? slot.material_color : "#" + slot.material_color;
+            if (wxColour(colour).IsOk())
+                colours->values[idx] = colour;
+        }
+        const std::string name = preset_for(slot.material_name, bundle.filament_presets[idx]);
+        if (name.empty()) {
+            unknown += wxString::Format("\n%d: %s", slot.slot_id, from_u8(slot.material_name));
+            continue;
+        }
+        bundle.set_filament_preset(idx, name);
+        plater->on_filament_change(idx);
+        report += wxString::Format("\n%d: %s", slot.slot_id, from_u8(name));
+    }
+
+    plater->update_filament_colors_in_full_config();
+    plater->sidebar().update_all_preset_comboboxes();
+    plater->sidebar().update_dynamic_filament_list();
+    plater->update_project_dirty_from_presets();
+    bundle.export_selections(*wxGetApp().app_config);
+    plater->update();
+
+    wxString text = _L("Filaments set from the printer:") + report;
+    if (!unknown.empty())
+        text += "\n\n" + _L("No matching filament profile for:") + unknown;
+    tell(text);
+}
+
 void Sidebar::update_all_preset_comboboxes()
 {
     PresetBundle &preset_bundle = *wxGetApp().preset_bundle;
@@ -3829,7 +3937,7 @@ void Sidebar::update_all_preset_comboboxes()
 
         // ORCA: show/hide sync-ams button based on filament sync mode
         auto agent = wxGetApp().getAgent();
-        if (agent && agent->get_filament_sync_mode() != FilamentSyncMode::none)
+        if ((agent && agent->get_filament_sync_mode() != FilamentSyncMode::none) || flashforge_connection() != nullptr)
             p->m_bpButton_ams_filament->Show();
         else
             p->m_bpButton_ams_filament->Hide();
@@ -6310,10 +6418,17 @@ void Sidebar::load_ams_list(MachineObject* obj)
 void Sidebar::sync_ams_list(bool is_from_big_sync_btn)
 {
     wxBusyCursor cursor;
+    if (DynamicPrintConfig *connection = flashforge_connection()) {
+        sync_filaments_from_flashforge(*connection);
+        return;
+    }
     // Force load ams list
     auto obj = wxGetApp().getDeviceManager()->get_selected_machine();
-    if (!obj)
+    if (!obj) {
+        MessageDialog dlg(p->plater, _L("Connect this printer first, so its filaments can be read."), _L("Get Filaments From Printer"), wxOK);
+        dlg.ShowModal();
         return;
+    }
     GUI::wxGetApp().sidebar().load_ams_list(obj);
 
     auto & list = wxGetApp().preset_bundle->filament_ams_list;
@@ -9008,6 +9123,7 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
     }
 
     const bool plate_was_empty = model.objects.empty();
+    bool       other_printer_project = false;
     bool load_model = strategy & LoadStrategy::LoadModel;
     bool load_config = strategy & LoadStrategy::LoadConfig;
     bool imperial_units = strategy & LoadStrategy::ImperialUnits;
@@ -9383,8 +9499,10 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                         !boost::algorithm::iends_with(path.string(), ".gcode.3mf")) {
                         const std::string local_printer = wxGetApp().preset_bundle->printers.get_selected_preset_name();
                         const auto       *file_printer  = config_loaded.option<ConfigOptionString>("printer_settings_id");
-                        if (!project_presets.empty() || file_printer == nullptr || file_printer->value != local_printer)
+                        if (!project_presets.empty() || file_printer == nullptr || file_printer->value != local_printer) {
                             skip_project_config(wxString());
+                            other_printer_project = true;
+                        }
                     }
 
                     // 1. add extruder for prusa model if the number of existing extruders is not enough
@@ -10334,7 +10452,12 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
     // Elslicer: a model opened without its own settings asks what to print it with.
     if (s_user_opening_file && plate_was_empty && load_model && !load_config && !obj_idxs.empty()) {
         s_user_opening_file = false;
-        wxGetApp().CallAfter([] { show_open_chooser_dialog(); });
+        wxGetApp().CallAfter([other_printer_project] {
+            // Its layout was made for another bed.
+            if (other_printer_project)
+                wxGetApp().plater()->arrange();
+            show_open_chooser_dialog();
+        });
     }
     return obj_idxs;
 }
