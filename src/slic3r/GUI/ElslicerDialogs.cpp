@@ -2,6 +2,7 @@
 
 #include "GUI.hpp"
 #include "GUI_App.hpp"
+#include "GUI_ObjectList.hpp"
 #include "GUI_Utils.hpp"
 #include "I18N.hpp"
 #include "MainFrame.hpp"
@@ -26,7 +27,9 @@
 #include <wx/sizer.h>
 #include <wx/webview.h>
 
+#include <algorithm>
 #include <ctime>
+#include <map>
 #include <memory>
 
 using json = nlohmann::json;
@@ -565,7 +568,145 @@ private:
     std::string                                      m_previous_preset;
 };
 
+// ---------------------------------------------------------------------------
+// Printer, print head and filament choice when a file opens
+// ---------------------------------------------------------------------------
+
+class OpenChooserDialog : public WebPageDialog
+{
+public:
+    OpenChooserDialog() : WebPageDialog(_L("Set Up This Print"), "open_chooser.html", wxSize(560, 460)) {}
+
+protected:
+    void on_message(const std::string &cmd, const json &data) override
+    {
+        if (cmd == "ready") {
+            send_state();
+        } else if (cmd == "select_printer") {
+            if (Tab *tab = wxGetApp().get_tab(Preset::TYPE_PRINTER))
+                tab->select_preset(data.at("name").get<std::string>());
+            send_state();
+        } else if (cmd == "apply") {
+            apply(data.at("head").get<int>(), data.at("filaments").get<std::vector<std::string>>());
+            EndModal(wxID_OK);
+        }
+    }
+
+private:
+    // How many filaments the loaded model is painted or assigned with.
+    static int slots_used()
+    {
+        int used = 1;
+        for (const ModelObject *object : wxGetApp().plater()->model().objects) {
+            if (object->config.has("extruder"))
+                used = std::max(used, object->config.extruder());
+            for (const ModelVolume *volume : object->volumes) {
+                if (volume->config.has("extruder"))
+                    used = std::max(used, volume->config.extruder());
+                for (int extruder : volume->get_extruders())
+                    used = std::max(used, extruder);
+            }
+        }
+        return used;
+    }
+
+    void send_state()
+    {
+        PresetBundle &bundle = *wxGetApp().preset_bundle;
+
+        std::map<std::string, json> by_model;
+        for (const Preset &preset : bundle.printers.get_presets()) {
+            if (!preset.is_visible || preset.is_default || preset.printer_technology() != ptFFF)
+                continue;
+            std::string model = preset.config.opt_string("printer_model");
+            if (model.empty())
+                model = preset.name;
+            std::string label = preset.config.opt_string("printer_variant");
+            label = label.empty() ? preset.name : label + " mm";
+            by_model[model].push_back({{"name", preset.name}, {"label", label}});
+        }
+        json printers = json::array();
+        for (const auto &[model, variants] : by_model)
+            printers.push_back({{"model", model}, {"variants", variants}});
+
+        const Preset &printer = bundle.printers.get_edited_preset();
+        std::string   model   = printer.config.opt_string("printer_model");
+        if (model.empty())
+            model = printer.name;
+        const auto *nozzles = printer.config.option<ConfigOptionFloats>("nozzle_diameter");
+        const int   heads   = nozzles != nullptr ? int(nozzles->size()) : 1;
+
+        std::vector<std::pair<std::string, std::string>> names;
+        for (const Preset &preset : bundle.filaments.get_presets()) {
+            if (!preset.is_visible || !preset.is_compatible || preset.is_default)
+                continue;
+            names.emplace_back(preset.label(false), preset.name);
+        }
+        std::sort(names.begin(), names.end());
+        json filaments = json::array();
+        for (const auto &[label, name] : names)
+            filaments.push_back({{"label", label}, {"value", name}});
+
+        const int slots = slots_used();
+        json      current = json::array();
+        for (int slot = 0; slot < slots; ++slot) {
+            const bool known = size_t(slot) < bundle.filament_presets.size();
+            current.push_back(known ? bundle.filament_presets[slot] : bundle.filament_presets.front());
+        }
+
+        send({{"type", "state"},
+              {"printers", printers},
+              {"model", model},
+              {"printer", printer.name},
+              {"heads", heads},
+              {"slots", slots},
+              {"filaments", filaments},
+              {"current", current}});
+    }
+
+    void apply(int head, const std::vector<std::string> &filaments)
+    {
+        PresetBundle &bundle = *wxGetApp().preset_bundle;
+        Plater       *plater = wxGetApp().plater();
+
+        // One filament goes on the chosen head. Several keep their own slots, one per head.
+        const size_t first  = filaments.size() == 1 ? size_t(std::max(head, 1) - 1) : 0;
+        const size_t needed = first + filaments.size();
+        if (bundle.filament_presets.size() < needed) {
+            for (size_t count = bundle.filament_presets.size() + 1; count <= needed; ++count)
+                bundle.set_num_filaments(unsigned(count), Plater::get_next_color_for_filament().GetAsString(wxC2S_HTML_SYNTAX).ToStdString());
+            plater->on_filament_count_change(needed);
+        }
+        for (size_t i = 0; i < filaments.size(); ++i) {
+            bundle.set_filament_preset(first + i, filaments[i]);
+            plater->on_filament_change(first + i);
+        }
+
+        if (filaments.size() == 1) {
+            for (ModelObject *object : plater->model().objects) {
+                object->config.set_key_value("extruder", new ConfigOptionInt(head));
+                for (ModelVolume *volume : object->volumes)
+                    if (volume->config.has("extruder"))
+                        volume->config.set_key_value("extruder", new ConfigOptionInt(head));
+            }
+            plater->sidebar().obj_list()->reload_all_plates();
+        }
+
+        plater->sidebar().update_all_preset_comboboxes();
+        plater->sidebar().update_dynamic_filament_list();
+        plater->update_project_dirty_from_presets();
+        bundle.export_selections(*wxGetApp().app_config);
+        plater->update();
+    }
+};
+
 } // namespace
+
+void show_open_chooser_dialog()
+{
+    OpenChooserDialog dialog;
+    dialog.ShowModal();
+}
 
 void show_resume_dialog(int layer)
 {

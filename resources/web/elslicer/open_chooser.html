@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Set Up This Print</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .field { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; margin-bottom: 12px; }
+  .field:last-child { margin-bottom: 0; }
+  select { width: 100%; }
+</style>
+</head>
+<body>
+<h1>Set up this print</h1>
+<p class="sub">Your printer and settings are used, whatever this file was made for.</p>
+
+<div id="error" class="note bad hidden"></div>
+
+<div class="panel">
+  <div id="printerRow" class="field hidden"><label for="printer">Printer</label><select id="printer"></select></div>
+  <div id="nozzleRow" class="field hidden"><label for="nozzle">Nozzle</label><select id="nozzle"></select></div>
+  <div id="headRow" class="field hidden"><label for="head">Print head</label><select id="head"></select></div>
+  <div id="filaments"></div>
+</div>
+
+<div class="footer">
+  <button id="later">Not now</button>
+  <button id="use" class="primary">Use these</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printers = [];
+
+function fill(select, items, value) {
+  select.replaceChildren(...items.map(item => new Option(item.label, item.value)));
+  if (value !== undefined) select.value = value;
+}
+
+function showNozzles(current) {
+  const model = printers.find(printer => printer.model === $('printer').value);
+  fill($('nozzle'), model.variants.map(variant => ({label: variant.label, value: variant.name})), current);
+  $('nozzleRow').classList.toggle('hidden', model.variants.length < 2);
+}
+
+window.fromApp = message => {
+  if (message.type === 'state') {
+    printers = message.printers;
+    fill($('printer'), printers.map(printer => ({label: printer.model, value: printer.model})), message.model);
+    $('printerRow').classList.toggle('hidden', printers.length < 2);
+    showNozzles(message.printer);
+
+    const heads = [];
+    for (let i = 1; i <= message.heads; i++) heads.push({label: `Head ${i}`, value: String(i)});
+    const previousHead = $('head').value;
+    fill($('head'), heads, previousHead && Number(previousHead) <= message.heads ? previousHead : '1');
+    $('headRow').classList.toggle('hidden', message.heads < 2 || message.slots > 1);
+
+    $('filaments').replaceChildren(...message.current.map((name, slot) => {
+      const row = document.createElement('div');
+      row.className = 'field';
+      const label = document.createElement('label');
+      label.textContent = message.slots > 1 ? `Filament ${slot + 1}` : 'Filament';
+      const select = document.createElement('select');
+      select.className = 'filament';
+      label.htmlFor = select.id = `filament${slot}`;
+      fill(select, message.filaments, name);
+      row.append(label, select);
+      return row;
+    }));
+    $('use').disabled = false;
+  } else if (message.type === 'error') {
+    $('error').textContent = message.message;
+    $('error').classList.remove('hidden');
+  }
+};
+
+function choosePrinter(name) {
+  $('use').disabled = true;
+  post({cmd: 'select_printer', name});
+}
+
+$('printer').onchange = () => {
+  showNozzles();
+  choosePrinter($('nozzle').value);
+};
+$('nozzle').onchange = () => choosePrinter($('nozzle').value);
+$('later').onclick = () => post({cmd: 'close'});
+$('use').onclick = () => post({
+  cmd: 'apply',
+  head: parseInt($('head').value, 10) || 1,
+  filaments: [...document.querySelectorAll('.filament')].map(select => select.value),
+});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

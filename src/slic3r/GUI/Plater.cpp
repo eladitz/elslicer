@@ -1,4 +1,5 @@
 #include "Plater.hpp"
+#include "ElslicerDialogs.hpp"
 #include "../Utils/NetworkAgent.hpp"
 #include "IPrinterAgent.hpp"
 #include "CalibUtils.hpp"
@@ -8959,6 +8960,15 @@ static void sync_loaded_project_filament_config(DynamicConfig& proj_cfg)
 }
 
 // BBS: backup & restore
+// Elslicer: true while the user is opening a file, as opposed to the app loading one itself.
+static bool s_user_opening_file = false;
+struct UserOpeningFile
+{
+    bool previous{s_user_opening_file};
+    UserOpeningFile() { s_user_opening_file = true; }
+    ~UserOpeningFile() { s_user_opening_file = previous; }
+};
+
 std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_files,
                                              LoadStrategy strategy,
                                              bool ask_multi,
@@ -8997,6 +9007,7 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
         }
     }
 
+    const bool plate_was_empty = model.objects.empty();
     bool load_model = strategy & LoadStrategy::LoadModel;
     bool load_config = strategy & LoadStrategy::LoadConfig;
     bool imperial_units = strategy & LoadStrategy::ImperialUnits;
@@ -9363,6 +9374,17 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                         if (load_config && config_loaded.empty()) {
                             skip_project_config(wxString());
                         }
+                    }
+
+                    // Elslicer: a project made for another printer, or one carrying its own presets,
+                    // opens on the local printer and settings without asking. Crash recovery and
+                    // sliced .gcode.3mf files keep theirs, because they depend on them.
+                    if (load_model && load_config && !(strategy & LoadStrategy::Restore) && !published_config.published &&
+                        !boost::algorithm::iends_with(path.string(), ".gcode.3mf")) {
+                        const std::string local_printer = wxGetApp().preset_bundle->printers.get_selected_preset_name();
+                        const auto       *file_printer  = config_loaded.option<ConfigOptionString>("printer_settings_id");
+                        if (!project_presets.empty() || file_printer == nullptr || file_printer->value != local_printer)
+                            skip_project_config(wxString());
                     }
 
                     // 1. add extruder for prusa model if the number of existing extruders is not enough
@@ -10308,6 +10330,12 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
     }
     q->schedule_background_process(true);
     q->mark_plate_toolbar_image_dirty();
+
+    // Elslicer: a model opened without its own settings asks what to print it with.
+    if (s_user_opening_file && plate_was_empty && load_model && !load_config && !obj_idxs.empty()) {
+        s_user_opening_file = false;
+        wxGetApp().CallAfter([] { show_open_chooser_dialog(); });
+    }
     return obj_idxs;
 }
 
@@ -16230,7 +16258,11 @@ void Plater::load_project(wxString const& filename2,
         input_paths.push_back(into_u8(originfile));
 
     bool loaded_published   = false;
+    std::optional<UserOpeningFile> user_opening;
+    if (!(strategy & LoadStrategy::Restore) && !(strategy & LoadStrategy::Silence))
+        user_opening.emplace();
     std::vector<size_t> res = load_files(input_paths, strategy, false, &loaded_published);
+    user_opening.reset();
 
     reset_project_dirty_initial_presets();
     update_project_dirty_from_presets();
@@ -18760,6 +18792,7 @@ void ProjectDropDialog::on_dpi_changed(const wxRect& suggested_rect)
 //BBS: remove GCodeViewer as seperate APP logic
 bool Plater::load_files(const wxArrayString& filenames)
 {
+    UserOpeningFile user_opening;
     const std::regex pattern_drop(".*[.](stp|step|stl|oltp|obj|amf|3mf|svg|zip|drc|glb|gltf|fbx)", std::regex::icase);
     const std::regex pattern_gcode_drop(".*[.](gcode|g)", std::regex::icase);
 
