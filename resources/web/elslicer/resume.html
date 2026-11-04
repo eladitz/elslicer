@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Continue Print From Layer</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Continue print from a layer</h1>
+<p class="sub">Makes a new G-code file that carries on from where the print failed. Your original file isn't changed.</p>
+
+<div class="panel">
+  <div class="row spread">
+    <div>
+      <h2 style="margin:0">Print file</h2>
+      <div id="source" class="muted">No file loaded. Slice the model first, or choose a file.</div>
+    </div>
+    <button id="choose">Choose file</button>
+  </div>
+</div>
+
+<div id="blocked" class="note bad hidden"></div>
+<div id="unverified" class="note warn hidden"><strong>Not proven on this printer yet.</strong> This firmware may home or level by itself when a job starts, which would drive the nozzle into the part. Run the empty-bed tests before using this with a real part.</div>
+
+<div id="picker" class="hidden">
+  <div class="panel">
+    <h2>Where did it fail?</h2>
+    <div class="row" style="margin-bottom:12px">
+      <label for="height">Measured height of the part</label>
+      <input id="height" type="number" min="0" step="0.01" style="width:100px"> <span class="muted">mm</span>
+      <button id="useHeight">Find layer</button>
+    </div>
+    <div class="row">
+      <label for="slider">Continue from layer</label>
+      <input id="layer" type="number" min="2" style="width:80px">
+      <input id="slider" type="range" min="2">
+    </div>
+    <p id="layerInfo" class="muted" style="margin:10px 0 0"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Check before you continue</h2>
+    <label class="check"><input type="checkbox" class="must"> <span>The part is still stuck to the bed and hasn't moved.</span></label>
+    <label class="check"><input type="checkbox" class="must"> <span>I've removed any failed strands from the top of the part.</span></label>
+    <label class="check"><input type="checkbox" class="must"> <span id="zCheck"></span></label>
+  </div>
+</div>
+
+<div id="result" class="hidden"></div>
+
+<div class="footer">
+  <button id="close">Close</button>
+  <div class="row">
+    <button id="reveal" class="hidden">Show in Finder</button>
+    <button id="create" class="primary" disabled>Create file</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let layers = [];
+
+function layerNumber() { return parseInt($('layer').value, 10); }
+
+function refresh() {
+  const n = layerNumber();
+  const valid = n >= 2 && n <= layers.length;
+  if (valid) {
+    const below = layers[n - 2];
+    $('layerInfo').textContent = `Layer ${n} of ${layers.length}, at ${layers[n - 1].toFixed(2)} mm. ${layers.length - n + 1} layers left to print.`;
+    $('zCheck').textContent = `The nozzle is just touching the top of the part, so the printer is really at ${below.toFixed(2)} mm.`;
+  } else {
+    $('layerInfo').textContent = layers.length ? `Choose a layer between 2 and ${layers.length}.` : '';
+  }
+  const checked = [...document.querySelectorAll('.must')].every(box => box.checked);
+  $('create').disabled = !(valid && checked && !$('picker').classList.contains('hidden'));
+}
+
+function setLayer(n) {
+  $('layer').value = n;
+  $('slider').value = n;
+  refresh();
+}
+
+function note(kind, text) {
+  const box = document.createElement('div');
+  box.className = 'note ' + kind;
+  box.textContent = text;
+  return box;
+}
+
+window.fromApp = message => {
+  if (message.type === 'state') {
+    layers = message.layers;
+    $('source').textContent = message.source ? `${message.source}, ${layers.length} layers, printer ${message.printer}` : `No file loaded. Slice the model first, or choose a file. Printer: ${message.printer}`;
+    const blocked = message.method === 'none';
+    $('blocked').classList.toggle('hidden', !blocked && !(message.source && layers.length < 2));
+    if (blocked) $('blocked').textContent = "This printer's firmware has no known safe way to set the height without homing, so continuing isn't available.";
+    else if (message.source && layers.length < 2) $('blocked').textContent = "This file has no layers to continue from. It needs to be sliced by Orca or Elslicer.";
+    $('unverified').classList.toggle('hidden', blocked || message.verified);
+    const usable = !blocked && layers.length >= 2;
+    $('picker').classList.toggle('hidden', !usable);
+    if (usable) {
+      $('layer').max = layers.length;
+      $('slider').max = layers.length;
+      setLayer(message.preselect >= 2 && message.preselect <= layers.length ? message.preselect : 2);
+    }
+    refresh();
+  } else if (message.type === 'measured') {
+    if (message.layer) setLayer(message.layer);
+    else $('layerInfo').textContent = 'That height is outside this print, or the print is already finished.';
+  } else if (message.type === 'result') {
+    const out = $('result');
+    out.replaceChildren();
+    out.classList.remove('hidden');
+    if (message.ok) {
+      out.append(note('good', `Saved ${message.file}. It prints the last ${message.layers_left} layers.`));
+      out.append(note('warn', `When the job starts, the printer treats its current position as ${message.declared_z.toFixed(2)} mm, heats the bed, lifts, homes X and Y, then continues.`));
+      message.warnings.forEach(text => out.append(note('warn', text)));
+      $('reveal').classList.remove('hidden');
+    } else {
+      out.append(note('bad', message.error));
+    }
+    out.scrollIntoView();
+  }
+};
+
+$('choose').onclick = () => post({cmd: 'choose_file'});
+$('close').onclick = () => post({cmd: 'close'});
+$('reveal').onclick = () => post({cmd: 'reveal'});
+$('create').onclick = () => post({cmd: 'create', layer: layerNumber()});
+$('useHeight').onclick = () => post({cmd: 'measured', mm: parseFloat($('height').value) || 0});
+$('slider').oninput = event => setLayer(parseInt(event.target.value, 10));
+$('layer').oninput = () => { $('slider').value = $('layer').value; refresh(); };
+document.querySelectorAll('.must').forEach(box => box.onchange = refresh);
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

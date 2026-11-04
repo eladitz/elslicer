@@ -581,6 +581,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/UserNotification.hpp
     GUI/UVEditorCanvas.cpp
     GUI/UVEditorCanvas.hpp
+    GUI/ElslicerDialogs.cpp
+    GUI/ElslicerDialogs.hpp
     GUI/WebGuideDialog.cpp
     GUI/WebGuideDialog.hpp
     GUI/WebUserLoginDialog.cpp

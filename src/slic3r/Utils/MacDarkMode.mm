@@ -27,9 +27,10 @@ bool is_in_full_screen_mode = false;
 
 bool mac_dark_mode()
 {
-    NSString *style = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleInterfaceStyle"];
-    return style && [style isEqualToString:@"Dark"];
-
+    // Elslicer is dark only: native controls follow, whatever macOS is set to.
+    if (NSApp && ![[NSApp appearance].name isEqualToString:NSAppearanceNameDarkAqua])
+        [NSApp setAppearance:[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]];
+    return true;
 }
 
 double mac_max_scaling_factor()

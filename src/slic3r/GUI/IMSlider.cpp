@@ -2,6 +2,7 @@
 #include "GUI_App.hpp"
 #include "GUI.hpp"
 #include "NotificationManager.hpp"
+#include "ElslicerDialogs.hpp"
 #include "Widgets/StateColor.hpp"
 #include "libslic3r/libslic3r.h"
 #include <imgui.h>
@@ -1551,6 +1552,12 @@ void IMSlider::render_add_menu()
             if (menu_item_with_icon(_u8L("Jump to layer").c_str(), "")) {
                 m_show_go_to_layer_dialog = true;
             }
+
+            if (menu_item_with_icon(_u8L("Continue Print From This Layer").c_str(), "", ImVec2(0, 0), 0, false, menu_item_enable, &hovered)) {
+                const int layer = m_higher_value + 1;
+                wxGetApp().CallAfter([layer] { show_resume_dialog(layer); });
+            }
+            if (hovered) { show_tooltip(_u8L("Make a G-code file that continues a failed print from this layer.")); }
         }
 
         //BBS render this menu item only when extruder_num > 1

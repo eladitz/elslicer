@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AI Setup</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  #options button { display: block; width: 100%; text-align: left; margin-bottom: 8px; padding: 10px 14px; }
+  #question { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+  table { width: 100%; border-collapse: collapse; }
+  td { padding: 9px 8px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  tr:first-child td { border-top: 0; }
+  .value { white-space: nowrap; }
+  .refused { color: var(--bad); }
+  .limited { color: var(--warn); }
+</style>
+</head>
+<body>
+<h1>AI setup</h1>
+<p class="sub">Answer a few questions and Claude chooses the settings. Only measurements of your model are sent, never the model itself.</p>
+
+<div id="error" class="note bad hidden"></div>
+
+<section id="keyView" class="panel hidden">
+  <h2>Anthropic API key</h2>
+  <p class="muted">Each setup is billed to this key, separately from a Claude subscription. It's stored in your Mac's Keychain.</p>
+  <div class="row">
+    <input id="key" type="password" placeholder="Paste your API key" style="flex:1" autocomplete="off">
+    <button id="saveKey" class="primary">Save</button>
+  </div>
+</section>
+
+<section id="startView" class="panel hidden">
+  <h2>Ready when you are</h2>
+  <p id="noModel" class="note warn hidden">Import a model first, then open AI setup again.</p>
+  <div class="row spread">
+    <div class="row">
+      <label for="model">Model</label>
+      <select id="model"></select>
+      <button id="forgetKey">Remove API key</button>
+    </div>
+    <button id="start" class="primary">Start</button>
+  </div>
+</section>
+
+<section id="askView" class="panel hidden">
+  <div id="question"></div>
+  <div id="options"></div>
+  <div class="row">
+    <input id="answer" type="text" placeholder="Or type your own answer" style="flex:1">
+    <button id="send">Send</button>
+  </div>
+</section>
+
+<section id="waitView" class="panel hidden"><span class="muted">Thinking…</span></section>
+
+<section id="proposalView" class="hidden">
+  <div class="panel">
+    <p id="summary"></p>
+    <table id="changes"></table>
+  </div>
+  <div class="panel">
+    <div class="row">
+      <input id="adjust" type="text" placeholder="Want something different? Tell Claude" style="flex:1">
+      <button id="sendAdjust">Send</button>
+    </div>
+  </div>
+</section>
+
+<section id="doneView" class="hidden">
+  <div id="doneNote" class="note good"></div>
+</section>
+
+<div class="footer">
+  <span id="cost" class="muted"></span>
+  <div class="row">
+    <button id="close">Close</button>
+    <button id="undo" class="hidden">Undo</button>
+    <button id="apply" class="primary hidden">Apply settings</button>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+const views = ['keyView', 'startView', 'askView', 'waitView', 'proposalView', 'doneView'];
+
+function show(view) {
+  views.forEach(id => $(id).classList.toggle('hidden', id !== view));
+  $('apply').classList.toggle('hidden', view !== 'proposalView');
+  if (view !== 'doneView') $('undo').classList.add('hidden');
+}
+
+function fail(text) {
+  $('error').textContent = text;
+  $('error').classList.remove('hidden');
+}
+
+function reply(text) {
+  if (!text.trim()) return;
+  $('error').classList.add('hidden');
+  post({cmd: 'answer', text});
+}
+
+let lastView = 'startView';
+
+window.fromApp = message => {
+  switch (message.type) {
+    case 'init':
+      message.models.forEach(model => $('model').add(new Option(model.label, model.id)));
+      $('noModel').classList.toggle('hidden', message.has_model);
+      $('start').disabled = !message.has_model;
+      show(message.has_key ? 'startView' : 'keyView');
+      break;
+    case 'key_saved':
+      if (message.ok) { $('key').value = ''; show('startView'); }
+      else fail("The API key couldn't be saved to the Keychain.");
+      break;
+    case 'thinking':
+      show('waitView');
+      break;
+    case 'question': {
+      $('question').textContent = message.question;
+      $('options').replaceChildren(...message.options.map(text => {
+        const button = document.createElement('button');
+        button.textContent = text;
+        button.onclick = () => reply(text);
+        return button;
+      }));
+      $('answer').value = '';
+      show('askView');
+      lastView = 'askView';
+      break;
+    }
+    case 'proposal': {
+      $('summary').textContent = message.summary;
+      $('changes').replaceChildren(...message.changes.map(change => {
+        const row = document.createElement('tr');
+        const name = document.createElement('td');
+        const strong = document.createElement('strong');
+        strong.textContent = change.label;
+        const why = document.createElement('div');
+        why.className = 'muted';
+        why.textContent = change.reason;
+        name.append(strong, why);
+        if (change.note) {
+          const extra = document.createElement('div');
+          extra.className = change.accepted ? 'limited' : 'refused';
+          extra.textContent = change.note;
+          name.append(extra);
+        }
+        const value = document.createElement('td');
+        value.className = 'value';
+        value.textContent = change.accepted ? `${change.before} → ${change.after}` : 'Not applied';
+        row.append(name, value);
+        return row;
+      }));
+      show('proposalView');
+      lastView = 'proposalView';
+      break;
+    }
+    case 'cost':
+      $('cost').textContent = `This setup so far: $${message.dollars.toFixed(3)}`;
+      break;
+    case 'applied':
+      $('doneNote').textContent = `Applied and saved as "${message.preset}". Slice when you're ready.`;
+      show('doneView');
+      $('undo').classList.remove('hidden');
+      break;
+    case 'undone':
+      $('doneNote').textContent = `Back to "${message.preset}".`;
+      $('undo').classList.add('hidden');
+      break;
+    case 'error':
+      fail(message.message);
+      show(message.bad_key ? 'keyView' : lastView);
+      break;
+  }
+};
+
+$('saveKey').onclick = () => { if ($('key').value.trim()) post({cmd: 'save_key', key: $('key').value.trim()}); };
+$('forgetKey').onclick = () => { post({cmd: 'forget_key'}); show('keyView'); };
+$('start').onclick = () => { $('error').classList.add('hidden'); post({cmd: 'start', model: $('model').value}); };
+$('send').onclick = () => reply($('answer').value);
+$('answer').onkeydown = event => { if (event.key === 'Enter') reply($('answer').value); };
+$('sendAdjust').onclick = () => { reply($('adjust').value); $('adjust').value = ''; };
+$('apply').onclick = () => post({cmd: 'apply'});
+$('undo').onclick = () => post({cmd: 'undo'});
+$('close').onclick = () => post({cmd: 'close'});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

@@ -271,6 +271,10 @@ set(lisbslic3r_sources
     GCode/FanMover.cpp
     GCode/FanMover.hpp
     GCode/GCodeProcessor.cpp
+    AISetup.cpp
+    AISetup.hpp
+    GCode/ResumeFromLayer.cpp
+    GCode/ResumeFromLayer.hpp
     GCode/GCodeProcessor.hpp
     GCode/GCodeStatistics.cpp
     GCode/GCodeStatistics.hpp

@@ -1,4 +1,5 @@
 #include "MainFrame.hpp"
+#include "ElslicerDialogs.hpp"
 
 #include <wx/event.h>
 #include "slic3r/GUI/Event.hpp"
@@ -3862,6 +3863,14 @@ void MainFrame::init_menubar_as_editor()
         [this]() {return m_plater->is_view3D_shown();; }, this);
 
     m_menubar->Append(calib_menu,wxString::Format("&%s", _L("Calibration")));
+
+    // Elslicer
+    auto elslicer_menu = new wxMenu();
+    append_menu_item(elslicer_menu, wxID_ANY, _L("AI Setup") + dots, _L("Answer a few questions and let Claude choose the settings"),
+        [](wxCommandEvent&) { show_ai_setup_dialog(); }, "", nullptr, []() { return true; }, this);
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Continue Print From Layer") + dots, _L("Make a G-code file that continues a failed print"),
+        [](wxCommandEvent&) { show_resume_dialog(); }, "", nullptr, []() { return true; }, this);
+    m_menubar->Append(elslicer_menu, wxString::Format("&%s", "Elslicer"));
     if (helpMenu)
         m_menubar->Append(helpMenu, wxString::Format("&%s", _L("Help")));
     SetMenuBar(m_menubar);

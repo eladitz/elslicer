@@ -3373,7 +3373,7 @@ bool GUI_App::on_init_inner()
     // differs from it, refresh them, or dialogs that map their colours stay in the old mode for this session.
     const bool saved_dark_mode = dark_mode();
     wxSystemAppearance app = wxSystemSettings::GetAppearance();
-    GUI::wxGetApp().app_config->set("dark_color_mode", app.IsDark() ? "1" : "0");
+    GUI::wxGetApp().app_config->set("dark_color_mode", "1"); // Elslicer is dark only
     GUI::wxGetApp().app_config->save();
     if (dark_mode() != saved_dark_mode) {
         init_label_colours();
