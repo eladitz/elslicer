@@ -291,6 +291,7 @@
 #include "nlohmann/json.hpp"
 
 #include "PhysicalPrinterDialog.hpp"
+#include "PrinterWebViewHandler.hpp"
 #include "PrintHostDialogs.hpp"
 #include "PlateSettingsDialog.hpp"
 #include "DailyTips.hpp"
@@ -3821,28 +3822,39 @@ static DynamicPrintConfig *flashforge_connection()
     return nullptr;
 }
 
-// Elslicer: reads what's loaded on a Flashforge printer and sets the app's filaments to match.
-static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
+// The printer names a type ("PLA", "TPU-95A") or a finish ("SILK"), which only appears in the
+// preset's name. Keep the current preset if it fits; otherwise take the plainest match, so
+// "PLA" means Generic PLA and not Flashforge HS PLA.
+static std::string flashforge_preset_for(const std::string &material, const std::string &current)
+{
+    PresetBundle &bundle = *wxGetApp().preset_bundle;
+    const Preset *generic_match = nullptr, *flashforge_match = nullptr, *other_match = nullptr;
+    const auto    plainer = [](const Preset *&best, const Preset &preset) {
+        if (best == nullptr || preset.name.size() < best->name.size())
+            best = &preset;
+    };
+    for (const Preset &preset : bundle.filaments.get_presets()) {
+        if (!preset.is_visible || !preset.is_compatible || preset.is_default)
+            continue;
+        if (!boost::iequals(preset.config.opt_string("filament_type", 0u), material) && !boost::icontains(preset.name, material))
+            continue;
+        if (preset.name == current)
+            return preset.name;
+        plainer(boost::istarts_with(preset.name, "Generic") ? generic_match :
+                boost::istarts_with(preset.name, "Flashforge") ? flashforge_match : other_match, preset);
+    }
+    const Preset *match = generic_match ? generic_match : flashforge_match ? flashforge_match : other_match;
+    return match ? match->name : std::string();
+}
+
+// Elslicer: sets the app's filaments to match what's loaded on a Flashforge printer.
+static void apply_flashforge_slots(const std::vector<FlashforgeMaterialSlot> &slots)
 {
     const wxString title = _L("Get Filaments From Printer");
     const auto     tell  = [&title](const wxString &text) {
         MessageDialog dlg(wxGetApp().plater(), text, title, wxOK);
         dlg.ShowModal();
     };
-
-    std::unique_ptr<PrintHost> host(PrintHost::get_print_host(&connection));
-    auto *flashforge = dynamic_cast<Flashforge *>(host.get());
-    if (flashforge == nullptr) {
-        tell(_L("This printer's connection can't report its filaments."));
-        return;
-    }
-
-    std::vector<FlashforgeMaterialSlot> slots;
-    wxString                            error;
-    if (!flashforge->fetch_material_slots(slots, nullptr, error)) {
-        tell(error.empty() ? _L("Couldn't reach the printer.") : error);
-        return;
-    }
 
     PresetBundle &bundle = *wxGetApp().preset_bundle;
     Plater       *plater = wxGetApp().plater();
@@ -3861,22 +3873,8 @@ static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
         plater->on_filament_count_change(size_t(highest));
     }
 
-    const auto preset_for = [&bundle](const std::string &material, const std::string &current) {
-        const Preset *flashforge_match = nullptr, *other_match = nullptr;
-        for (const Preset &preset : bundle.filaments.get_presets()) {
-            if (!preset.is_visible || !preset.is_compatible || preset.is_default || !boost::iequals(preset.config.opt_string("filament_type", 0u), material))
-                continue;
-            if (preset.name == current)
-                return preset.name;
-            if (flashforge_match == nullptr && boost::istarts_with(preset.name, "Flashforge"))
-                flashforge_match = &preset;
-            if (other_match == nullptr)
-                other_match = &preset;
-        }
-        return flashforge_match ? flashforge_match->name : other_match ? other_match->name : std::string();
-    };
-
-    auto    *colours = bundle.project_config.option<ConfigOptionStrings>("filament_colour");
+    auto    *colours       = bundle.project_config.option<ConfigOptionStrings>("filament_colour");
+    auto    *multi_colours = bundle.project_config.option<ConfigOptionStrings>("filament_multi_colour");
     wxString report, unknown;
     for (const FlashforgeMaterialSlot &slot : slots) {
         if (!slot.has_filament || slot.slot_id < 1)
@@ -3884,10 +3882,14 @@ static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
         const size_t idx = size_t(slot.slot_id - 1);
         if (colours != nullptr && idx < colours->values.size() && !slot.material_color.empty()) {
             const std::string colour = slot.material_color.front() == '#' ? slot.material_color : "#" + slot.material_color;
-            if (wxColour(colour).IsOk())
+            if (wxColour(colour).IsOk()) {
                 colours->values[idx] = colour;
+                // The swatches draw this list first, so it has to change too.
+                if (multi_colours != nullptr && idx < multi_colours->values.size())
+                    multi_colours->values[idx] = colour;
+            }
         }
-        const std::string name = preset_for(slot.material_name, bundle.filament_presets[idx]);
+        const std::string name = flashforge_preset_for(slot.material_name, bundle.filament_presets[idx]);
         if (name.empty()) {
             unknown += wxString::Format("\n%d: %s", slot.slot_id, from_u8(slot.material_name));
             continue;
@@ -3897,8 +3899,10 @@ static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
         report += wxString::Format("\n%d: %s", slot.slot_id, from_u8(name));
     }
 
+    bundle.install_slot_filaments(*wxGetApp().app_config);
     plater->update_filament_colors_in_full_config();
     plater->sidebar().update_all_preset_comboboxes();
+    plater->sidebar().obj_list()->update_filament_colors();
     plater->sidebar().update_dynamic_filament_list();
     plater->update_project_dirty_from_presets();
     bundle.export_selections(*wxGetApp().app_config);
@@ -3908,6 +3912,57 @@ static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
     if (!unknown.empty())
         text += "\n\n" + _L("No matching filament profile for:") + unknown;
     tell(text);
+}
+
+void read_loaded_filaments(std::function<void(const std::vector<LoadedFilament>&)> done)
+{
+    const DynamicPrintConfig *connection = flashforge_connection();
+    if (connection == nullptr || connection->opt_string("flashforge_serial_number").empty() || connection->opt_string("printhost_apikey").empty())
+        return;
+
+    read_flashforge_details(connection->opt_string("print_host"), connection->opt_string("flashforge_serial_number"), connection->opt_string("printhost_apikey"),
+                            [done = std::move(done)](bool ok, const std::string &body, const std::string &) {
+                                std::vector<FlashforgeMaterialSlot> slots;
+                                if (!ok || !Flashforge::parse_material_slots(body, slots, nullptr))
+                                    return;
+                                const auto &presets = wxGetApp().preset_bundle->filament_presets;
+                                std::vector<LoadedFilament> loaded;
+                                for (const FlashforgeMaterialSlot &slot : slots) {
+                                    const size_t idx = size_t(std::max(slot.slot_id - 1, 0));
+                                    LoadedFilament item{slot.slot_id, slot.has_filament, slot.material_name, slot.material_color, std::string()};
+                                    if (slot.has_filament)
+                                        item.preset = flashforge_preset_for(slot.material_name, idx < presets.size() ? presets[idx] : std::string());
+                                    loaded.push_back(std::move(item));
+                                }
+                                done(loaded);
+                            });
+}
+
+// Elslicer: reads what's loaded on a Flashforge printer.
+static void sync_filaments_from_flashforge(DynamicPrintConfig &connection)
+{
+    const auto tell = [](const wxString &text) {
+        MessageDialog dlg(wxGetApp().plater(), text, _L("Get Filaments From Printer"), wxOK);
+        dlg.ShowModal();
+    };
+
+    const std::string serial = connection.opt_string("flashforge_serial_number");
+    const std::string code   = connection.opt_string("printhost_apikey");
+    if (serial.empty() || code.empty()) {
+        tell(_L("Flashforge local API requires both serial number and access code."));
+        return;
+    }
+
+    read_flashforge_details(connection.opt_string("print_host"), serial, code,
+                            [tell](bool ok, const std::string &body, const std::string &error) {
+                                std::vector<FlashforgeMaterialSlot> slots;
+                                if (!ok)
+                                    tell(from_u8(error));
+                                else if (!Flashforge::parse_material_slots(body, slots, nullptr))
+                                    tell(_L("Flashforge returned an invalid JSON response."));
+                                else
+                                    apply_flashforge_slots(slots);
+                            });
 }
 
 void Sidebar::update_all_preset_comboboxes()
@@ -4483,7 +4538,7 @@ void Sidebar::update_mixed_filament_list()
                 auto* preset = preset_bundle.filaments.find_preset(preset_bundle.filament_presets[i]);
                 if (preset) {
                     std::string display_type;
-                    ft = preset->config.get_filament_type(display_type);
+                    ft = mixing_material(preset->config.get_filament_type(display_type), preset->name);
                 }
             }
             if (ft.empty()) ft = "PLA";
@@ -5007,7 +5062,7 @@ bool Sidebar::has_broken_mixed_filament(const PartPlate* plate) const
                 auto* preset = preset_bundle.filaments.find_preset(preset_bundle.filament_presets[i]);
                 if (preset) {
                     std::string display_type;
-                    ft = preset->config.get_filament_type(display_type);
+                    ft = mixing_material(preset->config.get_filament_type(display_type), preset->name);
                 }
             }
             if (ft.empty()) ft = "PLA";
@@ -5107,7 +5162,7 @@ void Sidebar::collect_physical_filament_info(std::vector<std::string>& color_str
         std::string ft;
         if (preset) {
             std::string display_type;
-            ft = preset->config.get_filament_type(display_type);
+            ft = mixing_material(preset->config.get_filament_type(display_type), preset->name);
         }
         if (ft.empty()) ft = "PLA";
         types.push_back(ft);
@@ -21181,6 +21236,8 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     PrintHostJob upload_job(physical_printer_config);
     if (upload_job.empty())
         return;
+    if (!journal_check_before_print())
+        return;
 
     // Orca: the use_3mf printer option makes us send a .gcode.3mf to the printer
     const auto* use_3mf_opt = physical_printer_config->option<ConfigOptionBool>("use_3mf");
@@ -21294,6 +21351,11 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
                     if (filament.type.empty())
                         filament.type = "Unknown";
 
+                    // Elslicer: silk profiles are typed PLA, but the printer tells SILK apart from PLA.
+                    const auto &presets = wxGetApp().preset_bundle->filament_presets;
+                    if (size_t(filament.id) < presets.size() && boost::icontains(presets[filament.id], "silk"))
+                        filament.type = "SILK";
+
                     filament.filament_id = filament_id_opt ? filament_id_opt->get_at(static_cast<size_t>(filament.id)) : "";
                     filament.color       = filament_color ? filament_color->get_at(static_cast<size_t>(filament.id)) : "#FFFFFF";
                     if (filament.color.empty())
@@ -21344,6 +21406,8 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         upload_job.upload_data.group       = pDlg->group();
         upload_job.upload_data.storage     = pDlg->storage();
         upload_job.upload_data.extended_info = pDlg->extendedInfo();
+        if (upload_job.upload_data.post_action == PrintHostPostUploadAction::StartPrint)
+            journal_print_sent(pDlg->filename().string(), p->model.objects.front()->name);
         // Orca: gcode inside a .gcode.3mf is index-coded (Metadata/plate_<N>.gcode) and a bundle may
         // carry several of them, so the upload must name which plate to print via a 1-based plateindex.
         // Even a single-plate bundle needs it, since its gcode entry is still indexed. The host upload

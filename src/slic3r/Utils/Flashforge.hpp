@@ -46,6 +46,8 @@ public:
     PrintHostPostUploadActions get_post_upload_actions() const override { return PrintHostPostUploadAction::StartPrint; }
     std::string                get_host() const override { return m_host; }
     bool                       fetch_material_slots(std::vector<FlashforgeMaterialSlot>& slots, bool* supports_material_station, wxString& msg) const;
+    // Asks the printer for its current state over the local API. body is the raw JSON reply.
+    bool                       fetch_details(std::string& body, wxString& msg) const;
     // Parses a local API "detail" reply. Returns false when the body is not valid JSON.
     static bool                parse_material_slots(const std::string& body, std::vector<FlashforgeMaterialSlot>& slots, bool* supports_material_station);
     static bool                discover_printers(std::vector<FlashforgeDiscoveredPrinter>& printers, wxString& msg, int timeout_ms = 10000, int idle_timeout_ms = 1500, int max_retries = 3);

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Printer needs attention</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1 id="title"></h1>
+<p id="where" class="sub"></p>
+<p id="what"></p>
+<div class="row">
+  <button id="device" class="primary">Open Device page</button>
+  <button id="close">Close</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+window.fromApp = alert => {
+  const error = alert.kind === 'error';
+  $('title').textContent = error ? `The printer reported an error${alert.code ? ` (${alert.code})` : ''}` : 'The printer paused';
+  $('where').textContent = [alert.file, alert.layers ? `layer ${alert.layer} of ${alert.layers}` : ''].filter(Boolean).join(' · ');
+  $('what').textContent = error ? "The printer's screen should say what went wrong."
+                                : "It may have run out of filament or hit a problem, and the printer's screen should say why. If you paused it there, you can ignore this.";
+};
+$('device').onclick = () => post({cmd: 'device'});
+$('close').onclick = () => post({cmd: 'close'});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

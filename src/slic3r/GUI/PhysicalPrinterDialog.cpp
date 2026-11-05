@@ -233,6 +233,7 @@ void PhysicalPrinterDialog::build_printhost_settings(ConfigOptionsGroup* m_optgr
         auto sizer = create_sizer_with_btn(parent, &m_printhost_test_btn, "printer_host_test", _L("Test"));
 
         m_printhost_test_btn->Bind(wxEVT_BUTTON, [this](wxCommandEvent& e) {
+            commit_typed_values();
             std::unique_ptr<PrintHost> host(PrintHost::get_print_host(m_config));
             if (!host) {
                 const wxString text = _L("Could not get a valid Printer Host reference");
@@ -833,8 +834,18 @@ void PhysicalPrinterDialog::check_host_key_valid()
     return;
 }
 
+void PhysicalPrinterDialog::commit_typed_values()
+{
+    // Fields commit when they lose focus, but buttons don't take the focus on macOS, so
+    // whatever was just typed would otherwise be dropped.
+    for (const char *key : {"print_host", "print_host_webui", "printhost_apikey", "flashforge_serial_number"})
+        if (Field *field = m_optgroup->get_field(key))
+            field->propagate_value();
+}
+
 void PhysicalPrinterDialog::OnOK(wxEvent& event)
 {
+    commit_typed_values();
     wxGetApp().get_tab(Preset::TYPE_PRINTER)->save_preset("", false, false, true, m_preset_name);
     event.Skip();
 }

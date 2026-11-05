@@ -1453,6 +1453,7 @@ void MainFrame::show_option(bool show)
 {
     if (!show) {
         if (m_slice_btn->IsShown()) {
+            m_ai_btn->Hide();
             m_slice_btn->Hide();
             m_print_btn->Hide();
             m_slice_option_btn->Hide();
@@ -1461,6 +1462,7 @@ void MainFrame::show_option(bool show)
         }
     } else {
         if (!m_slice_btn->IsShown()) {
+            m_ai_btn->Show();
             m_slice_btn->Show();
             m_print_btn->Show();
             m_slice_option_btn->Show();
@@ -1827,7 +1829,7 @@ void MainFrame::fit_tab_labels()
 
     // Compact (last to first)
     for (size_t i = count - 1; i >= 1; --i) {
-        int right = ScreenToClient(m_slice_option_btn->ClientToScreen({})).x;
+        int right = ScreenToClient(m_ai_btn->ClientToScreen({})).x;
         int left  = sizer->GetSize().GetWidth();
         // The overflow button sits between the tab buttons and the side tools, so it is not free space.
         if (const wxWindow* overflow = ctrl->GetOverflowButton())
@@ -2336,6 +2338,13 @@ wxBoxSizer* MainFrame::create_side_tools()
     slice_panel->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#3B4446")));
     print_panel->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#3B4446")));
 
+    auto ai_panel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
+    m_ai_btn = new SideButton(ai_panel, _L("AI Setup"), "");
+    m_ai_btn->Bind(wxEVT_BUTTON, [](wxCommandEvent&) { show_ai_setup_dialog(); });
+    auto ai_sizer = new wxBoxSizer(wxHORIZONTAL);
+    ai_sizer->Add(m_ai_btn, 0, wxALIGN_CENTER_VERTICAL);
+    ai_panel->SetSizer(ai_sizer);
+
     m_slice_btn = new SideButton(slice_panel, _L("Slice plate"), "");
     m_slice_option_btn = new SideButton(slice_panel, "", "sidebutton_dropdown", 0, 14);
     m_print_btn = new SideButton(print_panel, _L("Print plate"), "");
@@ -2363,6 +2372,8 @@ wxBoxSizer* MainFrame::create_side_tools()
     m_slice_option_btn->Enable();
     m_print_option_btn->Enable();
     //sizer->Add(FromDIP(15), 0, 0, 0, 0);
+    sizer->Add(ai_panel);
+    sizer->Add(FromDIP(15), 0, 0, 0, 0);
     sizer->Add(slice_panel);
     sizer->Add(FromDIP(15), 0, 0, 0, 0);
     sizer->Add(print_panel);
@@ -2702,6 +2713,12 @@ void MainFrame::update_side_button_style()
     // m_publish_btn->SetBackgroundColour(wxColour(59,68,70));
     // m_publish_btn->SetTextColor(StateColor::darkModeColorFor("#FFFFFE"));
 
+    m_ai_btn->SetLayoutStyle(1); // stands alone, so rounded on both sides
+    m_ai_btn->SetTextLayout(SideButton::EHorizontalOrientation::HO_Center);
+    m_ai_btn->SetCornerRadius(FromDIP(12));
+    m_ai_btn->SetExtraSize(wxSize(FromDIP(30), FromDIP(10)));
+    m_ai_btn->SetMinSize(wxSize(-1, FromDIP(24)));
+
     m_slice_btn->SetTextLayout(SideButton::EHorizontalOrientation::HO_Left, FromDIP(15));
     m_slice_btn->SetCornerRadius(FromDIP(12));
     m_slice_btn->SetExtraSize(wxSize(FromDIP(38), FromDIP(10)));
@@ -2726,6 +2743,7 @@ void MainFrame::update_side_button_style()
 
     // Keep panel backgrounds in sync with SideButton's darkModeColorFor(#3B4446) bottom strip
     auto bg = StateColor::darkModeColorFor(wxColour("#3B4446"));
+    m_ai_btn->GetParent()->SetBackgroundColour(bg);
     m_slice_btn->GetParent()->SetBackgroundColour(bg);
     m_print_btn->GetParent()->SetBackgroundColour(bg);
 }
@@ -3868,6 +3886,8 @@ void MainFrame::init_menubar_as_editor()
     auto elslicer_menu = new wxMenu();
     append_menu_item(elslicer_menu, wxID_ANY, _L("AI Setup") + dots, _L("Answer a few questions and let Claude choose the settings"),
         [](wxCommandEvent&) { show_ai_setup_dialog(); }, "", nullptr, []() { return true; }, this);
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Print Journal") + dots, _L("Past prints, with a photo and what to do better next time"),
+        [](wxCommandEvent&) { show_print_journal(); }, "", nullptr, []() { return true; }, this);
     append_menu_item(elslicer_menu, wxID_ANY, _L("Continue Print From Layer") + dots, _L("Make a G-code file that continues a failed print"),
         [](wxCommandEvent&) { show_resume_dialog(); }, "", nullptr, []() { return true; }, this);
     m_menubar->Append(elslicer_menu, wxString::Format("&%s", _L("Print Tools")));

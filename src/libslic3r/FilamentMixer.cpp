@@ -1,4 +1,5 @@
 #include "FilamentMixer.hpp"
+#include "prusa_fdm_mixer.hpp"
 
 #include <algorithm>
 #include <cassert>
@@ -21,7 +22,6 @@
 #include "Config.hpp"
 #include "I18N.hpp"
 #include "format.hpp"
-#include "FilamentMixerModel.hpp"
 #include "LocalesUtils.hpp"
 
 namespace Slic3r {
@@ -55,12 +55,32 @@ inline float to_f01(unsigned char x)
 
 } // namespace
 
+static std::string hex_of(unsigned char r, unsigned char g, unsigned char b)
+{
+    char buf[8];
+    std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
+    return std::string(buf);
+}
+
+// Prusa's model darkens any even mix, which is wrong when the spools are the same colour.
+static prusa_fdm_mixer::RGB predict_mix(const std::vector<prusa_fdm_mixer::Part> &parts)
+{
+    const bool same = std::all_of(parts.begin(), parts.end(), [&parts](const prusa_fdm_mixer::Part &part) { return part.hex == parts.front().hex; });
+    return same ? prusa_fdm_mixer::hex_to_rgb(parts.front().hex) : prusa_fdm_mixer::mix_rgb(parts);
+}
+
 void filament_mixer_lerp(unsigned char r1, unsigned char g1, unsigned char b1,
                          unsigned char r2, unsigned char g2, unsigned char b2,
                          float t,
                          unsigned char* out_r, unsigned char* out_g, unsigned char* out_b)
 {
-    ::filament_mixer::lerp(r1, g1, b1, r2, g2, b2, t, out_r, out_g, out_b);
+    // Elslicer: mixes are thin layers seen side by side, not paint, so this uses Prusa's model,
+    // calibrated on measured prints, instead of the Mixbox approximation.
+    const float ratio = std::clamp(t, 0.f, 1.f);
+    const prusa_fdm_mixer::RGB mixed = predict_mix({{hex_of(r1, g1, b1), 1.0 - ratio}, {hex_of(r2, g2, b2), double(ratio)}});
+    *out_r = mixed.r;
+    *out_g = mixed.g;
+    *out_b = mixed.b;
 }
 
 void filament_mixer_lerp_float(float r1, float g1, float b1,
@@ -142,31 +162,22 @@ std::string blend_color_multi(const std::vector<std::string> &hex_colors,
 
     assert(hex_colors.size() == weights.size());
 
-    unsigned char r = 128, g = 128, b = 128;
-    int accumulated = 0;
+    long total = 0;
+    for (size_t i = 0; i < hex_colors.size() && i < weights.size(); ++i)
+        total += std::max(weights[i], 0);
+    if (total == 0)
+        return "#000000";
 
+    std::vector<prusa_fdm_mixer::Part> parts;
     for (size_t i = 0; i < hex_colors.size() && i < weights.size(); ++i) {
         if (weights[i] <= 0)
             continue;
         unsigned char cr = 128, cg = 128, cb = 128;
         parse_hex(hex_colors[i], cr, cg, cb);
-        if (accumulated == 0) {
-            r = cr; g = cg; b = cb;
-            accumulated = weights[i];
-        } else {
-            const int new_total = accumulated + weights[i];
-            const float t = static_cast<float>(weights[i]) / static_cast<float>(new_total);
-            filament_mixer_lerp(r, g, b, cr, cg, cb, t, &r, &g, &b);
-            accumulated = new_total;
-        }
+        parts.push_back({hex_of(cr, cg, cb), double(weights[i]) / double(total)});
     }
-
-    if (accumulated == 0)
-        return "#000000";
-
-    char buf[8];
-    std::snprintf(buf, sizeof(buf), "#%02X%02X%02X", r, g, b);
-    return std::string(buf);
+    const prusa_fdm_mixer::RGB mixed = predict_mix(parts);
+    return hex_of(mixed.r, mixed.g, mixed.b);
 }
 
 std::vector<unsigned int> parse_mixed_components(const std::string &str)
@@ -579,6 +590,14 @@ void remap_mixed_components_on_delete(
         }
         comp_strs[i] = ss.str();
     }
+}
+
+std::string mixing_material(const std::string &filament_type, const std::string &preset_name)
+{
+    const std::string type = filament_type.empty() ? "PLA" : filament_type;
+    std::string lowered = preset_name;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+    return lowered.find("silk") != std::string::npos ? type + " Silk" : type;
 }
 
 std::vector<size_t> check_mixed_filament_type_consistency(

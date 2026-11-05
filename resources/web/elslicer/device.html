@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Device</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(280px, 1fr); gap: 14px; align-items: start; }
+  @media (max-width: 760px) { .layout { grid-template-columns: 1fr; } }
+  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 12px; }
+  .stat small { display: block; color: var(--muted); }
+  .stat b { font-size: 18px; font-weight: 600; }
+  #camera { display: block; width: 100%; border-radius: 6px; background: #000; }
+  .bar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; margin: 8px 0; }
+  .bar div { height: 100%; width: 0; background: var(--accent); }
+  .slot { display: flex; align-items: center; gap: 10px; padding: 4px 0; }
+  .swatch { width: 16px; height: 16px; border-radius: 4px; border: 1px solid var(--line); }
+  details { color: var(--muted); }
+  summary { cursor: pointer; }
+  td { padding: 2px 16px 2px 0; overflow-wrap: anywhere; }
+  .setter { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+  .setter > label { width: 110px; color: var(--muted); }
+  .setter input[type=number] { width: 76px; padding: 4px 8px; }
+  .setter input[type=text] { width: 180px; padding: 4px 8px; }
+  .setter button, #slots button, #jobButtons button { padding: 4px 10px; }
+  #temps { margin-bottom: 10px; }
+  .slot .grow { flex: 1; }
+  #slotEdit { border-top: 1px solid var(--line); margin-top: 8px; padding-top: 8px; }
+  #colours { display: grid; grid-template-columns: repeat(12, 26px); gap: 4px; padding: 6px 0; }
+  #colours button { height: 26px; padding: 0; border-radius: 5px; }
+  #colours button.chosen { outline: 2px solid var(--text); outline-offset: 1px; }
+  #controlNote { position: sticky; top: 8px; z-index: 1; }
+  body.sending button.act { opacity: .45; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="row spread">
+  <h1 id="name">Printer</h1>
+  <button id="connection">Connection settings</button>
+</div>
+<p id="status" class="sub">Connecting…</p>
+
+<div id="needCode" class="note warn hidden">
+  <p>The printer is on the network, but its status needs its access code.</p>
+  <p>Find the code on the printer's screen, usually with LAN mode in its network settings. Then open Connection settings and enter it in the API Key / Password box.</p>
+</div>
+<div id="error" class="note bad hidden"></div>
+<div id="controlNote" class="note hidden"></div>
+
+<div class="layout">
+  <div>
+    <div id="jobPanel" class="panel hidden">
+      <h2 id="file"></h2>
+      <div class="bar"><div id="progress"></div></div>
+      <div id="jobText" class="muted"></div>
+      <div id="printRows" class="hidden" style="margin-top:8px"></div>
+      <div id="jobButtons" class="row" style="margin-top:8px"></div>
+    </div>
+    <div id="controlPanel" class="panel hidden"><h2>Controls</h2><div id="controlRows"></div></div>
+    <div id="tempPanel" class="panel hidden">
+      <h2>Temperatures</h2>
+      <div id="temps" class="stats"></div>
+      <div id="heatRows"></div>
+    </div>
+    <div id="slotPanel" class="panel hidden">
+      <h2>Filament on the printer</h2>
+      <div id="slots"></div>
+      <div id="slotEdit" class="hidden"></div>
+    </div>
+    <div id="setupPanel" class="panel hidden"><h2>Printer setup</h2><div id="setupRows"></div></div>
+  </div>
+  <div class="panel">
+    <div class="row spread" style="margin-bottom:8px">
+      <h2 style="margin:0">Camera</h2>
+      <div class="row">
+        <button id="cameraPop" disabled>Pop out</button>
+        <button id="cameraButton" class="primary" disabled>Play</button>
+      </div>
+    </div>
+    <img id="camera" class="hidden" alt="Printer camera">
+    <div id="cameraNote" class="muted">Stopped. The printer's camera takes one viewer at a time, so it stays free for other apps until you press Play.</div>
+  </div>
+</div>
+
+<div id="allPanel" class="panel hidden">
+  <details><summary>Everything the printer reports</summary><table><tbody id="all"></tbody></table></details>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx && window.wx.postMessage(JSON.stringify(message));
+const STATUS = {ready: 'Ready', printing: 'Printing', pause: 'Paused', paused: 'Paused', pausing: 'Pausing', completed: 'Finished',
+                cancel: 'Cancelled', error: 'Error', busy: 'Busy', heating: 'Heating', calibrate_doing: 'Calibrating'};
+const TEMP_NAMES = {plat: 'Bed', chamber: 'Chamber'};
+const PRIVATE = /registercode|checkcode|mac|serial|key|password|token/i;
+const STOPPED = $('cameraNote').textContent;
+let cameraUrl = '';
+let playing = false;
+let host = '';
+
+function pick(object, ...names) {
+  for (const name of names) if (object && object[name] !== undefined) return object[name];
+}
+
+function plainHost(address) {
+  return address.replace(/^[a-z]+:\/\//i, '').replace(/[:/].*$/, '');
+}
+
+function showCamera(note) {
+  $('camera').classList.toggle('hidden', Boolean(note));
+  $('cameraNote').classList.toggle('hidden', !note);
+  $('cameraNote').textContent = note || '';
+}
+
+function playCamera() {
+  // A new address each try, so a retry really asks the camera again.
+  const address = cameraAddress();
+  $('camera').src = `${address}${address.includes('?') ? '&' : '?'}t=${Date.now()}`;
+}
+
+// What the printer's status means for the controls.
+const printing = status => /^(printing|pause|paused|pausing|heating|busy)$/.test(status);
+const MATERIALS = ['PLA', 'PETG', 'PLA-CF', 'PETG-CF', 'ABS', 'ASA', 'SILK', 'PET-CF', 'PAHT-CF', 'S-PAHT', 'S-Multi', 'PA-CF', 'HIPS', 'PVA', 'TPU-90A', 'TPU-95A', 'TPU-64D', 'PC', 'PA', 'PC-ABS', 'PPS-CF'];
+// The printer stores white for any colour not exactly on this list.
+const COLOURS = ['#FFFFFF', '#FFF245', '#DEF578', '#21CC3D', '#167A4B', '#156682', '#24E4A0', '#7BD9F0', '#4CAAF8', '#2E54DD', '#48358C', '#A341F7', '#F435F6', '#D5B4DE', '#FA6173', '#F82D29', '#805003', '#F9903B', '#FCEBD7', '#D5C5A1', '#B17C38', '#8C8C89', '#BEBEBE', '#1B1B1B'];
+const CHECK_SECONDS = 10;
+let sending = false;
+let waiting = null;
+let noteTimer = 0;
+let latest = {};
+let zNow = 0;
+let editing = 0;
+const updaters = [];
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+function note(text, kind, seconds) {
+  clearTimeout(noteTimer);
+  $('controlNote').textContent = text;
+  $('controlNote').className = `note ${kind || ''}` + (text ? '' : ' hidden');
+  if (seconds) noteTimer = setTimeout(() => note(''), seconds * 1000);
+}
+
+// The printer says Success even to what it ignores, so `done` checks the result in its next report.
+function command(name, args, label, done) {
+  if (sending) return;
+  sending = true;
+  document.body.classList.add('sending');
+  waiting = {label, done, until: 0};
+  note(`${label}…`);
+  post({cmd: 'control', command: name, args});
+}
+
+function checkResult(detail) {
+  if (!waiting || !waiting.until) return;
+  if (waiting.done(detail)) {
+    note(`${waiting.label}: done.`, '', 4);
+    waiting = null;
+  } else if (Date.now() > waiting.until) {
+    note(`${waiting.label}: the printer accepted this, but its report hasn't changed.`, 'warn');
+    waiting = null;
+  }
+}
+
+function button(text, onclick, className) {
+  const node = element('button', text, `act ${className || ''}`);
+  node.onclick = onclick;
+  return node;
+}
+
+// For what can ruin a print or hit a part: asks once more on the button itself.
+function sureButton(text, sure, onclick) {
+  const node = button(text, () => {
+    if (node.dataset.armed) {
+      delete node.dataset.armed;
+      node.textContent = text;
+      onclick();
+      return;
+    }
+    node.dataset.armed = '1';
+    node.textContent = sure;
+    setTimeout(() => {
+      delete node.dataset.armed;
+      node.textContent = text;
+    }, 4000);
+  });
+  return node;
+}
+
+function rowOf(parent, label, ...items) {
+  const row = element('div', undefined, 'setter');
+  row.append(element('label', label), ...items);
+  parent.append(row);
+  return row;
+}
+
+function numberRow(parent, label, unit, min, max, read, apply) {
+  const input = element('input');
+  input.type = 'number';
+  input.min = min;
+  input.max = max;
+  const set = () => {
+    const value = Number(input.value);
+    if (input.value === '' || !Number.isFinite(value) || value < min || value > max) {
+      note(`${label} has to be between ${min} and ${max}.`, 'warn', 5);
+      return;
+    }
+    input.dataset.edited = '';
+    input.blur();
+    apply(Math.round(value));
+  };
+  input.oninput = () => { input.dataset.edited = '1'; };
+  input.onkeydown = event => { if (event.key === 'Enter') set(); };
+  const row = rowOf(parent, label, input, element('span', unit, 'muted'), button('Set', set));
+  updaters.push(detail => {
+    const value = read(detail);
+    row.classList.toggle('hidden', value === undefined);
+    if (value !== undefined && !input.dataset.edited && document.activeElement !== input) input.value = Math.round(value);
+  });
+  return row;
+}
+
+const near = (a, b) => Math.abs(Number(a) - Number(b)) < 1.5;
+
+function heatCommand(args) {
+  return {platform: -200, chamber: -200, nozzles: [-1, -1, -1, -1], ...args};
+}
+
+function buildHeatRows(count) {
+  $('heatRows').replaceChildren();
+  for (let head = 0; head < count; head++) {
+    const name = `Head ${head + 1}`;
+    numberRow($('heatRows'), name, '°C', 0, 320, detail => (detail.nozzleTargetTemps || [])[head], value => {
+      const nozzles = [-1, -1, -1, -1];
+      nozzles[head] = value;
+      command('temperatureCtl_cmd', heatCommand({nozzles}), `${name} to ${value}°`, detail => near((detail.nozzleTargetTemps || [])[head], value));
+    });
+  }
+  numberRow($('heatRows'), 'Bed', '°C', 0, 110, detail => detail.platTargetTemp, value => {
+    command('temperatureCtl_cmd', heatCommand({platform: value || -100}), `Bed to ${value}°`, detail => near(detail.platTargetTemp, value));
+  });
+  // A chamber without a sensor, so without a heater, reports far below zero.
+  numberRow($('heatRows'), 'Chamber', '°C', 0, 80, detail => detail.chamberTemp > -40 ? detail.chamberTargetTemp : undefined, value => {
+    command('temperatureCtl_cmd', heatCommand({chamber: value || -100}), `Chamber to ${value}°`, detail => near(detail.chamberTargetTemp, value));
+  });
+  const off = sureButton('Turn all heaters off', 'Really turn them all off?', () => {
+    command('temperatureCtl_cmd', {platform: -100, chamber: -100, nozzles: [0, 0, 0, 0]}, 'All heaters off',
+            detail => !detail.platTargetTemp && (detail.nozzleTargetTemps || []).every(target => !target));
+  });
+  off.style.marginTop = '8px';
+  $('heatRows').append(off);
+}
+
+function setZ(value) {
+  const limited = Math.max(-1, Math.min(1, Math.round(value * 1000) / 1000));
+  zNow = limited;
+  // The printer takes -100 as the way back to zero.
+  command('printerCtl_cmd', {zAxisCompensation: limited === 0 ? -100 : limited}, `Z offset to ${limited} mm`,
+          detail => Math.abs((detail.zAxisCompensation || 0) - limited) < 0.002);
+}
+
+function buildPrintRows() {
+  numberRow($('printRows'), 'Speed', '%', 50, 150, detail => detail.printSpeedAdjust, value => {
+    command('printerCtl_cmd', {speed: value}, `Speed to ${value}%`, detail => near(detail.printSpeedAdjust, value));
+  });
+  const shown = element('span', '');
+  rowOf($('printRows'), 'Z offset', shown, ...[-0.05, -0.01, 0.01, 0.05].map(step =>
+    button(step > 0 ? `+${step}` : `${step}`, () => setZ(zNow + step))), button('Reset', () => setZ(0)));
+  updaters.push(detail => {
+    if (!waiting) zNow = detail.zAxisCompensation || 0;
+    shown.textContent = `${zNow.toFixed(2)} mm`;
+  });
+}
+
+function buildControlRows() {
+  const light = button('', () => {
+    const next = latest.lightStatus === 'open' ? 'close' : 'open';
+    command('lightControl_cmd', {status: next}, next === 'open' ? 'Light on' : 'Light off', detail => detail.lightStatus === next);
+  });
+  const lightRow = rowOf($('controlRows'), 'Light', light);
+  updaters.push(detail => {
+    lightRow.classList.toggle('hidden', detail.lightStatus === undefined);
+    light.textContent = detail.lightStatus === 'open' ? 'Turn off' : 'Turn on';
+  });
+  numberRow($('controlRows'), 'Part fan', '%', 0, 100, detail => detail.coolingFanSpeed, value => {
+    command('printerCtl_cmd', {coolingFan: value}, `Part fan to ${value}%`, detail => near(detail.coolingFanSpeed, value));
+  });
+  numberRow($('controlRows'), 'Chamber fan', '%', 0, 100, detail => detail.chamberFanSpeed, value => {
+    command('printerCtl_cmd', {chamberFan: value}, `Chamber fan to ${value}%`, detail => near(detail.chamberFanSpeed, value));
+  });
+}
+
+function buildSetupRows() {
+  const shutdown = element('input');
+  shutdown.type = 'checkbox';
+  const minutes = element('input');
+  minutes.type = 'number';
+  minutes.min = 1;
+  minutes.oninput = () => { minutes.dataset.edited = '1'; };
+  const applyShutdown = () => {
+    const on = shutdown.checked;
+    const time = Math.max(1, Math.round(Number(minutes.value)) || 30);
+    minutes.dataset.edited = '';
+    command('delayClose_cmd', {automaticShutdown: on ? 'open' : 'close', shutdownAfterTime: time}, on ? `Shut down ${time} min after a print` : 'Auto shutdown off',
+            detail => (detail.autoShutdown === 'open') === on);
+  };
+  rowOf($('setupRows'), 'Auto shutdown', shutdown, minutes, element('span', 'min after a print', 'muted'), button('Set', applyShutdown));
+  updaters.push(detail => {
+    if (!minutes.dataset.edited && document.activeElement !== minutes) {
+      shutdown.checked = detail.autoShutdown === 'open';
+      minutes.value = detail.autoShutdownTime || 30;
+    }
+  });
+
+  const name = element('input');
+  name.type = 'text';
+  name.oninput = () => { name.dataset.edited = '1'; };
+  rowOf($('setupRows'), 'Name', name, button('Set', () => {
+    const wanted = name.value.trim();
+    if (!wanted) return;
+    name.dataset.edited = '';
+    command('reName_cmd', {name: wanted}, `Name to ${wanted}`, detail => detail.name === wanted);
+  }));
+  updaters.push(detail => {
+    if (!name.dataset.edited && document.activeElement !== name) name.value = detail.name || '';
+  });
+
+  const levelling = element('input');
+  levelling.type = 'checkbox';
+  levelling.checked = true;
+  const vibration = element('input');
+  vibration.type = 'checkbox';
+  vibration.checked = true;
+  const calibrate = sureButton('Calibrate now', 'Is the bed empty?', () => {
+    command('calibration_cmd', {levelingDetection: levelling.checked ? 'open' : 'close', vibrationCompensation: vibration.checked ? 'open' : 'close'},
+            'Calibration', detail => /calibrate|busy|heating/i.test(detail.status));
+  });
+  const levelLabel = element('span', 'Bed levelling', 'muted');
+  const vibrationLabel = element('span', 'Vibration', 'muted');
+  const row = rowOf($('setupRows'), 'Calibration', levelling, levelLabel, vibration, vibrationLabel, calibrate);
+  updaters.push(detail => row.classList.toggle('hidden', String(detail.status).toLowerCase() !== 'ready'));
+}
+
+function drawJobButtons(status) {
+  const items = [];
+  if (status === 'printing') {
+    items.push(button('Pause', () => command('jobCtl_cmd', {jobID: '', action: 'pause'}, 'Pause', detail => /paus/i.test(detail.status))));
+  } else if (status === 'paused' || status === 'pause') {
+    items.push(button('Resume', () => command('jobCtl_cmd', {jobID: '', action: 'continue'}, 'Resume', detail => !/paus/i.test(detail.status)), 'primary'));
+  }
+  if (printing(status)) {
+    items.push(sureButton('Cancel print', 'Really cancel it?', () => command('jobCtl_cmd', {jobID: '', action: 'cancel'}, 'Cancel print', detail => !printing(String(detail.status).toLowerCase()))));
+  }
+  if (status === 'completed' || status === 'cancel') {
+    items.push(sureButton('The bed is clear', 'Is the part off the bed?', () => command('stateCtrl_cmd', {action: 'setClearPlatform'}, 'Bed marked clear', detail => String(detail.status).toLowerCase() === 'ready')));
+  }
+  // Rebuilt only when the choice changes, so a button waiting for its second click stays armed.
+  const key = items.map(item => item.textContent).join();
+  if ($('jobButtons').dataset.key !== key) {
+    $('jobButtons').dataset.key = key;
+    $('jobButtons').replaceChildren(...items);
+  }
+}
+
+function drawSlotEditor(slot) {
+  const box = $('slotEdit');
+  box.classList.remove('hidden');
+  let material = pick(slot, 'materialName', 'MaterialName') || 'PLA';
+  let colour = String(pick(slot, 'materialColor', 'MaterialColor') || COLOURS[0]).toUpperCase();
+  const select = element('select');
+  for (const name of MATERIALS.includes(material) ? MATERIALS : [material, ...MATERIALS]) {
+    const option = element('option', name);
+    option.selected = name === material;
+    select.append(option);
+  }
+  select.onchange = () => { material = select.value; };
+  const colours = element('div');
+  colours.id = 'colours';
+  const swatches = COLOURS.map(value => {
+    const swatch = element('button', '', value === colour ? 'chosen' : '');
+    swatch.style.background = value;
+    swatch.title = value;
+    swatch.onclick = () => {
+      colour = value;
+      swatches.forEach(other => other.classList.toggle('chosen', other === swatch));
+    };
+    return swatch;
+  });
+  colours.append(...swatches);
+  const id = pick(slot, 'slotId', 'SlotId');
+  const close = () => {
+    editing = 0;
+    box.classList.add('hidden');
+    showSlots(latest);
+  };
+  const save = button('Save', () => {
+    const wanted = {material, colour};
+    close();
+    command('msConfig_cmd', {slot: id, mt: wanted.material, rgb: wanted.colour}, `Slot ${id} to ${wanted.material}`, detail => {
+      const station = pick(detail, 'matlStationInfo', 'MatlStationInfo');
+      const now = (pick(station, 'slotInfos', 'SlotInfos') || []).find(other => pick(other, 'slotId', 'SlotId') === id);
+      return now && pick(now, 'materialName', 'MaterialName') === wanted.material &&
+             String(pick(now, 'materialColor', 'MaterialColor')).toUpperCase() === wanted.colour;
+    });
+  }, 'primary');
+  const actions = element('div', undefined, 'row');
+  actions.append(save, button('Close', close));
+  box.replaceChildren(element('h2', `Slot ${id}`), select, colours, actions);
+}
+
+$('camera').onload = () => showCamera('');
+// Refused while something else is watching, and for a moment after a viewer leaves.
+$('camera').onerror = () => {
+  if (!playing) return;
+  showCamera('The camera is busy, so another app may be using it. Trying again…');
+  setTimeout(playCamera, 3000);
+};
+
+function startCamera() {
+  playing = true;
+  $('cameraButton').textContent = 'Stop';
+  $('cameraButton').classList.remove('primary');
+  showCamera('Connecting…');
+  playCamera();
+}
+
+$('cameraButton').onclick = () => {
+  // Reloading is what reliably ends the stream; the page starts up stopped.
+  if (playing) location.reload();
+  else startCamera();
+};
+
+function cameraAddress() {
+  return cameraUrl || `http://${host}:8080/?action=stream`;
+}
+
+$('cameraPop').onclick = () => {
+  post({cmd: 'camera_window', url: cameraAddress()});
+  // The camera takes one viewer at a time, so this page lets go of it.
+  if (playing) location.reload();
+};
+
+function duration(seconds) {
+  const minutes = Math.round(seconds / 60);
+  return minutes >= 60 ? `${Math.floor(minutes / 60)} h ${minutes % 60} min` : `${minutes} min`;
+}
+
+function tempStat(name, current, target) {
+  const stat = document.createElement('div');
+  stat.className = 'stat';
+  const label = document.createElement('small');
+  label.textContent = name;
+  const value = document.createElement('b');
+  value.textContent = `${Math.round(current)}°` + (target > 0 ? ` / ${Math.round(target)}°` : '');
+  stat.append(label, value);
+  return stat;
+}
+
+function showTemps(detail) {
+  const items = [];
+  // Printers with several heads list them together; the older fields repeat two of them.
+  const heads = Array.isArray(detail.nozzleTemps) ? detail.nozzleTemps : [];
+  const targets = detail.nozzleTargetTemps || [];
+  heads.forEach((temp, index) => items.push(tempStat(`Head ${index + 1}`, temp, targets[index])));
+  if (!heads.length && typeof detail.leftTemp === 'number') items.push(tempStat('Nozzle', detail.leftTemp, detail.leftTargetTemp));
+  for (const key of ['plat', 'chamber']) {
+    const temp = detail[`${key}Temp`];
+    // A chamber without a sensor reports a value far below zero.
+    if (typeof temp === 'number' && temp > -40) items.push(tempStat(TEMP_NAMES[key], temp, detail[`${key}TargetTemp`]));
+  }
+  $('temps').replaceChildren(...items);
+  $('tempPanel').classList.toggle('hidden', !items.length);
+}
+
+function showSlots(detail) {
+  const station = pick(detail, 'matlStationInfo', 'MatlStationInfo');
+  const slots = pick(station, 'slotInfos', 'SlotInfos') || [];
+  $('slotPanel').classList.toggle('hidden', !slots.length);
+  // Redrawing would throw away the choices being made.
+  if (editing) return;
+  const rows = slots.map((slot, index) => {
+    const row = document.createElement('div');
+    row.className = 'slot';
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    const has = pick(slot, 'hasFilament', 'HasFilament');
+    if (has) swatch.style.background = pick(slot, 'materialColor', 'MaterialColor') || 'transparent';
+    const text = document.createElement('span');
+    text.textContent = `${pick(slot, 'slotId', 'SlotId') || index + 1}: ` + (has ? pick(slot, 'materialName', 'MaterialName') || 'Filament' : 'Empty');
+    text.className = 'grow';
+    row.append(swatch, text);
+    // Changing it mid-print could leave the print's own mapping wrong.
+    if (has && !printing(String(detail.status).toLowerCase())) {
+      row.append(button('Change', () => {
+        editing = pick(slot, 'slotId', 'SlotId') || index + 1;
+        drawSlotEditor(slot);
+      }));
+    }
+    return row;
+  });
+  $('slots').replaceChildren(...rows);
+}
+
+function showAll(detail) {
+  const rows = Object.keys(detail).filter(key => !PRIVATE.test(key)).sort().map(key => {
+    const row = document.createElement('tr');
+    const name = document.createElement('td');
+    name.textContent = key;
+    const value = document.createElement('td');
+    value.textContent = typeof detail[key] === 'object' ? JSON.stringify(detail[key]) : String(detail[key]);
+    row.append(name, value);
+    return row;
+  });
+  $('all').replaceChildren(...rows);
+  $('allPanel').classList.remove('hidden');
+}
+
+function showDetail(detail) {
+  if (detail.name) $('name').textContent = detail.name;
+  latest = detail;
+  const status = String(detail.status || '');
+  $('status').textContent = (STATUS[status.toLowerCase()] || status || 'Connected') + (detail.errorCode ? `, error ${detail.errorCode}` : '');
+
+  const file = detail.printFileName;
+  const active = Boolean(file) && !/^(ready|idle)$/i.test(status);
+  $('jobPanel').classList.toggle('hidden', !active);
+  if (active) {
+    let percent = Number(detail.printProgress) || 0;
+    if (percent <= 1) percent *= 100;
+    $('file').textContent = file;
+    $('progress').style.width = `${Math.min(percent, 100)}%`;
+    const parts = [`${Math.round(percent)}%`];
+    if (detail.targetPrintLayer > 0) parts.push(`layer ${detail.printLayer} of ${detail.targetPrintLayer}`);
+    if (detail.estimatedTime > 0) parts.push(`${duration(detail.estimatedTime)} left`);
+    $('jobText').textContent = parts.join(' · ');
+  }
+  const lowered = status.toLowerCase();
+  drawJobButtons(lowered);
+  $('printRows').classList.toggle('hidden', !printing(lowered));
+  const heads = Array.isArray(detail.nozzleTargetTemps) ? detail.nozzleTargetTemps.length : 0;
+  if (!$('controlRows').children.length) {
+    buildControlRows();
+    buildPrintRows();
+    buildSetupRows();
+    buildHeatRows(heads);
+  }
+  $('controlPanel').classList.remove('hidden');
+  $('setupPanel').classList.remove('hidden');
+  updaters.forEach(update => update(detail));
+  checkResult(detail);
+  showTemps(detail);
+  showSlots(detail);
+  showAll(detail);
+  if (detail.cameraStreamUrl) cameraUrl = detail.cameraStreamUrl;
+}
+
+window.fromApp = message => {
+  if (message.type === 'resume_camera') {
+    if (!playing) startCamera();
+  } else if (message.type === 'stop_camera') {
+    // Reloading is what reliably ends the stream.
+    if (playing) location.reload();
+  } else if (message.type === 'control') {
+    sending = false;
+    document.body.classList.remove('sending');
+    if (!waiting) return;
+    if (message.ok) {
+      waiting.until = Date.now() + CHECK_SECONDS * 1000;
+      note(`${waiting.label}: sent, checking…`);
+      post({cmd: 'refresh'});
+    } else {
+      note(`${waiting.label}: ${message.error}`, 'bad');
+      waiting = null;
+    }
+  } else if (message.type === 'state') {
+    host = plainHost(message.host);
+    $('cameraButton').disabled = message.camera_window;
+    $('cameraPop').disabled = false;
+    $('cameraPop').textContent = message.camera_window ? 'Show window' : 'Pop out';
+    if (!playing) showCamera(message.camera_window ? 'The camera is open in its own window.' : STOPPED);
+    if (playing && $('camera').naturalWidth > 0) showCamera('');
+    if (!message.shown) return;
+    if ($('name').textContent === 'Printer') $('name').textContent = host;
+    $('needCode').classList.toggle('hidden', message.has_code);
+    if (!message.has_code) $('status').textContent = 'Found on the network';
+  } else if (message.type === 'detail') {
+    $('error').classList.toggle('hidden', message.ok);
+    if (message.ok) {
+      showDetail(message.detail);
+    } else {
+      $('status').textContent = 'Not responding';
+      $('error').textContent = `Couldn't read the printer at ${host}: ${message.error}`;
+    }
+  }
+};
+
+$('connection').onclick = () => post({cmd: 'connection'});
+post({cmd: 'refresh'});
+setInterval(() => post({cmd: 'refresh'}), 3000);
+</script>
+</body>
+</html>

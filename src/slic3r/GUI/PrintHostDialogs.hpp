@@ -275,12 +275,16 @@ private:
     ::CheckBox*                      m_checkbox_ifs {nullptr};
     bool                             m_leveling_before_print {true};
     bool                             m_time_lapse_video {false};
+    bool                             m_flow_calibration {false};
+    bool                             m_first_layer_inspection {false};
     bool                             m_use_material_station {false};
     bool                             m_supports_material_station {false};
     bool                             m_slots_loaded {false};
     bool                             m_manual_filament_change {false};
 
     const char* CONFIG_KEY_LEVELING  = "flashforge_leveling_before_print";
+    const char* CONFIG_KEY_FLOW_CALIBRATION = "flashforge_flow_calibration";
+    const char* CONFIG_KEY_FIRST_LAYER_INSPECTION = "flashforge_first_layer_inspection";
     const char* CONFIG_KEY_TIMELAPSE = "flashforge_timelapse_video";
     const char* CONFIG_KEY_IFS       = "flashforge_use_material_station";
 };

@@ -83,8 +83,9 @@ void filament_mixer_lerp_linear_float(float r1, float g1, float b1,
 // Returns "#RRGGBB" string.
 std::string blend_color(const std::string& hex_a, const std::string& hex_b, float ratio_b);
 
-// Blend N hex colors by integer weights using polynomial pigment mixing.
-// Pairwise accumulation via filament_mixer_lerp. Returns "#RRGGBB".
+// Predict N hex colors printed as layers, by integer weights: a measured recipe if one matches,
+// otherwise Prusa's model.
+// Returns "#RRGGBB".
 std::string blend_color_multi(const std::vector<std::string> &hex_colors,
                               const std::vector<int> &weights);
 
@@ -150,6 +151,10 @@ void remap_mixed_components_on_delete(
 // filament_types: type strings for physical filaments (0-based, size == num_physical).
 // Component IDs in comp_strs are 1-based; the function converts to 0-based to look up types.
 // Returns 0-based config indices of mixed slots with mismatched component types.
+// The material a filament counts as when deciding what may be mixed. Silk profiles are typed PLA,
+// but silk looks and blends differently, so it only mixes with silk.
+std::string mixing_material(const std::string &filament_type, const std::string &preset_name);
+
 std::vector<size_t> check_mixed_filament_type_consistency(
     const std::vector<unsigned char> &is_mixed,
     const std::vector<std::string>   &comp_strs,

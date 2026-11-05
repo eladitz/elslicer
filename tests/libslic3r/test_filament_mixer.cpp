@@ -1,3 +1,4 @@
+#include <cstdio>
 #include <catch2/catch_all.hpp>
 #include <vector>
 #include <cstddef>
@@ -8,6 +9,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "libslic3r/prusa_fdm_mixer.hpp"
 #include "libslic3r/FilamentMixer.hpp"
 #include "libslic3r/PrintConfig.hpp"
 
@@ -242,15 +244,12 @@ TEST_CASE("blend_color mixes two hex colors", "[FilamentMixer]")
     REQUIRE(blend_color("#FF0000", "#0000FF", 0.0f) == "#FF0000");
     REQUIRE(blend_color("#FF0000", "#0000FF", 1.0f) == "#0000FF");
 
-    SECTION("Blue and yellow make green, not grey (pigment mixing)") {
-        // The polynomial model approximates subtractive pigment behaviour.
-        std::string mixed = blend_color("#0021D0", "#FCD300", 0.5f);
-        REQUIRE(mixed.size() == 7);
-        REQUIRE(mixed[0] == '#');
-        auto comp = [&](int i) { return std::stoi(mixed.substr(1 + 2 * i, 2), nullptr, 16); };
-        // Green channel should dominate red and blue.
-        REQUIRE(comp(1) > comp(0));
-        REQUIRE(comp(1) > comp(2));
+    SECTION("Blue and yellow predict Prusa's layered colour, not mixed paint") {
+        const std::string mixed = blend_color("#0021D0", "#FCD300", 0.5f);
+        const prusa_fdm_mixer::RGB expected = prusa_fdm_mixer::mix_rgb({{"#0021D0", 0.5}, {"#FCD300", 0.5}});
+        char expected_hex[8];
+        std::snprintf(expected_hex, sizeof(expected_hex), "#%02X%02X%02X", expected.r, expected.g, expected.b);
+        REQUIRE(mixed == expected_hex);
     }
 }
 
@@ -260,16 +259,46 @@ TEST_CASE("blend_color_multi weights components", "[FilamentMixer]")
         REQUIRE(blend_color_multi({"#FF0000"}, {1}) == "#FF0000");
     }
 
-    SECTION("Mixing a color with itself stays close to that color") {
-        // The mixer is a degree-4 polynomial fit of pigment behaviour, so mixing a color with
-        // itself lands near it rather than exactly on it; allow a small per-channel drift.
-        std::string mixed = blend_color_multi({"#123456", "#123456"}, {1, 1});
-        REQUIRE(mixed.size() == 7);
-        auto comp = [](const std::string &hex, int i) {
-            return std::stoi(hex.substr(1 + 2 * i, 2), nullptr, 16);
-        };
-        for (int i = 0; i < 3; ++i)
-            REQUIRE(std::abs(comp(mixed, i) - comp("#123456", i)) <= 8);
+    SECTION("A component with no share leaves the other unchanged") {
+        REQUIRE(blend_color_multi({"#FF0000", "#00FF00"}, {1, 0}) == "#FF0000");
+        REQUIRE(blend_color_multi({"#FF0000", "#00FF00"}, {0, 0}) == "#000000");
+    }
+
+    SECTION("More of a colour moves the blend towards it") {
+        const auto red = [](const std::string &hex) { return std::stoi(hex.substr(1, 2), nullptr, 16); };
+        REQUIRE(red(blend_color_multi({"#FF0000", "#0000FF"}, {3, 1})) > red(blend_color_multi({"#FF0000", "#0000FF"}, {1, 3})));
+    }
+
+    SECTION("Three components use the model directly, not pair by pair") {
+        const prusa_fdm_mixer::RGB expected = prusa_fdm_mixer::mix_rgb({{"#0086D6", 1. / 3.}, {"#EC008C", 1. / 3.}, {"#F4EE2A", 1. / 3.}});
+        const std::string mixed = blend_color_multi({"#0086D6", "#EC008C", "#F4EE2A"}, {1, 1, 1});
+        char expected_hex[8];
+        std::snprintf(expected_hex, sizeof(expected_hex), "#%02X%02X%02X", expected.r, expected.g, expected.b);
+        REQUIRE(mixed == expected_hex);
+    }
+
+    SECTION("Mixing a color with itself keeps that color") {
+        REQUIRE(blend_color_multi({"#123456", "#123456"}, {1, 1}) == "#123456");
+    }
+}
+
+TEST_CASE("Only filaments of the same material can be mixed", "[FilamentMixer]")
+{
+    SECTION("Silk profiles are typed PLA but count as their own material") {
+        REQUIRE(mixing_material("PLA", "Flashforge PLA Silk @FF C5") == "PLA Silk");
+        REQUIRE(mixing_material("PLA", "Flashforge Generic PLA") == "PLA");
+        REQUIRE(mixing_material("", "Unknown") == "PLA");
+    }
+
+    const std::vector<unsigned char> is_mixed = {0, 0, 0, 0, 1};
+
+    SECTION("Plain PLA and silk are refused") {
+        const std::vector<std::string> types = {mixing_material("PLA", "Generic PLA"), mixing_material("PLA", "PLA Silk"), "PLA", "PLA"};
+        REQUIRE(check_mixed_filament_type_consistency(is_mixed, {"", "", "", "", "1,2"}, types) == std::vector<size_t>{4});
+    }
+    SECTION("PLA and TPU are refused, four PLA are allowed") {
+        REQUIRE(check_mixed_filament_type_consistency(is_mixed, {"", "", "", "", "3,4"}, {"PLA", "PLA", "PLA", "TPU"}) == std::vector<size_t>{4});
+        REQUIRE(check_mixed_filament_type_consistency(is_mixed, {"", "", "", "", "1,2,3"}, {"PLA", "PLA", "PLA", "PLA"}).empty());
     }
 }
 

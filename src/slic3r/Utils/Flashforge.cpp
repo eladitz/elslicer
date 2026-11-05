@@ -51,6 +51,7 @@
 #include "TCPConsole.hpp"
 #include "SerialMessage.hpp"
 #include "SerialMessageType.hpp"
+#include "slic3r/GUI/PrinterWebViewHandler.hpp"
 
 namespace fs = boost::filesystem;
 using json = nlohmann::json;
@@ -369,6 +370,9 @@ wxString Flashforge::get_test_ok_msg() const
 
 wxString Flashforge::get_test_failed_msg(wxString& msg) const
 {
+    // Elslicer: newer printers only answer once they have their access code.
+    if (!m_serial_number.empty() && m_check_code.empty())
+        return _(L("Could not connect. Enter the access code shown on the printer's screen in the API Key / Password box, then test again."));
     const std::string prefix = (!m_serial_number.empty() && !m_check_code.empty()) ?
         _utf8(L("Could not connect to Flashforge local API")) :
         _utf8(L("Could not connect to Flashforge via serial"));
@@ -509,7 +513,21 @@ bool Flashforge::upload(PrintHostUpload upload_data, ProgressFn progress_fn, Err
 bool Flashforge::test_local_api(wxString& msg) const
 {
     std::string body;
+    return fetch_details(body, msg);
+}
+
+bool Flashforge::fetch_details(std::string& body, wxString& msg) const
+{
+#ifdef __APPLE__
+    // Elslicer: macOS can block the app's own connections to the local network, but not a web view's.
+    std::string error;
+    const bool  ok = GUI::read_flashforge_details_sync(m_host, m_serial_number, m_check_code, body, error);
+    if (!ok)
+        msg = wxString::FromUTF8(error);
+    return ok;
+#else
     return request_local_api_json("detail", json{{"serialNumber", m_serial_number}, {"checkCode", m_check_code}}.dump(), body, msg);
+#endif
 }
 
 bool Flashforge::fetch_material_slots(std::vector<FlashforgeMaterialSlot>& slots, bool* supports_material_station, wxString& msg) const
@@ -522,7 +540,7 @@ bool Flashforge::fetch_material_slots(std::vector<FlashforgeMaterialSlot>& slots
     }
 
     std::string body;
-    if (!request_local_api_json("detail", json{{"serialNumber", m_serial_number}, {"checkCode", m_check_code}}.dump(), body, msg))
+    if (!fetch_details(body, msg))
         return false;
 
     // Elslicer: printers report slots differently, so the raw answer helps when one lists none.
@@ -598,6 +616,8 @@ bool Flashforge::upload_local_api(PrintHostUpload upload_data, ProgressFn progre
     std::string material_map_json = "[]";
     auto        leveling_before_print = upload_data.extended_info["levelingBeforePrint"] == "1";
     auto        time_lapse_video      = upload_data.extended_info["timeLapseVideo"] == "1";
+    auto        flow_calibration      = upload_data.extended_info["flowCalibration"] == "1";
+    auto        first_layer_inspection = upload_data.extended_info["firstLayerInspection"] == "1";
     auto        use_material_station  = upload_data.extended_info["useMatlStation"] == "1";
 
     if (auto it = upload_data.extended_info.find("materialMappings"); it != upload_data.extended_info.end())
@@ -616,14 +636,51 @@ bool Flashforge::upload_local_api(PrintHostUpload upload_data, ProgressFn progre
         file_size = "0";
     }
 
+#ifdef __APPLE__
+    // Elslicer: see fetch_details.
+    const std::vector<std::pair<std::string, std::string>> headers = {
+        {"serialNumber", m_serial_number},
+        {"checkCode", m_check_code},
+        {"fileSize", file_size},
+        {"printNow", upload_data.post_action == PrintHostPostUploadAction::StartPrint ? "true" : "false"},
+        {"levelingBeforePrint", leveling_before_print ? "true" : "false"},
+        {"flowCalibration", flow_calibration ? "true" : "false"},
+        {"firstLayerInspection", first_layer_inspection ? "true" : "false"},
+        {"timeLapseVideo", time_lapse_video ? "true" : "false"},
+        {"useMatlStation", use_material_station ? "true" : "false"},
+        {"gcodeToolCnt", upload_data.extended_info["gcodeToolCnt"]},
+        {"materialMappings", material_map_b64},
+    };
+    std::string reply, problem;
+    const auto  on_progress = [&progress_fn](size_t sent, size_t total) {
+        static const std::string nothing;
+        bool cancel = false;
+        progress_fn(Http::Progress(0, 0, total, sent, nothing), cancel);
+        return cancel;
+    };
+    if (!GUI::upload_flashforge_file(m_host, headers, upload_data.source_path.string(), filename, on_progress, reply, problem)) {
+        BOOST_LOG_TRIVIAL(error) << "[Flashforge web] upload failed: " << problem;
+        if (problem != "cancelled")
+            error_fn(wxString::FromUTF8(problem));
+        return false;
+    }
+    wxString rejected;
+    if (!validate_local_api_response(reply, rejected)) {
+        BOOST_LOG_TRIVIAL(error) << "[Flashforge web] upload rejected by printer: " << reply;
+        error_fn(rejected);
+        return false;
+    }
+    BOOST_LOG_TRIVIAL(info) << "[Flashforge web] upload complete: " << reply;
+    return true;
+#else
     auto http = Http::post(url);
     http.header("serialNumber", m_serial_number)
         .header("checkCode", m_check_code)
         .header("fileSize", file_size)
         .header("printNow", upload_data.post_action == PrintHostPostUploadAction::StartPrint ? "true" : "false")
         .header("levelingBeforePrint", leveling_before_print ? "true" : "false")
-        .header("flowCalibration", "false")
-        .header("firstLayerInspection", "false")
+        .header("flowCalibration", flow_calibration ? "true" : "false")
+        .header("firstLayerInspection", first_layer_inspection ? "true" : "false")
         .header("timeLapseVideo", time_lapse_video ? "true" : "false")
         .header("useMatlStation", use_material_station ? "true" : "false")
         .header("gcodeToolCnt", upload_data.extended_info["gcodeToolCnt"])
@@ -652,6 +709,7 @@ bool Flashforge::upload_local_api(PrintHostUpload upload_data, ProgressFn progre
         .perform_sync();
 
     return res;
+#endif
 }
 
 bool Flashforge::request_local_api_json(const std::string& path, const std::string& body, std::string& response_body, wxString& error_msg) const

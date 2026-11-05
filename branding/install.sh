@@ -1,9 +1,8 @@
 #!/bin/zsh
-# Installs the built app as /Applications/Elslicer.app, signed with the private local certificate.
+# Installs the built app as /Applications/Elslicer.app, signed with the Developer ID certificate.
 set -euo pipefail
 ROOT=${0:A:h:h}
 APP=/Applications/Elslicer.app
-SIGNING="$HOME/Library/Application Support/Itzkin Signing"
 # Quit properly, so an open project can be saved. Never replace an app that's still in use.
 if pgrep -x OrcaSlicer >/dev/null; then
   osascript -e 'tell application id "com.itzkin.elslicer" to quit' 2>/dev/null || true
@@ -14,9 +13,9 @@ rm -rf "$APP"
 cp -R "$ROOT/build/arm64/OrcaSlicer/OrcaSlicer.app" "$APP"
 rsync -a "$ROOT/resources/" "$APP/Contents/Resources/"
 /usr/libexec/PlistBuddy -c 'Set CFBundleIdentifier com.itzkin.elslicer' "$APP/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :NSLocalNetworkUsageDescription string Elslicer connects to your printer on your network to show its status and camera and to read its filaments.' "$APP/Contents/Info.plist" 2>/dev/null || true
 xattr -cr "$APP"
-KEYCHAIN=$(ls "$SIGNING"/signing.keychain* | head -1)
-security unlock-keychain -p "$(cat "$SIGNING/password")" "$KEYCHAIN"
-codesign --force --deep --keychain "$KEYCHAIN" --sign "$(cat "$SIGNING/identity")" "$APP"
+# macOS only tracks Local Network permission reliably for Apple-issued signatures (Apple TN3179).
+codesign --force --deep --timestamp=none --sign "Developer ID Application: Elad Itzkin (SZ6ZN9RLXR)" "$APP"
 codesign --verify --deep "$APP"
 echo "Installed $APP"

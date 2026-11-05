@@ -201,6 +201,8 @@ set(lisbslic3r_sources
     FilamentMixer.cpp
     FilamentMixer.hpp
     FilamentMixerModel.hpp
+    prusa_fdm_mixer.cpp
+    prusa_fdm_mixer.hpp
     ColorDecomposeRecipe.cpp
     ColorDecomposeRecipe.hpp
     TexturePainting.hpp
@@ -273,6 +275,8 @@ set(lisbslic3r_sources
     GCode/GCodeProcessor.cpp
     AISetup.cpp
     AISetup.hpp
+    PrintJournal.cpp
+    PrintJournal.hpp
     GCode/ResumeFromLayer.cpp
     GCode/ResumeFromLayer.hpp
     GCode/GCodeProcessor.hpp

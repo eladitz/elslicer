@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Print Journal</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: 0; height: 100vh; overflow: hidden; }
+  .layout { display: grid; grid-template-columns: 250px 1fr; height: 100%; }
+  .side { border-right: 1px solid var(--line); overflow-y: auto; padding: 16px 10px; }
+  .side h1 { padding: 0 8px; margin-bottom: 12px; }
+  .side > button { width: calc(100% - 16px); margin: 0 8px 12px; }
+  .entry { display: block; width: 100%; text-align: left; background: none; border: 1px solid transparent; margin-bottom: 2px; }
+  .entry.selected { background: var(--panel); border-color: var(--line); }
+  .entry b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .entry small { color: var(--muted); }
+  .main { overflow-y: auto; padding: 24px 28px; }
+  .photos #photos { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 10px; }
+  .photos #photos:empty { display: none; }
+  .shot { position: relative; }
+  .shot img { width: 100%; height: 190px; object-fit: contain; border-radius: 6px; display: block; background: #000; }
+  .shot small { position: absolute; left: 6px; top: 6px; background: rgba(0,0,0,.7); padding: 0 6px; border-radius: 4px; }
+  .shot button { position: absolute; right: 6px; top: 6px; padding: 0 8px; background: rgba(0,0,0,.7); }
+  textarea { width: 100%; min-height: 56px; resize: vertical; }
+  .defect { border-top: 1px solid var(--line); padding: 12px 0; }
+  .defect:first-child { border-top: 0; padding-top: 0; }
+  .defect.wrong { opacity: .5; }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.bad, .tag.failed { color: var(--bad); border-color: var(--bad); }
+  .tag.visible { color: var(--warn); border-color: var(--warn); }
+  .tag.good { color: #6cc48a; border-color: #6cc48a; }
+  .change { font-size: 13px; color: var(--muted); }
+  .link { background: none; border: none; color: var(--muted); padding: 0; text-decoration: underline; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="side">
+    <h1>Print Journal</h1>
+    <button id="reviewNow" title="For a print the app didn't send, using the settings it has now">Add a print</button>
+    <div id="list"></div>
+  </div>
+  <div class="main">
+    <div id="empty" class="muted">Prints you send appear here. When one ends, the app takes a photo and asks what you saw, then Claude reads it all in one request.</div>
+    <div id="detail" class="hidden">
+      <div class="row spread"><h1 id="file"></h1><span id="overall" class="tag"></span></div>
+      <p id="meta" class="sub"></p>
+      <div id="error" class="note bad hidden"></div>
+      <div id="sameNote" class="note hidden">The app is set to exactly these settings now, so what's below applies to your next print.</div>
+
+      <div class="panel photos">
+        <h2>Photos</h2>
+        <div id="photos"></div>
+        <p class="muted">The printer's camera only sees one side. Add up to 3 of your own from other angles: the back, the underside once the supports are off, or a close-up of anything that looks wrong.</p>
+        <div class="row">
+          <button id="addPhoto"></button>
+          <button id="photo"></button>
+          <span id="busy" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="panel">
+        <h2>What you saw</h2>
+        <textarea id="note" placeholder="Anything the camera can't see, like a rough underside or a weak spot. Claude takes your word over the photo."></textarea>
+        <div class="row" style="margin-top:10px">
+          <button id="analyse" class="primary">Analyse</button>
+          <span id="cost" class="muted"></span>
+        </div>
+      </div>
+
+      <div id="reportPanel" class="panel hidden">
+        <h2>What Claude found</h2>
+        <p id="summary"></p>
+        <div id="defects"></div>
+        <p id="notVisible" class="muted" style="margin:12px 0 0"></p>
+      </div>
+
+      <button id="delete" class="link">Delete this print</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let selected = '';
+let ownFull = false;
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+function select(id) {
+  selected = id;
+  document.querySelectorAll('.entry').forEach(entry => entry.classList.toggle('selected', entry.dataset.id === id));
+  $('error').classList.add('hidden');
+  $('busy').textContent = '';
+  post({cmd: 'open', id});
+}
+
+function stateText(row) {
+  if (row.state === 'waiting') return 'Sent';
+  if (row.state === 'printing') return 'Printing';
+  return row.overall || row.status || 'Not analysed';
+}
+
+function drawList(rows, show) {
+  $('list').replaceChildren(...rows.map(row => {
+    const entry = element('button', undefined, 'entry');
+    entry.dataset.id = row.id;
+    entry.append(element('b', row.file || 'Print'), element('small', `${row.when} · ${stateText(row)}`));
+    entry.onclick = () => select(row.id);
+    return entry;
+  }));
+  $('empty').classList.toggle('hidden', rows.length > 0);
+  $('detail').classList.toggle('hidden', rows.length === 0);
+  const wanted = show && rows.some(row => row.id === show) ? show : rows.some(row => row.id === selected) ? selected : (rows[0] || {}).id;
+  if (wanted) select(wanted);
+}
+
+function drawDefect(defect, index, id) {
+  const box = element('div', undefined, 'defect' + (defect.wrong ? ' wrong' : ''));
+  const head = element('div', undefined, 'row spread');
+  const title = element('div', undefined, 'row');
+  title.append(element('b', defect.name), element('span', defect.severity, `tag ${defect.severity}`));
+  const wrong = element('button', defect.wrong ? 'Actually, it was right' : 'That’s wrong', 'link');
+  wrong.onclick = () => post({cmd: 'wrong', id, defect: index, wrong: !defect.wrong});
+  head.append(title, wrong);
+  box.append(head, element('div', defect.evidence, 'muted'));
+  if (defect.cause) box.append(element('div', `Likely cause: ${defect.cause}`));
+  if (defect.prevention) box.append(element('div', `Next time: ${defect.prevention}`));
+  for (const row of defect.rows || []) {
+    box.append(element('div', row.accepted ? `${row.label}: ${row.before} → ${row.after}` : `${row.label}: not usable (${row.note})`, 'change'));
+  }
+  return box;
+}
+
+function drawRecord(record) {
+  selected = record.id;
+  $('file').textContent = record.file || 'Print';
+  const parts = [record.when, record.printer, (record.materials || []).join(', ')];
+  if (record.status) parts.push(`printer said: ${record.status}`);
+  if (record.layers) parts.push(`layer ${record.layer} of ${record.layers}`);
+  $('meta').textContent = parts.filter(Boolean).join(' · ');
+  $('sameNote').classList.toggle('hidden', !record.same_settings || !record.report);
+
+  const images = record.images || [];
+  $('photos').replaceChildren(...images.map(photo => {
+    const shot = element('div', undefined, 'shot');
+    const image = element('img');
+    image.src = photo.source;
+    const remove = element('button', '×');
+    remove.title = 'Remove this photo';
+    remove.onclick = () => post({cmd: 'remove_photo', id: record.id, name: photo.name});
+    shot.append(image, element('small', photo.camera ? 'Printer camera' : 'Your photo'), remove);
+    return shot;
+  }));
+  const own = images.filter(photo => !photo.camera).length;
+  ownFull = own >= 3;
+  $('addPhoto').textContent = ownFull ? '3 of your photos added' : `Add photos (${3 - own} left)`;
+  $('addPhoto').disabled = ownFull;
+  $('photo').textContent = images.some(photo => photo.camera) ? 'Retake camera photo' : 'Take camera photo';
+  if (document.activeElement !== $('note')) $('note').value = record.note || '';
+
+  const report = record.report;
+  $('overall').textContent = report ? report.overall : '';
+  $('overall').className = 'tag ' + (report ? report.overall : 'hidden');
+  $('reportPanel').classList.toggle('hidden', !report);
+  if (report) {
+    $('summary').textContent = report.summary;
+    $('defects').replaceChildren(...(report.defects || []).map((defect, index) => drawDefect(defect, index, record.id)));
+    $('notVisible').textContent = report.not_visible ? `Couldn't judge: ${report.not_visible}` : '';
+  }
+  $('analyse').textContent = report ? 'Analyse again' : 'Analyse';
+  $('analyse').disabled = !images.length;
+  $('cost').textContent = record.cost ? `Spent on this print so far: $${record.cost.toFixed(3)}` : 'One request, about 5 to 8 cents.';
+}
+
+function setBusy(on) {
+  $('photo').disabled = on;
+  $('addPhoto').disabled = on || ownFull;
+  $('analyse').disabled = on;
+}
+
+window.fromApp = message => {
+  if (message.type === 'list') {
+    drawList(message.rows, message.show);
+    if (message.problem) {
+      $('error').textContent = message.problem;
+      $('error').classList.remove('hidden');
+    }
+  } else if (message.type === 'record') {
+    if (message.record.id === selected) drawRecord(message.record);
+  } else if (message.type === 'busy') {
+    setBusy(true);
+    $('error').classList.add('hidden');
+    $('busy').textContent = message.text;
+  } else if (message.type === 'done') {
+    setBusy(false);
+    $('busy').textContent = '';
+    $('error').textContent = message.problem;
+    $('error').classList.toggle('hidden', !message.problem);
+  }
+};
+
+$('reviewNow').onclick = () => post({cmd: 'review_now'});
+$('photo').onclick = () => post({cmd: 'photo', id: selected});
+$('addPhoto').onclick = () => post({cmd: 'add_photos', id: selected});
+$('analyse').onclick = () => {
+  post({cmd: 'note', id: selected, text: $('note').value});
+  post({cmd: 'analyse', id: selected});
+};
+$('note').onchange = () => post({cmd: 'note', id: selected, text: $('note').value});
+$('delete').onclick = () => post({cmd: 'delete', id: selected});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

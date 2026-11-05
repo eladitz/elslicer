@@ -154,6 +154,20 @@ TEST_CASE("Whole-layer mixing emits only the nominal layer height", "[MixedFilam
     CHECK(gc.find(";HEIGHT:0.08") == std::string::npos);
 }
 
+TEST_CASE("A mix calls only the physical tools, never its own slot", "[MixedFilament]")
+{
+    Print print;
+    Model model;
+    init_print({cube(20)}, print, model, mixed_config(false));
+    print.process();
+    const std::string gc = Slic3r::Test::gcode(print);
+
+    REQUIRE(!gc.empty());
+    // Slot 3 is the mix (T2). A printer has no such head.
+    CHECK(gc.find("\nT2") == std::string::npos);
+    CHECK(gc.find("\nT1") != std::string::npos);
+}
+
 TEST_CASE("By-object prints without mixed filaments keep their used-filament set", "[MixedFilament]")
 {
     // With no mixed slot the by-object bookkeeping stays plain: object 2 prints with filament 2,

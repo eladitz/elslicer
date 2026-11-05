@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Printer camera</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { height: 100%; margin: 0; padding: 0; background: #000; overflow: hidden; }
+  #camera { display: block; width: 100%; height: 100%; object-fit: contain; }
+  #note { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+  #buttons { position: fixed; top: 14px; right: 14px; display: flex; gap: 8px; opacity: .85; }
+  #buttons:hover { opacity: 1; }
+  html { cursor: move; }
+  * { user-select: none; -webkit-user-select: none; }
+  #buttons button { cursor: pointer; }
+  #grip { position: fixed; right: 0; bottom: 0; width: 18px; height: 18px; cursor: nwse-resize; }
+  body.full { cursor: default; }
+  body.full #grip { display: none; }
+</style>
+</head>
+<body>
+<img id="camera" alt="">
+<div id="note">Connecting…</div>
+<div id="buttons">
+  <button id="full">Full screen</button>
+  <button id="back">Back to Elslicer</button>
+</div>
+<div id="grip"></div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let url = '';
+let attempts = 0;
+// Every try is a new address: the web view would otherwise reuse the Device page's dropped
+// stream, or the failed try before this one, without asking the camera again.
+function connect() {
+  attempts++;
+  $('camera').removeAttribute('src');
+  $('camera').src = `${url}${url.includes('?') ? '&' : '?'}t=${Date.now()}`;
+}
+const showing = () => $('note').classList.add('hidden');
+$('camera').onload = showing;
+// A stream doesn't always report its first picture.
+setInterval(() => { if ($('camera').naturalWidth > 0) showing(); }, 1000);
+// Refused while something else is watching, and for a moment after a viewer leaves.
+$('camera').onerror = () => {
+  $('note').classList.remove('hidden');
+  $('note').textContent = attempts < 6 ? 'Waiting for the camera…' : 'The camera is busy, so another app may be using it. Trying again…';
+  setTimeout(connect, 3000);
+};
+window.fromApp = message => {
+  // The Device page has just let go of the camera, which needs a moment before it takes a new viewer.
+  if (message.url) { url = message.url; setTimeout(connect, 3000); }
+  if (message.full !== undefined) {
+    $('full').textContent = message.full ? 'Exit full screen' : 'Full screen';
+    document.body.classList.toggle('full', message.full);
+  }
+};
+// No title bar, so the picture is what moves the window and the corner what sizes it.
+let drag = null;
+document.addEventListener('mousedown', event => {
+  if (event.target.closest('button') || document.body.classList.contains('full')) return;
+  drag = {cmd: event.target.id === 'grip' ? 'resize' : 'move', x: event.screenX, y: event.screenY};
+  event.preventDefault();
+  post({cmd: 'grab'});
+});
+document.addEventListener('mousemove', event => {
+  if (drag) post({cmd: drag.cmd, x: event.screenX - drag.x, y: event.screenY - drag.y});
+});
+document.addEventListener('mouseup', () => { drag = null; });
+$('back').onclick = () => post({cmd: 'back'});
+$('full').onclick = () => post({cmd: 'toggle'});
+document.addEventListener('keydown', event => { if (event.key === 'Escape') post({cmd: 'exit'}); });
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

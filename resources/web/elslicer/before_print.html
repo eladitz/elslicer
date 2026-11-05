@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Before You Print</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .tip { display: grid; grid-template-columns: 20px 1fr; gap: 10px; }
+  .change { font-size: 13px; color: var(--muted); }
+  .tag { font-size: 12px; padding: 1px 8px; border-radius: 10px; border: 1px solid var(--line); color: var(--muted); margin-left: 6px; }
+</style>
+</head>
+<body>
+<h1>Before you print</h1>
+<p class="sub">Past prints with this printer and these materials had problems you may be able to avoid.</p>
+<div id="tips"></div>
+<p id="reslice" class="muted hidden">Changing settings means slicing again, then you press Print once more.</p>
+<div class="footer">
+  <button id="print">Print as it is</button>
+  <button id="apply" class="primary">Change ticked settings</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+
+function element(tag, text, className) {
+  const node = document.createElement(tag);
+  if (text !== undefined) node.textContent = text;
+  if (className) node.className = className;
+  return node;
+}
+
+function drawTip(tip, index) {
+  const panel = element('div', undefined, 'panel tip');
+  const usable = (tip.rows || []).filter(row => row.accepted);
+  const tick = element('input');
+  tick.type = 'checkbox';
+  tick.dataset.index = index;
+  tick.checked = usable.length > 0;
+  tick.disabled = usable.length === 0;
+  tick.className = 'tick';
+  const body = element('div');
+  const title = element('div');
+  title.append(element('b', tip.name));
+  title.append(element('span', tip.same_settings ? 'same settings' : 'different settings', 'tag'));
+  if (tip.times > 1) title.append(element('span', `seen ${tip.times} times`, 'tag'));
+  body.append(title, element('div', `${tip.file}, ${tip.when}: ${tip.evidence}`, 'muted'));
+  if (tip.prevention) body.append(element('div', tip.prevention));
+  for (const row of usable) body.append(element('div', `${row.label}: ${row.before} → ${row.after}`, 'change'));
+  panel.append(tick, body);
+  return panel;
+}
+
+const ticked = () => [...document.querySelectorAll('.tick:checked')].map(tick => Number(tick.dataset.index));
+
+function refresh() {
+  $('apply').disabled = ticked().length === 0;
+  $('reslice').classList.toggle('hidden', ticked().length === 0);
+}
+
+window.fromApp = message => {
+  if (message.type !== 'tips') return;
+  $('tips').replaceChildren(...message.tips.map(drawTip));
+  document.querySelectorAll('.tick').forEach(tick => { tick.onchange = refresh; });
+  refresh();
+};
+
+$('print').onclick = () => post({cmd: 'print'});
+$('apply').onclick = () => post({cmd: 'apply', tips: ticked()});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

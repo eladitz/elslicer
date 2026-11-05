@@ -6,6 +6,7 @@
 #include "libslic3r/Technologies.hpp"
 #include "libslic3r/Platform.hpp"
 #include "GUI_App.hpp"
+#include "ElslicerDialogs.hpp"
 #include "BBLTopbar.hpp"
 #include "Shortcuts.hpp"
 #include "DeviceCore/DevConfigUtil.h"
@@ -938,6 +939,8 @@ void GUI_App::post_init()
     assert(initialized());
     if (! this->initialized())
         throw Slic3r::RuntimeError("Calling post_init() while not yet initialized");
+
+    start_print_journal();
 
 #if wxUSE_WEBVIEW_EDGE
     // Ensure the Microsoft WebView2 runtime is installed before any WebView is

@@ -25,6 +25,7 @@ add_executable(${_TEST_NAME}_tests
     test_calib.cpp
     test_resume_from_layer.cpp
     test_ai_setup.cpp
+    test_print_journal.cpp
     test_clipper_offset.cpp
     test_clipper_utils.cpp
     test_cut_connectors.cpp

@@ -1,5 +1,7 @@
 #include "PrintHostDialogs.hpp"
 
+#include <tuple>
+
 #include <algorithm>
 #include <boost/algorithm/string/trim.hpp>
 #include <boost/algorithm/string/case_conv.hpp>
@@ -720,6 +722,9 @@ void FlashforgePrintHostSendDialog::init()
     if (!timelapse.empty())
         m_time_lapse_video = timelapse == "1";
 
+    m_flow_calibration       = app_config->get("recent", CONFIG_KEY_FLOW_CALIBRATION) == "1";
+    m_first_layer_inspection = app_config->get("recent", CONFIG_KEY_FIRST_LAYER_INSPECTION) == "1";
+
     // Flashforge local printing should default to IFS enabled when supported and manual filament change is not active.
     // We don't revive an old stale "0" here.
     m_use_material_station = m_supports_material_station && !m_manual_filament_change;
@@ -792,6 +797,10 @@ void FlashforgePrintHostSendDialog::init()
 
     add_option_checkbox(m_flashforge_options_sizer, _L("Leveling before print"), m_leveling_before_print,
                         [this](bool checked) { m_leveling_before_print = checked; }, &m_checkbox_leveling);
+    add_option_checkbox(m_flashforge_options_sizer, _L("Flow calibration before print"), m_flow_calibration,
+                        [this](bool checked) { m_flow_calibration = checked; });
+    add_option_checkbox(m_flashforge_options_sizer, _L("First layer inspection"), m_first_layer_inspection,
+                        [this](bool checked) { m_first_layer_inspection = checked; });
     add_option_checkbox(m_flashforge_options_sizer, _L("Time-lapse"), m_time_lapse_video,
                         [this](bool checked) { m_time_lapse_video = checked; }, &m_checkbox_timelapse);
     add_option_checkbox(m_flashforge_options_sizer, _L("Enable IFS"), m_use_material_station,
@@ -883,6 +892,8 @@ void FlashforgePrintHostSendDialog::EndModal(int ret)
         AppConfig* app_config = wxGetApp().app_config;
         app_config->set("recent", CONFIG_KEY_LEVELING, m_leveling_before_print ? "1" : "0");
         app_config->set("recent", CONFIG_KEY_TIMELAPSE, m_time_lapse_video ? "1" : "0");
+        app_config->set("recent", CONFIG_KEY_FLOW_CALIBRATION, m_flow_calibration ? "1" : "0");
+        app_config->set("recent", CONFIG_KEY_FIRST_LAYER_INSPECTION, m_first_layer_inspection ? "1" : "0");
         app_config->set("recent", CONFIG_KEY_IFS, m_use_material_station ? "1" : "0");
     }
 
@@ -922,6 +933,8 @@ std::map<std::string, std::string> FlashforgePrintHostSendDialog::extendedInfo()
 
     return {
         {"levelingBeforePrint", m_leveling_before_print ? "1" : "0"},
+        {"flowCalibration", m_flow_calibration ? "1" : "0"},
+        {"firstLayerInspection", m_first_layer_inspection ? "1" : "0"},
         {"timeLapseVideo", m_time_lapse_video ? "1" : "0"},
         {"useMatlStation", m_use_material_station ? "1" : "0"},
         {"gcodeToolCnt", std::to_string(mapped_count)},
@@ -1017,16 +1030,20 @@ void FlashforgePrintHostSendDialog::auto_assign_mappings()
 
         const wxColour filament_color = to_wx_colour(filament.color);
         const Slic3r::FlashforgeMaterialSlot* best_slot = nullptr;
-        long long best_distance = std::numeric_limits<long long>::max();
+        // Elslicer: the same material comes before a related one, then the head the filament is
+        // set up on, then the closest colour.
+        std::tuple<bool, bool, long long> best_rank;
 
         for (const auto& slot : m_slots) {
             if (!slot.has_filament || !slot_matches_filament(slot, filament))
                 continue;
 
-            const long long distance = color_distance_sq(filament_color, to_wx_colour(slot.material_color));
-            if (best_slot == nullptr || distance < best_distance) {
+            const bool same_material = normalize_material(slot.material_name) == normalize_material(filament.type);
+            const std::tuple<bool, bool, long long> rank(!same_material, slot.slot_id != filament.id + 1,
+                                                         color_distance_sq(filament_color, to_wx_colour(slot.material_color)));
+            if (best_slot == nullptr || rank < best_rank) {
                 best_slot = &slot;
-                best_distance = distance;
+                best_rank = rank;
             }
         }
 
@@ -1099,7 +1116,10 @@ bool FlashforgePrintHostSendDialog::slot_matches_filament(const Slic3r::Flashfor
 
     const std::string project_material = normalize_material(!filament.type.empty() ? filament.type : filament.get_display_filament_type());
     const std::string slot_material    = normalize_material(slot.material_name);
-    return !project_material.empty() && !slot_material.empty() && project_material == slot_material;
+    // Elslicer: silk is a kind of PLA, and it's up to the user if one is loaded in place of the other.
+    const auto is_pla_family = [](const std::string& material) { return material == "PLA" || material == "SILK"; };
+    return !project_material.empty() && !slot_material.empty() &&
+           (project_material == slot_material || (is_pla_family(project_material) && is_pla_family(slot_material)));
 }
 
 bool FlashforgePrintHostSendDialog::validate_before_close()

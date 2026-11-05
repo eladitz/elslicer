@@ -5,63 +5,84 @@
 <title>AI Setup</title>
 <link rel="stylesheet" href="style.css">
 <style>
-  #options button { display: block; width: 100%; text-align: left; margin-bottom: 8px; padding: 10px 14px; }
-  #question { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
-  table { width: 100%; border-collapse: collapse; }
-  td { padding: 9px 8px 9px 0; border-top: 1px solid var(--line); vertical-align: top; }
-  tr:first-child td { border-top: 0; }
-  .value { white-space: nowrap; }
+  .field { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .field:last-child { margin-bottom: 0; }
+  select, textarea { width: 100%; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chips .selected { border-color: var(--accent); outline: 1px solid var(--accent); }
+  .swatches { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 12px; }
+  .swatch { display: inline-block; width: 12px; height: 12px; border-radius: 3px; border: 1px solid var(--line); margin-right: 5px; vertical-align: -1px; }
+  .bar { margin-bottom: 18px; }
+  .bar:last-child { margin-bottom: 0; }
+  .ends { display: flex; justify-content: space-between; color: var(--muted); font-size: 12px; }
+  .bar input[type=range] { width: 100%; margin: 6px 0 2px; }
+  .level { margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+  td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); vertical-align: top; }
+  .value { white-space: nowrap; text-align: right; }
   .refused { color: var(--bad); }
   .limited { color: var(--warn); }
 </style>
 </head>
 <body>
 <h1>AI setup</h1>
-<p class="sub">Answer a few questions and Claude chooses the settings. Only measurements of your model are sent, never the model itself.</p>
+<p class="sub">Choose what you know now. Claude is asked once, then you adjust the result with bars, which costs nothing. Only measurements of your model are sent, never the model itself.</p>
 
 <div id="error" class="note bad hidden"></div>
 
 <section id="keyView" class="panel hidden">
   <h2>Anthropic API key</h2>
-  <p class="muted">Each setup is billed to this key, separately from a Claude subscription. It's stored in your Mac's Keychain.</p>
+  <p class="muted">Each request is billed to this key, separately from a Claude subscription. It's stored in your Mac's Keychain.</p>
   <div class="row">
     <input id="key" type="password" placeholder="Paste your API key" style="flex:1" autocomplete="off">
     <button id="saveKey" class="primary">Save</button>
   </div>
 </section>
 
-<section id="startView" class="panel hidden">
-  <h2>Ready when you are</h2>
+<section id="formView" class="hidden">
   <p id="noModel" class="note warn hidden">Import a model first, then open AI setup again.</p>
+  <div class="panel">
+    <h2>What is it for?</h2>
+    <div id="purpose" class="chips"></div>
+  </div>
+  <div class="panel">
+    <h2>Supports</h2>
+    <p id="supportHint" class="muted"></p>
+    <div id="heads" class="swatches"></div>
+    <div class="field"><label for="support">Supports</label>
+      <select id="support"><option value="auto">Let Claude decide</option><option value="on">Yes</option><option value="off">No</option></select></div>
+    <div class="field supportOnly"><label for="style">Type</label>
+      <select id="style"><option value="auto">Let Claude decide</option><option value="tree">Tree</option><option value="normal">Normal</option></select></div>
+    <div class="field supportOnly"><label for="body">Support material</label><select id="body"></select></div>
+    <div class="field supportOnly"><label for="interface">Layer touching the part</label><select id="interface"></select></div>
+  </div>
+  <div class="panel">
+    <h2>Anything else?</h2>
+    <textarea id="notes" rows="2" placeholder="Optional. Anything Claude should know or do"></textarea>
+  </div>
   <div class="row spread">
     <div class="row">
       <label for="model">Model</label>
-      <select id="model"></select>
+      <select id="model" style="width:auto"></select>
       <button id="forgetKey">Remove API key</button>
     </div>
-    <button id="start" class="primary">Start</button>
+    <button id="start" class="primary">Get settings</button>
   </div>
+  <p class="muted" style="margin-top:12px">One request, roughly $0.10 on Opus and less on the others, billed to your API key.</p>
 </section>
 
-<section id="askView" class="panel hidden">
-  <div id="question"></div>
-  <div id="options"></div>
-  <div class="row">
-    <input id="answer" type="text" placeholder="Or type your own answer" style="flex:1">
-    <button id="send">Send</button>
-  </div>
-</section>
-
-<section id="waitView" class="panel hidden"><span class="muted">Thinking…</span></section>
+<section id="waitView" class="panel hidden"><span class="muted">Claude is working out the settings. This can take a minute…</span></section>
 
 <section id="proposalView" class="hidden">
-  <div class="panel">
-    <p id="summary"></p>
-    <table id="changes"></table>
+  <div class="panel"><p id="summary" style="margin:0"></p></div>
+  <div id="bars" class="panel"></div>
+  <div id="fixedPanel" class="panel">
+    <h2>Also changing</h2>
+    <table id="fixed"></table>
   </div>
   <div class="panel">
     <div class="row">
-      <input id="adjust" type="text" placeholder="Want something different? Tell Claude" style="flex:1">
+      <input id="adjust" type="text" placeholder="Want something else? Tell Claude. This is another paid request" style="flex:1">
       <button id="sendAdjust">Send</button>
     </div>
   </div>
@@ -83,12 +104,17 @@
 <script>
 const $ = id => document.getElementById(id);
 const post = message => window.wx.postMessage(JSON.stringify(message));
-const views = ['keyView', 'startView', 'askView', 'waitView', 'proposalView', 'doneView'];
+const views = ['keyView', 'formView', 'waitView', 'proposalView', 'doneView'];
+const PURPOSES = ['To look at', 'Has to work or take load', 'A quick test', 'A gift'];
+let purpose = '';
+let lastView = 'formView';
 
 function show(view) {
   views.forEach(id => $(id).classList.toggle('hidden', id !== view));
   $('apply').classList.toggle('hidden', view !== 'proposalView');
   if (view !== 'doneView') $('undo').classList.add('hidden');
+  $('close').textContent = view === 'formView' || view === 'keyView' ? 'Not now' : 'Close';
+  if (view !== 'waitView') lastView = view === 'doneView' ? lastView : view;
 }
 
 function fail(text) {
@@ -96,13 +122,104 @@ function fail(text) {
   $('error').classList.remove('hidden');
 }
 
-function reply(text) {
-  if (!text.trim()) return;
-  $('error').classList.add('hidden');
-  post({cmd: 'answer', text});
+function drawPurpose() {
+  $('purpose').replaceChildren(...PURPOSES.map(text => {
+    const button = document.createElement('button');
+    button.textContent = text;
+    button.className = text === purpose ? 'selected' : '';
+    button.onclick = () => { purpose = purpose === text ? '' : text; drawPurpose(); };
+    return button;
+  }));
 }
 
-let lastView = 'startView';
+function headName(head) {
+  return `Head ${head.head}: ${head.printer_calls_it || head.filament}`;
+}
+
+function drawHeads(heads) {
+  $('heads').replaceChildren(...heads.filter(head => !head.empty).map(head => {
+    const item = document.createElement('span');
+    const swatch = document.createElement('span');
+    swatch.className = 'swatch';
+    swatch.style.background = head.colour || 'transparent';
+    item.append(swatch, headName(head));
+    return item;
+  }));
+  for (const id of ['body', 'interface']) {
+    const before = $(id).value;
+    $(id).replaceChildren(new Option('Let Claude decide', '-1'), new Option("Same as the part", '0'),
+      ...heads.filter(head => !head.empty).map(head => new Option(headName(head), head.head)));
+    if ([...$(id).options].some(option => option.value === before)) $(id).value = before;
+  }
+}
+
+function drawObjects(objects) {
+  const midAir = objects.reduce((sum, object) => sum + object.parts_starting_in_mid_air, 0);
+  const overhang = objects.reduce((most, object) => Math.max(most, object.overhang_percent_of_surface), 0);
+  $('supportHint').textContent = midAir > 0
+    ? 'This model has parts that start in mid air, so it needs supports this way up.'
+    : `About ${Math.round(overhang)}% of this model's surface overhangs.`;
+}
+
+function drawRows(table, rows) {
+  table.replaceChildren(...rows.map(change => {
+    const row = document.createElement('tr');
+    const name = document.createElement('td');
+    const title = document.createElement('div');
+    title.textContent = change.label;
+    name.append(title);
+    for (const [text, className] of [[change.reason, 'muted'], [change.note, change.accepted ? 'limited' : 'refused']]) {
+      if (!text) continue;
+      const extra = document.createElement('div');
+      extra.className = className;
+      extra.textContent = text;
+      name.append(extra);
+    }
+    const value = document.createElement('td');
+    value.className = 'value';
+    value.textContent = change.accepted ? `${change.before} → ${change.after}` : 'Not applied';
+    row.append(name, value);
+    return row;
+  }));
+}
+
+function drawBars(bars) {
+  $('bars').classList.toggle('hidden', !bars.length);
+  $('bars').replaceChildren(...bars.map(bar => {
+    const box = document.createElement('div');
+    box.className = 'bar';
+    const title = document.createElement('h2');
+    title.textContent = bar.title;
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = 0;
+    slider.max = bar.levels.length - 1;
+    slider.step = 1;
+    slider.value = bar.recommended;
+    slider.dataset.bar = bar.id;
+    slider.disabled = bar.levels.length < 2;
+    const ends = document.createElement('div');
+    ends.className = 'ends';
+    const left = document.createElement('span');
+    left.textContent = bar.left;
+    const right = document.createElement('span');
+    right.textContent = bar.right;
+    ends.append(left, right);
+    const label = document.createElement('div');
+    label.className = 'level';
+    const table = document.createElement('table');
+    const draw = () => {
+      const level = bar.levels[Number(slider.value)];
+      const suggested = Number(slider.value) === bar.recommended ? ' (Claude suggests this)' : '';
+      label.textContent = level.label + suggested;
+      drawRows(table, level.rows);
+    };
+    slider.oninput = draw;
+    draw();
+    box.append(title, slider, ends, label, table);
+    return box;
+  }));
+}
 
 window.fromApp = message => {
   switch (message.type) {
@@ -110,60 +227,34 @@ window.fromApp = message => {
       message.models.forEach(model => $('model').add(new Option(model.label, model.id)));
       $('noModel').classList.toggle('hidden', message.has_model);
       $('start').disabled = !message.has_model;
-      show(message.has_key ? 'startView' : 'keyView');
+      drawPurpose();
+      drawHeads(message.heads);
+      drawObjects(message.objects);
+      show(message.has_key ? 'formView' : 'keyView');
+      break;
+    case 'heads':
+      drawHeads(message.heads);
       break;
     case 'key_saved':
-      if (message.ok) { $('key').value = ''; show('startView'); }
+      if (message.ok) { $('key').value = ''; show('formView'); }
       else fail("The API key couldn't be saved to the Keychain.");
       break;
     case 'thinking':
       show('waitView');
       break;
-    case 'question': {
-      $('question').textContent = message.question;
-      $('options').replaceChildren(...message.options.map(text => {
-        const button = document.createElement('button');
-        button.textContent = text;
-        button.onclick = () => reply(text);
-        return button;
-      }));
-      $('answer').value = '';
-      show('askView');
-      lastView = 'askView';
-      break;
-    }
-    case 'proposal': {
+    case 'proposal':
       $('summary').textContent = message.summary;
-      $('changes').replaceChildren(...message.changes.map(change => {
-        const row = document.createElement('tr');
-        const name = document.createElement('td');
-        const strong = document.createElement('strong');
-        strong.textContent = change.label;
-        const why = document.createElement('div');
-        why.className = 'muted';
-        why.textContent = change.reason;
-        name.append(strong, why);
-        if (change.note) {
-          const extra = document.createElement('div');
-          extra.className = change.accepted ? 'limited' : 'refused';
-          extra.textContent = change.note;
-          name.append(extra);
-        }
-        const value = document.createElement('td');
-        value.className = 'value';
-        value.textContent = change.accepted ? `${change.before} → ${change.after}` : 'Not applied';
-        row.append(name, value);
-        return row;
-      }));
+      drawBars(message.bars);
+      drawRows($('fixed'), message.fixed);
+      $('fixedPanel').classList.toggle('hidden', !message.fixed.length);
       show('proposalView');
-      lastView = 'proposalView';
       break;
-    }
     case 'cost':
-      $('cost').textContent = `This setup so far: $${message.dollars.toFixed(3)}`;
+      $('cost').textContent = `Spent on this setup: $${message.dollars.toFixed(3)}`;
       break;
     case 'applied':
       $('doneNote').textContent = `Applied and saved as "${message.preset}". Slice when you're ready.`;
+      if (message.dropped.length) fail(`These didn't stay as Claude set them, so check them before slicing: ${message.dropped.join(', ')}`);
       show('doneView');
       $('undo').classList.remove('hidden');
       break;
@@ -178,13 +269,26 @@ window.fromApp = message => {
   }
 };
 
+$('support').onchange = () => document.querySelectorAll('.supportOnly').forEach(row => row.classList.toggle('hidden', $('support').value === 'off'));
 $('saveKey').onclick = () => { if ($('key').value.trim()) post({cmd: 'save_key', key: $('key').value.trim()}); };
 $('forgetKey').onclick = () => { post({cmd: 'forget_key'}); show('keyView'); };
-$('start').onclick = () => { $('error').classList.add('hidden'); post({cmd: 'start', model: $('model').value}); };
-$('send').onclick = () => reply($('answer').value);
-$('answer').onkeydown = event => { if (event.key === 'Enter') reply($('answer').value); };
-$('sendAdjust').onclick = () => { reply($('adjust').value); $('adjust').value = ''; };
-$('apply').onclick = () => post({cmd: 'apply'});
+$('start').onclick = () => {
+  $('error').classList.add('hidden');
+  post({cmd: 'start', model: $('model').value, purpose, notes: $('notes').value.trim(), support: $('support').value, style: $('style').value,
+        body: Number($('body').value), interface: Number($('interface').value)});
+};
+$('sendAdjust').onclick = () => {
+  const text = $('adjust').value.trim();
+  if (!text) return;
+  $('error').classList.add('hidden');
+  $('adjust').value = '';
+  post({cmd: 'answer', text});
+};
+$('apply').onclick = () => {
+  const levels = {};
+  document.querySelectorAll('#bars input[type=range]').forEach(slider => { levels[slider.dataset.bar] = Number(slider.value); });
+  post({cmd: 'apply', levels});
+};
 $('undo').onclick = () => post({cmd: 'undo'});
 $('close').onclick = () => post({cmd: 'close'});
 post({cmd: 'ready'});

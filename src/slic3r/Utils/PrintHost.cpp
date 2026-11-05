@@ -10,7 +10,9 @@
 #include <memory>
 #include <boost/filesystem/operations.hpp>
 #include "libslic3r/LifecycleEvents.hpp"
+#include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/GUI_App.hpp"
+#include "libslic3r/Utils.hpp"
 #include <vector>
 #include <thread>
 #include <exception>
@@ -107,6 +109,12 @@ std::string PrintHost::get_print_host_webui(DynamicPrintConfig* config)
     switch (host_type) {
     case htElegooLink: {
         webui_url = ElegooLink::get_print_host_webui(config);
+        break;
+    }
+    case htFlashforge: {
+        // Elslicer: these printers serve no web page, so the Device tab shows our own status page.
+        if (config->opt_string("print_host_webui").empty() && !config->opt_string("print_host").empty())
+            webui_url = GUI::file_url_from_path(boost::filesystem::path(resources_dir()) / "web/elslicer/device.html").ToUTF8().data();
         break;
     }
     default: break;
