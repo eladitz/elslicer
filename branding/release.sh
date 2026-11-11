@@ -10,6 +10,8 @@ ENT=$ROOT/scripts/disable_validation.entitlements
 STAGE=$OUT/dmg
 rm -rf "$OUT"; mkdir -p "$STAGE"
 ditto "$SRC" "$STAGE/Elslicer.app"
+# Page and resource fixes ship without a rebuild, and without touching the installed app.
+rsync -a "$ROOT/resources/" "$STAGE/Elslicer.app/Contents/Resources/"
 xattr -cr "$STAGE/Elslicer.app"
 
 # Notarization needs a hardened-runtime signature on every nested Mach-O, then the bundle sealed last.
