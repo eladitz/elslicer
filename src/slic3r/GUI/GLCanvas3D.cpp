@@ -1257,8 +1257,15 @@ void GLCanvas3D::_render_gradient_direction()
     const std::vector<GradientDirection::Slot> slots   = GradientDirection::gradient_slots(wxGetApp().preset_bundle->project_config);
     const std::vector<ColorRGBA>               colours = wxGetApp().plater()->get_extruders_colors();
     const int selected = m_selection.is_empty() ? -1 : m_selection.get_object_idx();
+    // Focus mode hides the objects on other plates, so their arrows go with them.
+    std::vector<bool> shown(m_model->objects.size(), false);
+    for (const GLVolume *volume : m_volumes.volumes)
+        if (!volume->on_hidden_plate && volume->object_idx() >= 0 && volume->object_idx() < int(shown.size()))
+            shown[volume->object_idx()] = true;
     std::optional<AimedGradient> chosen;
     for (int idx = 0; idx < int(m_model->objects.size()); ++idx) {
+        if (!shown[idx])
+            continue;
         const std::optional<AimedGradient> gradient = aimed_gradient(*m_model->objects[idx], idx, slots, colours);
         if (!gradient)
             continue;
@@ -11210,7 +11217,8 @@ void GLCanvas3D::_render_plate_switcher()
     const float   rounding  = 4.f * sc;
     const float   scrollbar = PLATE_TOOLBAR_SCROLLBAR * sc;
     const float   top       = std::max(m_main_toolbar.get_height(), m_gizmos.get_scaled_total_height()) + CANVAS_TOOLBAR_MARGIN * sc;
-    const float   content_h = plate_count * (btn_size.y + spacing) - spacing + 2.f * padding.y;
+    const float   all_h     = 26.f * sc; // "Show all" under the thumbnails turns Focus mode off
+    const float   content_h = plate_count * (btn_size.y + spacing) + all_h + 2.f * padding.y;
     const float   max_h     = std::max(btn_size.y + 2.f * padding.y, float(get_canvas_size().get_height()) - top - (canvas_corner_height() + CANVAS_TOOLBAR_MARGIN) * sc);
     // As in the Preview plate toolbar, the scrollbar shows only while the mouse is over the column.
     const bool    scroll    = m_plate_switcher_scrollbar && content_h > max_h;
@@ -11267,6 +11275,14 @@ void GLCanvas3D::_render_plate_switcher()
             imgui.tooltip(_u8L("Plate") + " " + std::to_string(i + 1) + (name.empty() ? "" : " (" + name + ")"), ImGui::GetFontSize() * 20.f);
         }
     }
+
+    // Focus mode is easy to forget, and then the other plates seem gone.
+    if (ImGui::Button(_u8L("Show all").c_str(), ImVec2(btn_size.x, all_h))) {
+        wxGetApp().toggle_focus_mode();
+        m_dirty = true;
+    }
+    if (ImGui::IsItemHovered())
+        imgui.tooltip(_u8L("Show every plate again. This turns off Focus mode, which is in the View menu."), ImGui::GetFontSize() * 20.f);
 
     m_plate_switcher_scrollbar = plate_toolbar_keeps_scrollbar(scroll, scrollbar);
     imgui.end();
