@@ -9,6 +9,7 @@
 #include "libslic3r/Geometry.hpp"
 #include "libslic3r/PrintConfig.hpp"
 #include "libslic3r/Color.hpp"
+#include "libslic3r/GradientDirection.hpp"
 // BBS
 #include "libslic3r/ObjectID.hpp"
 
@@ -207,6 +208,8 @@ public:
 	    bool                disabled : 1;
 	    // Is this object printable?
 	    bool                printable : 1;
+	    // Elslicer: a see-through head for sizing, drawn in its own colour rather than as unprintable.
+	    bool                is_head_reference : 1;
         // Is this object visible(in assemble view)?
 	    bool                visible : 1;
 	    // Whether or not this volume is active for rendering
@@ -253,6 +256,15 @@ public:
     // BBS
     mutable std::vector<GUI::GLModel> mmuseg_models;
     mutable ObjectBase::Timestamp       mmuseg_ts;
+    // Elslicer: a gradient mix shown across the volume, a model for each step of colour, and what they were
+    // made for.
+    mutable std::vector<GUI::GLModel> gradient_models;
+    mutable std::vector<double>       gradient_key;
+    // The gradient mixes of the configuration being drawn, set by the canvas each frame.
+    static std::vector<GradientDirection::Slot> gradient_slots;
+    // The object whose gradient dial is open, and the direction it is set to, shown before it is let go.
+    static int   gradient_preview_object;
+    static Vec3d gradient_preview_direction;
 
     // Ranges of triangle and quad indices to be rendered.
     std::pair<size_t, size_t>   tverts_range;

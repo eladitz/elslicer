@@ -337,3 +337,33 @@ TEST_CASE("find_fixed_mixed_filament reuses only a fixed slot of the same blend"
         REQUIRE(find_fixed_mixed_filament(cfg, {2, 1}, {50, 50}) == -1);
     }
 }
+
+TEST_CASE("A palette spreads its mixes evenly between two colours", "[FilamentMixer]")
+{
+    const std::vector<int> ratios = palette_ratios("#0047AB", "#FFD700", 8);
+    INFO("mixes: " << ratios.size());
+    // Blue to yellow is far apart, so there are several, in 5% steps strictly between the two.
+    REQUIRE(ratios.size() >= 3);
+    for (size_t i = 0; i < ratios.size(); ++i) {
+        CHECK(ratios[i] % 5 == 0);
+        CHECK(ratios[i] > 0);
+        CHECK(ratios[i] < 100);
+        if (i > 0)
+            CHECK(ratios[i] > ratios[i - 1]);
+    }
+}
+
+TEST_CASE("A palette never has more mixes than asked", "[FilamentMixer]")
+{
+    CHECK(palette_ratios("#0047AB", "#FFD700", 2).size() <= 2);
+}
+
+TEST_CASE("Two colours too close for a palette give no mixes", "[FilamentMixer]")
+{
+    CHECK(palette_ratios("#FF0000", "#FA0505", 8).empty());
+}
+
+TEST_CASE("A palette with a colour that isn't hex gives no mixes", "[FilamentMixer]")
+{
+    CHECK(palette_ratios("red", "#FFD700", 8).empty());
+}

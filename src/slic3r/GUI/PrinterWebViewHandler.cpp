@@ -760,8 +760,9 @@ void capture_flashforge_photo(const std::string& print_host, std::function<void(
     photo->take(flashforge_host_name(print_host), std::move(done));
 }
 
-bool read_flashforge_details_sync(const std::string& print_host, const std::string& serial, const std::string& code,
-                                  std::string& body, std::string& error)
+// Runs a request that answers on the main thread, and waits up to 15 seconds for it.
+static bool wait_for_flashforge(std::function<void(std::function<void(bool, const std::string&, const std::string&)>)> request,
+                                std::string& body, std::string& error)
 {
     struct State
     {
@@ -775,7 +776,7 @@ bool read_flashforge_details_sync(const std::string& print_host, const std::stri
     };
     auto state = std::make_shared<State>();
     auto start = [=] {
-        read_flashforge_details(print_host, serial, code, [state](bool ok, const std::string& reply, const std::string& problem) {
+        request([state](bool ok, const std::string& reply, const std::string& problem) {
             std::lock_guard<std::mutex> lock(state->mutex);
             state->finished = true;
             state->ok       = ok;
@@ -818,6 +819,18 @@ bool read_flashforge_details_sync(const std::string& print_host, const std::stri
     body  = state->body;
     error = state->error;
     return state->ok;
+}
+
+bool read_flashforge_details_sync(const std::string& print_host, const std::string& serial, const std::string& code,
+                                  std::string& body, std::string& error)
+{
+    return wait_for_flashforge([=](auto done) { read_flashforge_details(print_host, serial, code, std::move(done)); }, body, error);
+}
+
+bool send_flashforge_control_sync(const std::string& print_host, const std::string& serial, const std::string& code,
+                                  const std::string& command, const nlohmann::json& args, std::string& body, std::string& error)
+{
+    return wait_for_flashforge([=](auto done) { send_flashforge_control(print_host, serial, code, command, args, std::move(done)); }, body, error);
 }
 
 namespace {

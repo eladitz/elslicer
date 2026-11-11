@@ -264,6 +264,9 @@ enum class CutConnectorType : int {
     , Dowel
     , Snap
     , Undef
+    // Elslicer: a threaded peg on one part and a matching threaded hole in the other. Kept after Undef so the
+    // values already stored in project files keep their meaning.
+    , Screw
 };
 
 enum class CutConnectorStyle : int {

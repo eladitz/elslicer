@@ -200,6 +200,18 @@ set(lisbslic3r_sources
     Fill/Lightning/TreeNode.hpp
     FilamentMixer.cpp
     FilamentMixer.hpp
+    GradientDirection.cpp
+    GradientDirection.hpp
+    HeadReference.cpp
+    HeadReference.hpp
+    ColourBands.cpp
+    ColourBands.hpp
+    FoldBox.cpp
+    FoldBox.hpp
+    Papercraft.cpp
+    Papercraft.hpp
+    NestingDoll.cpp
+    NestingDoll.hpp
     FilamentMixerModel.hpp
     prusa_fdm_mixer.cpp
     prusa_fdm_mixer.hpp
@@ -563,6 +575,8 @@ set(lisbslic3r_sources
     TriangleMeshSlicer.cpp
     TriangleMeshSlicer.hpp
     TriangleSelector.cpp
+    PaintFromImage.hpp
+    PaintFromImage.cpp
     TriangleSelector.hpp
     TriangleSetSampling.cpp
     TriangleSetSampling.hpp

@@ -750,6 +750,16 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
                 return true;
             }
 
+            if (m_tool_type == ToolType::BUCKET_FILL && m_part_fill) {
+                m_part_fill_step = std::clamp(m_part_fill_step + (action == SLAGizmoEventType::MouseWheelDown ? -1.f : 1.f), -3.f, 3.f);
+                for (auto &triangle_selector : m_triangle_selectors) {
+                    triangle_selector->seed_fill_unselect_all_triangles();
+                    triangle_selector->request_update_render_data();
+                }
+                m_parent.set_as_dirty();
+                return true;
+            }
+
             if (m_tool_type == ToolType::BUCKET_FILL || m_tool_type == ToolType::SMART_FILL) {
                 m_smart_fill_angle = action == SLAGizmoEventType::MouseWheelDown ? std::max(m_smart_fill_angle - SmartFillAngleStep, SmartFillAngleMin)
                                                                                 : std::min(m_smart_fill_angle + SmartFillAngleStep, SmartFillAngleMax);
@@ -781,6 +791,14 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
             }
         }
     }
+
+    // Clicks on the model do nothing while painting is paused, so they neither paint nor move the object. Dragging
+    // outside the model still turns the view.
+    if (is_painting_paused() && (action == SLAGizmoEventType::LeftDown || action == SLAGizmoEventType::RightDown ||
+                                 action == SLAGizmoEventType::Dragging || action == SLAGizmoEventType::LeftUp ||
+                                 action == SLAGizmoEventType::RightUp) &&
+        m_rr.mesh_id != -1)
+        return true;
 
     if (action == SLAGizmoEventType::LeftDown
      || action == SLAGizmoEventType::RightDown
@@ -919,6 +937,8 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
                     else if (m_tool_type == ToolType::BRUSH && m_cursor_type == TriangleSelector::CursorType::POINTER)
                         // BBS: add infill_angle parameter
                         m_triangle_selectors[mesh_idx]->bucket_fill_select_triangles(mesh_hit, facet_idx, clp, -1.f, false, true);
+                    else if (m_tool_type == ToolType::BUCKET_FILL && m_part_fill)
+                        m_triangle_selectors[mesh_idx]->part_fill_select_triangles(mesh_hit, facet_idx, clp, int(std::lround(m_part_fill_step)), true);
                     else if (m_tool_type == ToolType::BUCKET_FILL)
                         // BBS: add infill_angle parameter
                         m_triangle_selectors[mesh_idx]->bucket_fill_select_triangles(mesh_hit, facet_idx, clp, m_smart_fill_angle, true, true);
@@ -1017,6 +1037,8 @@ bool GLGizmoPainterBase::gizmo_event(SLAGizmoEventType action, const Vec2d& mous
         else if (m_tool_type == ToolType::BRUSH && m_cursor_type == TriangleSelector::CursorType::POINTER)
             // BBS: add infill_angle parameter
             m_triangle_selectors[m_rr.mesh_id]->bucket_fill_select_triangles(m_rr.hit, int(m_rr.facet), clp, -1.f, false);
+        else if (m_tool_type == ToolType::BUCKET_FILL && m_part_fill)
+            m_triangle_selectors[m_rr.mesh_id]->part_fill_select_triangles(m_rr.hit, int(m_rr.facet), clp, int(std::lround(m_part_fill_step)));
         else if (m_tool_type == ToolType::BUCKET_FILL)
             // BBS: add infill_angle parameter
             m_triangle_selectors[m_rr.mesh_id]->bucket_fill_select_triangles(m_rr.hit, int(m_rr.facet), clp, m_smart_fill_angle, true);

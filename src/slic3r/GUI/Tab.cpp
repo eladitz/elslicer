@@ -85,6 +85,7 @@
 #include <limits>
 
 #include "GUI_App.hpp"
+#include "ElslicerDialogs.hpp"
 #include "GUI_ObjectList.hpp"
 #include "slic3r/Utils/NetworkAgentFactory.hpp"
 #include "slic3r/Utils/PresetUpdater.hpp"
@@ -3542,7 +3543,39 @@ void TabPrint::build()
     //     optgroup->append_single_option_line(option);
 
     //     build_preset_description_line(optgroup.get());
+
+    add_setting_guides();
 }
+
+// Elslicer: every section of plain settings gets a "Guide me" button. Sections made of scripts, notes or
+// plugins have nothing to guide through.
+void Tab::add_setting_guides()
+{
+    static const std::set<std::string> without = {"Change extrusion role G-code", "Post-processing Scripts", "Slicing Pipeline Plugin",
+                                                  "Plugin Configuration", "Notes", "Profile dependencies"};
+    for (PageShp page : m_pages)
+        for (ConfigOptionsGroupShp group : page->m_optgroups) {
+            const std::string title = group->title.ToUTF8().data();
+            if (title.empty() || without.count(title) > 0 || group->get_lines().empty())
+                continue;
+            group->guide = [this, page = page.get(), group = group.get(), title]() {
+                // The settings the section shows now, in its order.
+                std::vector<std::string> keys;
+                for (const Line &line : group->get_lines())
+                    if (line.toggle_visible)
+                        for (const Option &option : line.get_options())
+                            if (option.opt.mode <= wxGetApp().get_mode()) {
+                                const std::string key = option.opt_id.substr(0, option.opt_id.find('#'));
+                                if (m_config->has(key) && std::find(keys.begin(), keys.end(), key) == keys.end())
+                                    keys.push_back(key);
+                            }
+                if (!keys.empty())
+                    show_setting_guide(this, page->title().ToUTF8().data(), title, keys);
+            };
+        }
+}
+
+void Tab::apply_guide_changes(const DynamicPrintConfig &changes) { load_config(changes); }
 
 // Reload current config (aka presets->edited_preset->config) into the UI fields.
 void TabPrint::reload_config()
@@ -4047,6 +4080,25 @@ void TabPrintModel::on_value_change(const std::string& opt_id, const boost::any&
     if (m_back_to_sys || set) update_changed_ui();
     m_back_to_sys = false;
     TabPrint::on_value_change(opt_id, value);
+    for (auto config : m_object_configs) {
+        config.second->touch();
+        notify_changed(config.first);
+    }
+    wxGetApp().params_panel()->notify_object_config_changed();
+}
+
+void TabPrintModel::apply_guide_changes(const DynamicPrintConfig &changes)
+{
+    if (m_object_configs.empty())
+        return;
+    wxGetApp().plater()->take_snapshot("Settings guide");
+    m_config->apply(changes);
+    const std::vector<std::string> keys = changes.keys();
+    for (auto config : m_object_configs)
+        config.second->apply_only(*m_config, keys);
+    m_all_keys = concat(m_all_keys, keys);
+    reload_config();
+    update_changed_ui();
     for (auto config : m_object_configs) {
         config.second->touch();
         notify_changed(config.first);

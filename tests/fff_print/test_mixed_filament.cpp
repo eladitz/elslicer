@@ -13,6 +13,10 @@
 #include <catch2/catch_message.hpp>
 #include <catch2/matchers/catch_matchers.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include "libslic3r/ClipperUtils.hpp"
+#include "libslic3r/ColourBands.hpp"
+#include "libslic3r/GradientDirection.hpp"
+#include <map>
 #include "libslic3r/GCode/ToolOrdering.hpp"
 #include "libslic3r/MultiNozzleUtils.hpp"
 #include "libslic3r/Print.hpp"
@@ -421,4 +425,92 @@ TEST_CASE("Filament shrinkage compensation counts the wipe tower filament next t
     CHECK(std::any_of(warnings.begin(), warnings.end(), [](const StringObjectException &w) {
         return w.string.find("Filament shrinkage will not be used") != std::string::npos;
     }));
+}
+
+TEST_CASE("Bands painted across an object print with the physical filaments of their mixes", "[MixedFilament]")
+{
+    // Two physical filaments and slot 3 mixing them, with nothing but the paint choosing filaments.
+    DynamicPrintConfig config = multifilament_config(3);
+    config.set_deserialize_strict({{"filament_is_mixed", "0,0,1"},
+                                   {"filament_mixed_components", ";;1,2"},
+                                   {"filament_mixed_sublayer_ratios", ";;0.5,0.5"},
+                                   {"filament_mixed_gradient", "0,0,0"},
+                                   {"filament_mixed_gradient_range", ";;"},
+                                   {"filament_mixed_gradient_curve", ";;"},
+                                   {"filament_mixed_gradient_per_part", "0,0,0"},
+                                   {"enable_mixed_color_sublayer", "0"}});
+    Print print;
+    Model model;
+    init_print({cube(20)}, print, model, config);
+    ColourBands::paint(*model.objects.front(), Vec3d::UnitX(), {1, 3, 2});
+    print.apply(model, print.full_print_config());
+    print.process();
+    const std::string gc = Slic3r::Test::gcode(print);
+    CHECK(gc.find("\nT0") != std::string::npos);
+    CHECK(gc.find("\nT1") != std::string::npos);
+    CHECK(gc.find("\nT2") == std::string::npos);
+}
+
+TEST_CASE("A gradient mix aimed sideways prints each side mostly with its own filament", "[MixedFilament]")
+{
+    // Slot 3 is a gradient of 1 and 2, the first filament's share running from 10% to 90%.
+    DynamicPrintConfig config = multifilament_config(3);
+    config.set_deserialize_strict({{"filament_is_mixed", "0,0,1"},
+                                   {"filament_mixed_components", ";;1,2"},
+                                   {"filament_mixed_sublayer_ratios", ";;0.5,0.5"},
+                                   {"filament_mixed_gradient", "0,0,1"},
+                                   {"filament_mixed_gradient_range", ";;0.1,0.9"},
+                                   {"filament_mixed_gradient_curve", ";;"},
+                                   {"filament_mixed_gradient_per_part", "0,0,0"},
+                                   {"enable_mixed_color_sublayer", "0"}});
+    Print print;
+    Model model;
+    init_print({cube(20)}, print, model, config);
+    ModelObject &object = *model.objects.front();
+    object.config.set_key_value("extruder", new ConfigOptionInt(3));
+    // Left to right across the bed.
+    object.config.set_key_value("elslicer_gradient_direction", new ConfigOptionFloats({1., 0., 0.}));
+    print.apply(model, print.full_print_config());
+    print.process();
+
+    // Area printed by each filament in the left and right fifths, over all layers.
+    const PrintObject &printed = *print.objects().front();
+    BoundingBox        box;
+    for (const Layer *layer : printed.layers())
+        box.merge(get_extents(layer->lslices));
+    const coord_t fifth = (box.max.x() - box.min.x()) / 5;
+    const Polygon left  = BoundingBox(box.min, Point(box.min.x() + fifth, box.max.y())).polygon();
+    const Polygon right = BoundingBox(Point(box.max.x() - fifth, box.min.y()), box.max).polygon();
+    std::map<int, double> left_area, right_area;
+    for (const Layer *layer : printed.layers())
+        for (const LayerRegion *region : layer->regions()) {
+            const int    filament = region->region().config().outer_wall_filament_id.value;
+            const ExPolygons slices = to_expolygons(region->slices.surfaces);
+            left_area[filament] += area(intersection_ex(slices, Polygons{left}));
+            right_area[filament] += area(intersection_ex(slices, Polygons{right}));
+        }
+    // Nothing is left to the mix itself.
+    CHECK(left_area[3] == 0.);
+    CHECK(right_area[3] == 0.);
+    const double left_first  = left_area[1] / (left_area[1] + left_area[2]);
+    const double right_first = right_area[1] / (right_area[1] + right_area[2]);
+    // The gradient starts on the left with 10% of filament 1 and ends on the right with 90%; each fifth
+    // averages over its width.
+    CHECK(left_first < 0.35);
+    CHECK(right_first > 0.65);
+
+    const std::string gc = Slic3r::Test::gcode(print);
+    CHECK(gc.find("\nT0") != std::string::npos);
+    CHECK(gc.find("\nT1") != std::string::npos);
+    CHECK(gc.find("\nT2") == std::string::npos);
+}
+
+TEST_CASE("A gradient mix aimed straight up stays the mix's own gradient", "[MixedFilament]")
+{
+    Model        model;
+    ModelObject &object = *model.add_object();
+    object.config.set_key_value("elslicer_gradient_direction", new ConfigOptionFloats({0., 0., 1.}));
+    CHECK_FALSE(GradientDirection::of(object).has_value());
+    object.config.set_key_value("elslicer_gradient_direction", new ConfigOptionFloats({0., 0., -1.}));
+    CHECK(GradientDirection::of(object).has_value());
 }

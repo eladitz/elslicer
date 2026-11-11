@@ -15,6 +15,12 @@
 #include "libslic3r/Model.hpp"
 #include "slic3r/Utils/UndoRedo.hpp"
 #include "GLGizmoUtils.hpp"
+#include "slic3r/GUI/MainFrame.hpp"
+#include "libslic3r/AABBMesh.hpp"
+
+#include <wx/filedlg.h>
+#include <wx/filename.h>
+#include <wx/image.h>
 
 
 #include <cstddef>
@@ -185,6 +191,7 @@ bool GLGizmoMmuSegmentation::on_init()
 GLGizmoMmuSegmentation::GLGizmoMmuSegmentation(GLCanvas3D& parent, const std::string& icon_filename, unsigned int sprite_id)
     : GLGizmoPainterBase(parent, icon_filename, sprite_id), m_current_tool(ImGui::CircleButtonIcon)
 {
+    m_part_fill = true;
 }
 
 void GLGizmoMmuSegmentation::render_painter_gizmo()
@@ -400,6 +407,8 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     float f_scale = m_parent.get_gizmos_manager().get_layout_scale();
     ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(6.0f, 4.0f * f_scale));
 
+    render_photo_overlay();
+
     GizmoImguiBegin(get_name(), ImGuiWindowFlags_NoMove | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoTitleBar);
 
     // First calculate width of all the texts that are could possibly be shown. We will decide set the dialog width based on that:
@@ -598,7 +607,26 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
         m_cursor_type = TriangleSelector::CursorType::POINTER;
         m_tool_type = ToolType::BUCKET_FILL;
 
-        if (m_detect_geometry_edge) {
+        auto clear_fill_preview = [this]() {
+            for (auto &triangle_selector : m_triangle_selectors) {
+                triangle_selector->seed_fill_unselect_all_triangles();
+                triangle_selector->request_update_render_data();
+            }
+        };
+        if (m_imgui->bbl_checkbox(_L("Find whole parts"), m_part_fill))
+            clear_fill_preview();
+        if (ImGui::IsItemHovered())
+            m_imgui->tooltip(_L("Paints the whole part you click, such as a rope, a branch or a lock of hair, up to the creases where it meets the rest of the model."), max_tooltip_width);
+
+        if (m_part_fill) {
+            ImGui::AlignTextToFramePadding();
+            m_imgui->text(_L("Part size"));
+            ImGui::SameLine(sliders_left_width);
+            ImGui::PushItemWidth(sliders_width);
+            if (m_imgui->bbl_slider_float_style("##part_fill_step", &m_part_fill_step, -3.f, 3.f, "%.0f", 1.0f, true,
+                                                _L("Lower picks a smaller part inside the one found, higher a larger part around it. Ctrl + mouse wheel changes it too.")))
+                clear_fill_preview();
+        } else if (m_detect_geometry_edge) {
             ImGui::AlignTextToFramePadding();
             m_imgui->text(m_desc["smart_fill_angle"]);
             std::string format_str = std::string("%.f") + I18N::translate_utf8("°", "Face angle threshold,"
@@ -618,7 +646,8 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
             m_smart_fill_angle = -1.f;
         }
                 
-        m_imgui->bbl_checkbox(m_desc["edge_detection"], m_detect_geometry_edge);
+        if (!m_part_fill)
+            m_imgui->bbl_checkbox(m_desc["edge_detection"], m_detect_geometry_edge);
     } 
     else if (m_current_tool == ImGui::HeightRangeIcon) {
         m_tool_type   = ToolType::BRUSH;
@@ -661,6 +690,9 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     }
 
     ImGui::Separator();
+    render_photo_ui(sliders_left_width, sliders_width, max_tooltip_width);
+
+    ImGui::Separator();
 
     render_tooltip_button(x, y);
 
@@ -695,6 +727,240 @@ void GLGizmoMmuSegmentation::on_render_input_window(float x, float y, float bott
     ImGuiWrapper::pop_toolbar_style();
 }
 
+
+void GLGizmoMmuSegmentation::photo_rect(Vec2d &top_left, Vec2d &size) const
+{
+    const std::array<int, 4> &vp = wxGetApp().plater()->get_camera().get_viewport();
+    const double h = double(m_photo.size) * vp[3];
+    const double w = m_photo.height > 0 ? h * m_photo.width / m_photo.height : 0.;
+    const double cx = vp[0] + vp[2] * (0.5 + 0.5 * m_photo.offset_x);
+    const double cy = vp[1] + vp[3] * (0.5 - 0.5 * m_photo.offset_y);
+    top_left = {cx - 0.5 * w, cy - 0.5 * h};
+    size     = {w, h};
+}
+
+void GLGizmoMmuSegmentation::render_photo_overlay()
+{
+    if (!m_photo.loaded() || !m_photo.shown)
+        return;
+    if (m_photo.texture_dirty) {
+        m_photo_texture.reset();
+        m_photo_texture.load_from_raw_data(m_photo.rgba, unsigned(m_photo.width), unsigned(m_photo.height), false, true);
+        m_photo.texture_dirty = false;
+    }
+    if (m_photo_texture.get_id() == 0)
+        return;
+    Vec2d tl, sz;
+    photo_rect(tl, sz);
+    ImGui::GetBackgroundDrawList()->AddImage((ImTextureID) (intptr_t) m_photo_texture.get_id(), ImVec2(float(tl.x()), float(tl.y())),
+                                             ImVec2(float(tl.x() + sz.x()), float(tl.y() + sz.y())), ImVec2(0.f, 0.f), ImVec2(1.f, 1.f),
+                                             IM_COL32(255, 255, 255, int(std::clamp(m_photo.opacity, 0.f, 1.f) * 255.f)));
+}
+
+void GLGizmoMmuSegmentation::open_photo()
+{
+    const wxString patterns = "*.png;*.jpg;*.jpeg;*.webp;*.bmp;*.PNG;*.JPG;*.JPEG;*.WEBP;*.BMP";
+    // TRN %1% is a list of file patterns such as *.png;*.jpg
+    wxFileDialog dlg(wxGetApp().mainframe, _L("Choose a photo to paint from"), from_u8(wxGetApp().app_config->get_last_dir()), wxEmptyString,
+                     format_wxstr(_L("Images (%1%)"), patterns) + "|" + patterns, wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dlg.ShowModal() != wxID_OK)
+        return;
+    wxImage image;
+    if (!image.LoadFile(dlg.GetPath()) || !image.IsOk()) {
+        show_error(wxGetApp().mainframe, _L("This image could not be opened."));
+        return;
+    }
+    // Large photos are drawn and sampled at up to 2048 pixels on the long side; finer detail does not change a part's colour.
+    const int longest = std::max(image.GetWidth(), image.GetHeight());
+    if (longest > 2048)
+        image.Rescale(std::max(1, image.GetWidth() * 2048 / longest), std::max(1, image.GetHeight() * 2048 / longest), wxIMAGE_QUALITY_HIGH);
+    m_photo.width  = image.GetWidth();
+    m_photo.height = image.GetHeight();
+    m_photo.rgba.resize(size_t(m_photo.width) * m_photo.height * 4);
+    const unsigned char *rgb   = image.GetData();
+    const unsigned char *alpha = image.HasAlpha() ? image.GetAlpha() : nullptr;
+    for (size_t i = 0, n = size_t(m_photo.width) * m_photo.height; i < n; ++i) {
+        m_photo.rgba[4 * i]     = rgb[3 * i];
+        m_photo.rgba[4 * i + 1] = rgb[3 * i + 1];
+        m_photo.rgba[4 * i + 2] = rgb[3 * i + 2];
+        m_photo.rgba[4 * i + 3] = alpha ? alpha[i] : 255;
+    }
+    m_photo.name          = into_u8(wxFileName(dlg.GetPath()).GetFullName());
+    m_photo.shown         = true;
+    m_photo.texture_dirty = true;
+    m_photo.colours.clear();
+    m_photo.allowed.assign(std::min(m_extruders_colors.size(), size_t(EnforcerBlockerType::ExtruderMax)), true);
+    m_parent.set_as_dirty();
+}
+
+void GLGizmoMmuSegmentation::apply_photo()
+{
+    namespace pfi = paint_from_image;
+    ModelObject *mo = m_c->selection_info()->model_object();
+    if (mo == nullptr || !m_photo.loaded())
+        return;
+    const size_t filaments_count = std::min(m_extruders_colors.size(), size_t(EnforcerBlockerType::ExtruderMax));
+    std::vector<pfi::RGB> filaments;
+    for (size_t i = 0; i < filaments_count; ++i) {
+        const ColorRGBA &c = m_extruders_colors[i];
+        filaments.push_back({size_t(std::lround(std::clamp(c.r(), 0.f, 1.f) * 255.f)), size_t(std::lround(std::clamp(c.g(), 0.f, 1.f) * 255.f)),
+                             size_t(std::lround(std::clamp(c.b(), 0.f, 1.f) * 255.f))});
+    }
+    m_photo.allowed.resize(filaments_count, true);
+    if (std::none_of(m_photo.allowed.begin(), m_photo.allowed.end(), [](bool b) { return b; }))
+        return;
+
+    const Camera &camera = wxGetApp().plater()->get_camera();
+    pfi::View     view;
+    view.projection_view = camera.get_projection_matrix().matrix() * camera.get_view_matrix().matrix();
+    view.viewport        = camera.get_viewport();
+    view.camera_position = camera.get_position();
+    view.camera_forward  = camera.get_dir_forward();
+    view.perspective     = camera.get_type() == Camera::EType::Perspective;
+    pfi::Photo photo;
+    photo.rgba   = m_photo.rgba.data();
+    photo.width  = m_photo.width;
+    photo.height = m_photo.height;
+    photo_rect(photo.top_left, photo.size);
+
+    Plater::TakeSnapshot snapshot(wxGetApp().plater(), "Paint from image", UndoRedo::SnapshotType::GizmoAction);
+    const Selection     &selection = m_parent.get_selection();
+    const ModelInstance *mi        = mo->instances[selection.get_instance_idx()];
+    const bool           assemble  = m_parent.get_canvas_type() == GLCanvas3D::CanvasAssembleView;
+    std::vector<pfi::PhotoColour> colours;
+    size_t                        most_samples = 0;
+    int                           idx          = -1;
+    for (const ModelVolume *mv : mo->volumes) {
+        if (!mv->is_model_part())
+            continue;
+        ++idx;
+        if (idx >= int(m_triangle_selectors.size()))
+            break;
+        const Transform3d world = (assemble ? mi->get_assemble_transformation().get_matrix() : mi->get_transformation().get_matrix()) * mv->get_matrix();
+        const AABBMesh    aabb(mv->mesh());
+        const std::vector<pfi::Sample> samples = pfi::sample_photo(mv->mesh().its, aabb, world, view, photo);
+        if (samples.empty())
+            continue;
+        const std::vector<int> parts  = m_triangle_selectors[idx]->segment_parts();
+        const pfi::Result      result = pfi::assign_filaments(parts, samples, filaments, m_photo.allowed, m_photo.brightness, filaments_count);
+        std::vector<std::vector<int>> by_filament(filaments_count);
+        for (size_t f = 0; f < result.facet_filament.size(); ++f)
+            if (result.facet_filament[f] >= 0)
+                by_filament[result.facet_filament[f]].push_back(int(f));
+        for (size_t i = 0; i < filaments_count; ++i)
+            if (!by_filament[i].empty())
+                m_triangle_selectors[idx]->paint_facets(by_filament[i], EnforcerBlockerType(i + 1));
+        m_triangle_selectors[idx]->request_update_render_data(true);
+        if (samples.size() > most_samples) {
+            most_samples = samples.size();
+            colours      = result.photo_colours;
+        }
+    }
+    m_photo.colours = colours;
+    update_model_object();
+    m_parent.set_as_dirty();
+}
+
+void GLGizmoMmuSegmentation::render_photo_ui(float sliders_left_width, float sliders_width, float max_tooltip_width)
+{
+    if (!m_photo.loaded()) {
+        if (m_imgui->button(_L("Paint from image...")))
+            wxGetApp().CallAfter([this]() { open_photo(); });
+        if (ImGui::IsItemHovered())
+            m_imgui->tooltip(_L("Lay a photo over the model, line it up, and paint each part in the filament closest to the photo's colour there."),
+                             max_tooltip_width);
+        return;
+    }
+
+    m_imgui->text(format_wxstr(_L("Photo: %1%"), from_u8(m_photo.name)));
+    if (m_photo.shown) {
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + max_tooltip_width);
+        m_imgui->text(_L("Turn the model to match the photo by dragging outside it, then line the photo up. Painting is paused while the photo is shown."));
+        ImGui::PopTextWrapPos();
+    }
+    auto slider = [&](const wxString &label, const char *id, float *value, float min, float max, const char *format) {
+        ImGui::AlignTextToFramePadding();
+        m_imgui->text(label);
+        ImGui::SameLine(sliders_left_width);
+        ImGui::PushItemWidth(sliders_width);
+        const bool changed = m_imgui->bbl_slider_float_style(id, value, min, max, format, 1.0f, true);
+        ImGui::PopItemWidth();
+        if (changed)
+            m_parent.set_as_dirty();
+    };
+    if (m_photo.shown) {
+        slider(_L("See-through"), "##photo_opacity", &m_photo.opacity, 0.1f, 1.f, "%.2f");
+        slider(_L("Photo size"), "##photo_size", &m_photo.size, 0.2f, 3.f, "%.2f");
+        slider(_L("Left / right"), "##photo_x", &m_photo.offset_x, -1.f, 1.f, "%.2f");
+        slider(_L("Up / down"), "##photo_y", &m_photo.offset_y, -1.f, 1.f, "%.2f");
+    }
+    slider(_L("Brightness"), "##photo_brightness", &m_photo.brightness, 0.5f, 3.f, "%.2f");
+    if (ImGui::IsItemHovered())
+        m_imgui->tooltip(_L("Lightens the photo before its colours are matched. Raise it when skin or light parts come out too dark."),
+                         max_tooltip_width);
+
+    // Filaments the photo may use.
+    m_photo.allowed.resize(std::min(m_extruders_colors.size(), size_t(EnforcerBlockerType::ExtruderMax)), true);
+    ImGui::AlignTextToFramePadding();
+    m_imgui->text(_L("Use filaments"));
+    for (size_t i = 0; i < m_photo.allowed.size(); ++i) {
+        ImGui::SameLine();
+        const ColorRGBA &c = m_extruders_colors[i];
+        ImGui::PushID(int(i));
+        bool use = m_photo.allowed[i];
+        ImGui::PushStyleColor(ImGuiCol_CheckMark, ImVec4(c.r(), c.g(), c.b(), 1.f));
+        if (ImGui::Checkbox("##photo_use", &use))
+            m_photo.allowed[i] = use;
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+            m_imgui->tooltip(format_wxstr(_L("Filament %1%"), i + 1), max_tooltip_width);
+        ImGui::PopID();
+    }
+
+    if (m_imgui->button(_L("Apply")))
+        apply_photo();
+    if (ImGui::IsItemHovered())
+        m_imgui->tooltip(_L("Paints every part of the model the photo covers. Undo takes it back."), max_tooltip_width);
+    ImGui::SameLine();
+    if (m_imgui->button(m_photo.shown ? _L("Hide photo") : _L("Show photo"))) {
+        m_photo.shown = !m_photo.shown;
+        m_parent.set_as_dirty();
+    }
+    ImGui::SameLine();
+    if (m_imgui->button(_L("Remove photo"))) {
+        m_photo = Photo();
+        m_photo_texture.reset();
+        m_parent.set_as_dirty();
+        return;
+    }
+
+    // What the photo's main colours became.
+    if (!m_photo.colours.empty()) {
+        m_imgui->text(_L("Photo colour, then the filament it became:"));
+        const ImVec2 swatch(ImGui::GetFrameHeight(), ImGui::GetFrameHeight());
+        for (size_t i = 0; i < m_photo.colours.size(); ++i) {
+            const paint_from_image::PhotoColour &pc = m_photo.colours[i];
+            if (pc.share < 0.02)
+                continue;
+            ImGui::PushID(int(100 + i));
+            ImGui::ColorButton("##photo_colour", ImVec4(pc.rgb[0] / 255.f, pc.rgb[1] / 255.f, pc.rgb[2] / 255.f, 1.f), ImGuiColorEditFlags_NoTooltip, swatch);
+            ImGui::SameLine();
+            if (pc.filament >= 0 && pc.filament < int(m_extruders_colors.size())) {
+                const ColorRGBA &c = m_extruders_colors[pc.filament];
+                ImGui::ColorButton("##photo_filament", ImVec4(c.r(), c.g(), c.b(), 1.f), ImGuiColorEditFlags_NoTooltip, swatch);
+                ImGui::SameLine();
+            }
+            ImGui::AlignTextToFramePadding();
+            // TRN %1% is a filament number, %2% a percentage of the photo
+            wxString line = format_wxstr(_L("Filament %1%, %2%%% of the photo"), pc.filament + 1, int(std::lround(pc.share * 100.)));
+            if (pc.distance > 20.)
+                // TRN Appended after "Filament 2, 30% of the photo" when the filament's colour is far from the photo's
+                line = format_wxstr(_L("%1% (poor match, load a closer colour)"), line);
+            m_imgui->text(line);
+            ImGui::PopID();
+        }
+    }
+}
 
 void GLGizmoMmuSegmentation::update_model_object()
 {

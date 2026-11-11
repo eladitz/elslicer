@@ -4,6 +4,7 @@
 #include "libslic3r/Model.hpp"
 
 #include "GUI_Factories.hpp"
+#include "ElslicerDialogs.hpp"
 #include "GUI_ObjectList.hpp"
 #include "GUI_App.hpp"
 #include "Shortcuts.hpp"
@@ -621,6 +622,11 @@ wxMenu* MenuFactory::append_submenu_add_generic(wxMenu* menu, ModelVolumeType ty
     append_menu_item(sub_menu, wxID_ANY, _L("Torus"), "",
         [type](wxCommandEvent&) { obj_list()->load_generic_subobject(L("Torus"), type); },"menu_obj_torus", menu);
 
+    // Elslicer: a see-through head to size things worn on it. It's never printed, so it's no use as a part.
+    if (type == ModelVolumeType::INVALID)
+        append_menu_item(sub_menu, wxID_ANY, _L("Head, for sizing"), _L("A see-through head that isn't printed. Drop a tiara or crown on it to fit it."),
+            [type](wxCommandEvent&) { obj_list()->load_generic_subobject(L("Head"), type); }, "menu_obj_sphere", menu);
+
 
     append_menu_item_add_text(sub_menu, type);
     append_menu_item_add_svg(sub_menu, type);
@@ -634,16 +640,16 @@ wxMenu* MenuFactory::append_submenu_add_generic(wxMenu* menu, ModelVolumeType ty
 const std::vector<MenuFactory::HandyModel>& MenuFactory::handy_models()
 {
     static const std::vector<HandyModel> models = {
-        {"orca_cube",           L("Elslicer Cube"),           {"OrcaCube_v2.drc", "OrcaPlug_v2.drc"},                    true},
-        {"orcasliced_combo",    L("OrcaSliced Combo"),    {"OrcaSliced.3mf", "OrcaCube_v2.drc", "OrcaPlug_v2.drc"},  true},
-        {"orca_badge",          L("Elslicer Badge"),          {"OrcaBadge.3mf"}},
-        {"orca_tolerance_test", L("Elslicer Tolerance Test"), {"OrcaToleranceTest.drc"}},
+        {"orca_cube",           L("Elslicer Cube"),           {"ElslicerCube.drc", "ElslicerPlug.drc"},                         true},
+        {"orcasliced_combo",    L("Elslicer Combo"),          {"ElslicerSliced.3mf", "ElslicerCube.drc", "ElslicerPlug.drc"},   true},
+        {"orca_badge",          L("Elslicer Badge"),          {"ElslicerBadge.3mf"}},
+        {"orca_tolerance_test", L("Elslicer Tolerance Test"), {"ElslicerToleranceTest.drc"}},
         {"3dbenchy",            L("3DBenchy"),            {"3DBenchy.drc"}},
         {"cali_cat",            L("Cali Cat"),            {"calicat.drc"}},
         {"autodesk_fdm_test",   L("Autodesk FDM Test"),   {"ksr_fdmtest_v4.drc"}},
         {"voron_cube",          L("Voron Cube"),          {"Voron_Design_Cube_v7.drc"}},
         {"stanford_bunny",      L("Stanford Bunny"),      {"Stanford_Bunny.drc"}},
-        {"orca_string_hell",    L("Stringing Test"),    {"Orca_stringhell.drc"},                                   false, true},
+        {"orca_string_hell",    L("Stringing Test"),    {"ElslicerStringTest.drc"},                                false, true},
     };
     return models;
 }
@@ -1689,6 +1695,18 @@ MenuFactory::MenuFactory()
     }
 }
 
+// Elslicer's tools that add models, listed under Add Models in the plate's right-click menus.
+static void append_menu_items_make_models(wxMenu* menu, wxWindow* parent)
+{
+    const auto can_add = []() { return wxGetApp().plater()->can_add_model(); };
+    append_menu_item(menu, wxID_ANY, _L("Folding Box") + dots, _L("Make a box that prints flat and folds up by hand, without glue"),
+        [](wxCommandEvent&) { show_fold_box_dialog(); }, "menu_add_part", menu, can_add, parent);
+    append_menu_item(menu, wxID_ANY, _L("Origami Animal") + dots, _L("Make a folded animal or mask, or fold up the selected object, from flat sheets"),
+        [](wxCommandEvent&) { show_origami_dialog(); }, "menu_add_part", menu, can_add, parent);
+    append_menu_item(menu, wxID_ANY, _L("Nesting Doll Copy") + dots, _L("Add smaller copies of the selected hollow object that fit inside it"),
+        [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "menu_add_part", menu, []() { return can_make_nesting_doll(); }, parent);
+}
+
 void MenuFactory::create_default_menu()
 {
     wxMenu* sub_menu_primitives = append_submenu_add_generic(&m_default_menu, ModelVolumeType::INVALID);
@@ -1701,6 +1719,7 @@ void MenuFactory::create_default_menu()
     append_menu_item(&m_default_menu, wxID_ANY, _L("Add Models"), "", // ORCA: Add Models
         [](wxCommandEvent&) { plater()->add_file(); }, "menu_add_part", &m_default_menu,
         []() {return wxGetApp().plater()->can_add_model(); }, m_parent);
+    append_menu_items_make_models(&m_default_menu, m_parent);
 
     m_default_menu.AppendSeparator();
 
@@ -1761,6 +1780,13 @@ void MenuFactory::create_extra_object_menu()
     append_menu_item_center(&m_object_menu);
 
     append_menu_item_drop(&m_object_menu);
+    append_menu_item(&m_object_menu, wxID_ANY, _L("Fit to Head") + dots, _L("Choose how this is worn on the sizing head"),
+        [](wxCommandEvent&) { plater()->fit_selected_to_head(); }, "", nullptr,
+        []() { return plater()->can_fit_selected_to_head(); }, m_parent);
+    append_menu_item(&m_object_menu, wxID_ANY, _L("Nesting Doll Copy") + dots, _L("Add smaller copies that fit inside this one"),
+        [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "", nullptr, []() { return can_make_nesting_doll(); }, m_parent);
+    append_menu_item(&m_object_menu, wxID_ANY, _L("Origami Copy") + dots, _L("Fold this up from flat sheets, cut down to a few flat faces"),
+        [](wxCommandEvent&) { show_origami_dialog(true); }, "", nullptr, []() { return can_make_nesting_doll(); }, m_parent);
 
     m_object_transform_menu = append_menu_item_transform(&m_object_menu, false /*multi_selection*/, true /*mirror*/, true /*is_scalable*/);
     // Object Align/Distribute
@@ -1783,6 +1809,10 @@ void MenuFactory::create_extra_object_menu()
     // Set Printable
     wxMenuItem* menu_item_printable = append_menu_item_printable(&m_object_menu);
     wxMenuItem* menu_item_auto_drop = append_menu_item_auto_drop(&m_object_menu);
+    // Elslicer: bands of colour from one filament to another, in a chosen direction.
+    append_menu_item(&m_object_menu, wxID_ANY, _L("Colour gradient") + dots, _L("Paint the object in bands running from one filament to another"),
+        [](wxCommandEvent&) { show_gradient_dialog(); }, "color_palette", nullptr,
+        []() { return wxGetApp().preset_bundle->filament_presets.size() >= 2; }, m_parent);
     m_object_menu.AppendSeparator();
 
     append_menu_item_per_object_process(&m_object_menu);
@@ -2066,6 +2096,7 @@ void MenuFactory::create_plate_menu()
     append_menu_item(menu, wxID_ANY, _L("Add Models"), "", // ORCA: Add Models
         [](wxCommandEvent&) { plater()->add_file(); }, "menu_add_part", menu,
         []() {return wxGetApp().plater()->can_add_model(); }, m_parent);
+    append_menu_items_make_models(menu, m_parent);
 
     menu->AppendSeparator();
     // reload all objects on current plate
@@ -2227,6 +2258,8 @@ wxMenu* MenuFactory::multi_selection_menu()
         auto transform_menu = append_menu_item_transform(menu, true /*multi_selection*/, false /*mirror*/, true /*is_scalable*/);
         append_menu_items_convert_unit(transform_menu);
         append_menu_item_align_distribute(menu);
+        append_menu_item(menu, wxID_ANY, _L("Nesting Doll Copy") + dots, _L("Add smaller copies of these pieces, all scaled the same so they still fit together"),
+            [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "", nullptr, []() { return can_make_nesting_doll(); }, m_parent);
         //ORCA switch to sub menus if new items added
         //append_menu_item_modify(menu, true /*multi_selection*/, false /*splittable*/, true /*is_mesh*/, false /*mesh_boolean*/);
         append_menu_item_fix_through_cgal(menu);

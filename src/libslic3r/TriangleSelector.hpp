@@ -369,6 +369,16 @@ public:
                                       bool                 propagate,                  // if bucket fill is propagated to neighbor faces or if it fills the only facet of the modified mesh that the hit point belongs to.
                                       bool                 force_reselection = false); // force reselection of the triangle mesh even in cases that mouse is pointing on the selected triangle
 
+    // Elslicer: selects the whole part of the model under the cursor, such as a rope, an antler branch or a necklace on a
+    // sculpt. The part is bounded by the concave creases where it meets the rest of the model. step 0 picks the part
+    // automatically; negative steps pick a smaller part inside it, positive steps a larger one around it.
+    void part_fill_select_triangles(const Vec3f &hit, int facet_start, const ClippingPlane &clp, int step, bool force_reselection = false);
+
+    // Elslicer: splits the model into its parts as part fill finds them. Returns a part number for each original facet.
+    std::vector<int> segment_parts();
+    // Elslicer: paints the given original facets, with all their split pieces, in one state.
+    void paint_facets(const std::vector<int> &facets, EnforcerBlockerType state);
+
     bool                 has_facets(EnforcerBlockerType state) const;
     static bool          has_facets(const TriangleSplittingData &data, EnforcerBlockerType test_state);
     int                  num_facets(EnforcerBlockerType state) const;
@@ -543,6 +553,14 @@ protected:
     // Number of original vertices and triangles.
     int m_orig_size_vertices = 0;
     int m_orig_size_indices = 0;
+
+    // Elslicer: how concave the surface is around each original facet (positive in creases, negative on ridges),
+    // computed on the first part fill.
+    std::vector<float> m_part_concavity;
+    void               compute_part_concavity();
+    int                part_ridge(int seed, const ClippingPlane &clp) const;
+    std::vector<int>   part_region(int seed, const ClippingPlane &clp, int step);
+    void               select_leaves_by_seed_fill(int facet_idx);
 
     std::unique_ptr<Cursor> m_cursor;
     // Zero indicates an uninitialized state.

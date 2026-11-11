@@ -13,6 +13,7 @@
 #include "calib.hpp"
 #include <cassert>
 #include "CustomGCode.hpp"
+#include "GradientDirection.hpp"
 #include "ObjectID.hpp"
 #include <cstddef>
 #include "Point.hpp"
@@ -2217,8 +2218,19 @@ StringObjectException Print::validate(std::vector<StringObjectException> *warnin
     if (!m_config.enable_mixed_color_sublayer.value) {
         const auto &is_mixed = m_config.filament_is_mixed.values;
         const auto &gradient = m_config.filament_mixed_gradient.values;
-        if (std::any_of(extruders.begin(), extruders.end(), [&](unsigned int e) {
-                return e < is_mixed.size() && is_mixed[e] && e < gradient.size() && gradient[e]; }))
+        // Elslicer: objects with a gradient direction split the mix into its two filaments themselves, so
+        // only a gradient slot that an object without one uses is dropped.
+        const auto dropped = [&](unsigned int e) {
+            if (e >= is_mixed.size() || !is_mixed[e] || e >= gradient.size() || !gradient[e])
+                return false;
+            return std::any_of(m_objects.begin(), m_objects.end(), [e](const PrintObject *object) {
+                if (GradientDirection::of(*object->model_object()))
+                    return false;
+                const std::vector<unsigned int> used = GradientDirection::used_filaments(*object->model_object());
+                return std::find(used.begin(), used.end(), e + 1) != used.end();
+            });
+        };
+        if (std::any_of(extruders.begin(), extruders.end(), dropped))
             warn(L("A gradient mixed filament is used, but 'Mixed color sublayer' is disabled. The gradient will not be printed."),
                  "enable_mixed_color_sublayer");
     }

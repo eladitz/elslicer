@@ -14,7 +14,7 @@ PY="${2:-python3}"
 SRC="${3:-}"
 # 77 is the test's SKIP_RETURN_CODE.
 [ -x "$BIN" ] || { echo "SKIP: orca-slicer binary not found: $BIN"; exit 77; }
-[ -f "$SRC/resources/handy_models/OrcaBadge.3mf" ] || { echo "SKIP: handy model not found"; exit 77; }
+[ -f "$SRC/resources/handy_models/ElslicerBadge.3mf" ] || { echo "SKIP: handy model not found"; exit 77; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/orca-cli-emptycfg.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -22,7 +22,7 @@ mkdir -p "$WORK/datadir"
 
 # Rewrite the project settings to an empty object, so the test holds no matter what the shipped
 # models carry later on.
-cp "$SRC/resources/handy_models/OrcaBadge.3mf" "$WORK/empty_config.3mf"
+cp "$SRC/resources/handy_models/ElslicerBadge.3mf" "$WORK/empty_config.3mf"
 "$PY" - "$WORK/empty_config.3mf" <<'PYEOF'
 import shutil, sys, zipfile
 

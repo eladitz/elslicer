@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ask Elai</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  html, body { height: 100%; }
+  body { padding: 0; display: flex; flex-direction: column; }
+  header { padding: 18px 22px 12px; border-bottom: 1px solid var(--line); }
+  header h1 { display: flex; align-items: baseline; gap: 10px; }
+  header .sub { margin: 2px 0 0; font-size: 12.5px; }
+  #log { flex: 1; overflow-y: auto; padding: 16px 22px 8px; }
+  .msg { margin: 0 0 14px; max-width: 100%; }
+  .msg.you { display: flex; justify-content: flex-end; }
+  .msg.you span { background: #2a2a4a; border: 1px solid #3b3b70; border-radius: 12px 12px 2px 12px; padding: 8px 12px; max-width: 80%; }
+  .msg.elai { background: var(--panel); border: 1px solid var(--line); border-radius: 12px 12px 12px 2px; padding: 12px 14px; }
+  .msg.elai h2 { color: #fff; margin-bottom: 8px; }
+  .msg.elai p, .msg.elai li { line-height: 1.55; }
+  .msg.elai p:last-child { margin-bottom: 0; }
+  .msg.elai ul, .msg.elai ol { margin: 0 0 12px; padding-left: 20px; }
+  .msg.elai b { color: #fff; }
+  .setting { color: #b7b7f5; cursor: pointer; border-bottom: 1px dotted #6d6de0; white-space: nowrap; }
+  .setting:hover { color: #fff; }
+  .where { color: var(--muted); font-size: 12.5px; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .actions button { padding: 6px 12px; font-size: 13px; }
+  .also { margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+  .also a { color: #b7b7f5; cursor: pointer; text-decoration: none; margin-right: 10px; }
+  .done { color: #8fd6a9; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 0; }
+  .chips button { font-size: 12.5px; padding: 5px 11px; border-radius: 14px; }
+  header h1 button { margin-left: auto; font-size: 12.5px; padding: 4px 10px; }
+  #aiPanel { padding: 12px 22px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  #aiPanel .field { margin-bottom: 8px; }
+  #aiPanel .field label { display: block; font-size: 12.5px; color: var(--muted); margin-bottom: 3px; }
+  #aiPanel select, #aiPanel input { width: 100%; }
+  .thinking { color: var(--muted); font-style: italic; }
+  .from { margin-top: 10px; color: var(--muted); font-size: 12.5px; }
+  .from a { color: #b7b7f5; cursor: pointer; }
+  .hidden { display: none !important; }
+  form { display: flex; gap: 8px; padding: 12px 22px 18px; border-top: 1px solid var(--line); }
+  form input { flex: 1; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Elai <button id="aiButton" type="button">AI service</button></h1>
+  <p class="sub muted" id="sub">Answers from Elslicer itself: its settings, their explanations and common fixes.</p>
+</header>
+<section id="aiPanel" class="hidden"></section>
+<div id="log"></div>
+<form id="ask">
+  <input id="question" type="text" placeholder="Ask about a setting or a problem, like &quot;how do I remove the brim?&quot;" autocomplete="off" autofocus>
+  <button class="primary" type="submit">Ask</button>
+</form>
+<script src="guides/common.js"></script>
+<script src="ai_provider.js"></script>
+<script src="elai/ai.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+
+// The settings guide files fill these; Elai uses their explanations.
+window.SETTINGS = {};
+window.SECTIONS = {};
+const GUIDES = ['quality', 'quality_lines', 'quality_seam', 'quality_precision', 'quality_surface', 'quality_walls',
+  'quality_overhangs', 'strength', 'speed', 'support', 'multimaterial', 'others'];
+
+let ctx = null, elai = null, settings = [];
+const TYPE_NAMES = {print: 'Process', filament: 'Filament', printer: 'Printer'};
+
+function setting(key) { return elai && elai.setting(key); }
+function valueLabel(s) {
+  const def = s.def || {};
+  if (def.kind === 'bool') return s.value === '1' ? 'on' : 'off';
+  if (def.options) { const o = def.options.find(o => o.value === s.value); if (o) return o.label; }
+  return def.unit && !String(s.value).endsWith('%') ? `${s.value} ${def.unit}` : String(s.value);
+}
+function optionLabel(s, value) {
+  const def = s.def || {};
+  if (def.kind === 'bool') return value === '1' ? 'on' : 'off';
+  if (def.options) { const o = def.options.find(o => o.value === value); if (o) return o.label; }
+  return def.unit && !String(value).endsWith('%') ? `${value} ${def.unit}` : String(value);
+}
+function where(s) {
+  return [TYPE_NAMES[s.type] || s.type, s.page, s.group].filter(Boolean).map(esc).join(' › ');
+}
+
+// What the written answers use to name a setting: its name, where it is and its value now.
+const helpers = {
+  at(key) {
+    const s = setting(key);
+    if (!s) return '';
+    return `<span class="setting" data-show="${esc(key)}">${esc(s.label)}</span> <span class="where">(${where(s)}, now <b>${esc(valueLabel(s))}</b>)</span>`;
+  },
+  value: key => (setting(key) || {}).value,
+};
+
+// The settings guide's explanation of a setting as plain text, worked out for this printer and plate.
+function guideText(key) {
+  const g = window.SETTINGS[key];
+  if (!g || !ctx) return null;
+  let text = '';
+  try { text = typeof g.explain === 'function' ? g.explain(ctx, ctx.values[key]) : (g.explain || ''); } catch (e) { text = ''; }
+  return {title: g.title || '', html: text, text: String(text).replace(/<[^>]*>/g, ' ')};
+}
+
+function add(html, cls = 'elai') {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.innerHTML = html;
+  $('log').appendChild(div);
+  $('log').scrollTop = $('log').scrollHeight;
+  return div;
+}
+
+// A button that changes settings says what it changes; buttons for settings this app doesn't have are left out.
+function buttons(actions) {
+  const usable = (actions || []).filter(a => !a.set || Object.keys(a.set).every(k => setting(k)))
+    .filter(a => !a.show || setting(a.show));
+  if (!usable.length) return '';
+  return `<div class="actions">${usable.map((a, i) => `<button data-action="${i}" ${i === 0 && a.set ? 'class="primary"' : ''}>${esc(a.label)}</button>`).join('')}</div>`;
+}
+function wire(div, actions) {
+  const usable = (actions || []).filter(a => !a.set || Object.keys(a.set).every(k => setting(k)))
+    .filter(a => !a.show || setting(a.show));
+  div.querySelectorAll('[data-action]').forEach(b => b.onclick = () => act(usable[+b.dataset.action]));
+  div.querySelectorAll('[data-show]').forEach(el => el.onclick = () => show(el.dataset.show));
+  div.querySelectorAll('[data-ask]').forEach(el => el.onclick = () => ask(el.dataset.ask, el.textContent));
+}
+
+function act(a) {
+  if (a.set) {
+    const changes = {};
+    for (const [k, v] of Object.entries(a.set)) changes[k] = {type: setting(k).type, value: v};
+    post({cmd: 'set', changes});
+  } else if (a.show) show(a.show);
+  else if (a.run) post({cmd: 'run', what: a.run});
+}
+function show(key) { const s = setting(key); if (s) post({cmd: 'show', key, type: s.type}); }
+
+function answerTopic(r) {
+  const t = r.topic;
+  const actions = t.actions ? t.actions(helpers) : [];
+  let html = `<h2>${esc(t.title)}</h2>${t.answer(helpers)}${buttons(actions)}`;
+  if (r.also && r.also.length)
+    html += `<div class="also">Related: ${r.also.map(o => `<a data-ask="topic:${esc(o.id)}">${esc(o.title)}</a>`).join('')}</div>`;
+  wire(add(html), actions);
+}
+
+function answerSetting(r) {
+  const s = r.setting;
+  const g = guideText(s.key);
+  const explain = g && g.html ? g.html : (s.tooltip ? `<p>${esc(s.tooltip)}</p>` : '');
+  const actions = [];
+  if (r.switchTo != null && r.switchTo !== s.value)
+    actions.push({label: r.mode < 0 ? `Turn ${s.label} off` : `Set ${s.label} to ${optionLabel(s, r.switchTo)}`, set: {[s.key]: r.switchTo}});
+  actions.push({label: 'Show me the setting', show: s.key});
+  let html = `<h2>${esc(s.label)}</h2><p class="where">${where(s)} · now <b>${esc(valueLabel(s))}</b></p>${explain}${buttons(actions)}`;
+  const related = (r.topics || []).map(t => `<a data-ask="topic:${esc(t.id)}">${esc(t.title)}</a>`)
+    .concat((r.also || []).map(o => `<a data-ask="setting:${esc(o.key)}">${esc(o.label)}</a>`));
+  if (related.length) html += `<div class="also">Related: ${related.join('')}</div>`;
+  wire(add(html), actions);
+}
+
+function answerNone(r) {
+  const options = (r.topics || []).map(t => `<a data-ask="topic:${esc(t.id)}">${esc(t.title)}</a>`)
+    .concat((r.settings || []).map(o => `<a data-ask="setting:${esc(o.key)}">${esc(o.label)}</a>`));
+  const html = `<p>I couldn't find that in Elslicer. Try naming the problem or the setting in a few words, like <i>stringing</i>, <i>supports hard to remove</i> or <i>wall loops</i>.</p>` +
+    (options.length ? `<div class="also">Closest: ${options.join('')}</div>` : '');
+  wire(add(html), []);
+}
+
+function ask(question, shown) {
+  if (!elai) return;
+  if (question.startsWith('topic:')) {
+    const t = elai.topics.find(t => t.id === question.slice(6));
+    add(`<span>${esc(shown || t.title)}</span>`, 'you');
+    return answerTopic({topic: t});
+  }
+  if (question.startsWith('setting:')) {
+    const s = setting(question.slice(8));
+    add(`<span>${esc(shown || s.label)}</span>`, 'you');
+    return answerSetting({setting: s});
+  }
+  add(`<span>${esc(question)}</span>`, 'you');
+  const r = elai.ask(question);
+  // A question that names a setting is answered with it; the AI would only swap it for a similar one.
+  if (aiReady() && r.kind !== 'chat' && r.kind !== 'setting') {
+    const request = ElaiAI.build(elai, history, question, {context: setupText()});
+    // Nothing to choose from: the AI couldn't help, so Elslicer's own reply stands.
+    if (request.choices.length) return askAI(question, r, request);
+  }
+  offline(r);
+  remember(question, r);
+}
+
+// What Elai says without an AI, from the written answers and settings.
+function offline(r) {
+  if (r.kind === 'topic') answerTopic(r);
+  else if (r.kind === 'setting') answerSetting(r);
+  else if (r.kind === 'unsure') answerUnsure(r);
+  else if (r.kind === 'chat') add(`<p>Any time. Ask me about a setting or a printing problem whenever you like.</p>`);
+  else answerNone(r);
+}
+
+// The conversation so far, for the AI to tell what "it" or "no, the other one" means.
+const history = [];
+function remember(question, r) {
+  history.push({role: 'user', text: question});
+  const said = r.kind === 'topic' ? r.topic.title : r.kind === 'setting' ? r.setting.label : '';
+  history.push({role: 'elai', text: said, id: r.kind === 'topic' ? r.topic.id : r.kind === 'setting' ? r.setting.key : null});
+  if (history.length > 12) history.splice(0, history.length - 12);
+}
+
+let aiSettings = null, aiPanel = null, nextId = 1;
+const waiting = new Map();
+function aiReady() {
+  if (!aiSettings || !aiSettings.usable) return false;
+  const apple = aiSettings.choice.provider === 'apple';
+  return !apple || !aiPanel.apple || aiPanel.apple.ok;
+}
+function aiName() {
+  const p = aiSettings && aiSettings.providers.find(p => p.id === aiSettings.choice.provider);
+  return p ? p.label : 'the AI';
+}
+function describeAI() {
+  const p = aiSettings && aiSettings.providers.find(p => p.id === aiSettings.choice.provider);
+  let text = 'Answers from Elslicer itself: its settings, their explanations and common fixes.';
+  if (aiReady()) text = p.kind === 'apple' ? 'Answers with Apple\'s model on this Mac, from Elslicer\'s own settings and fixes. Free, and nothing leaves your Mac.'
+    : p.local ? `Answers with ${p.label}, from Elslicer's own settings and fixes. Free, and nothing leaves your Mac.`
+    : `Answers with ${p.label} (${aiSettings.choice.model}), from Elslicer's own settings and fixes. Each question is sent to ${p.label}.`;
+  else if (p && p.kind === 'apple' && aiPanel.apple && !aiPanel.apple.ok) text += ' ' + aiPanel.apple.reason;
+  $('sub').textContent = text;
+}
+
+function askAI(question, r, request) {
+  const id = nextId++;
+  const bubble = add(`<p class="thinking">Thinking…</p>`);
+  waiting.set(id, {question, r, bubble, request});
+  post({cmd: 'ai_ask', id, instructions: request.instructions, prompt: request.prompt, choices: request.choices});
+}
+function setupText() {
+  if (!ctx) return '';
+  return [ctx.printer && `printer ${ctx.printer}`, ctx.nozzle && `${ctx.nozzle} mm nozzle`, ctx.filament && `filament ${ctx.filament}`,
+    ctx.filaments > 1 && `${ctx.filaments} filaments`].filter(Boolean).join(', ');
+}
+
+// The AI chose which written answer fits; that answer is what the user sees.
+function answerAI(wait, reply) {
+  wait.bubble.remove();
+  const checked = ElaiAI.check(reply, wait.request, elai);
+  let r;
+  if (checked.topic) r = {kind: 'topic', topic: checked.topic, also: wait.r.kind === 'topic' && wait.r.topic !== checked.topic ? [wait.r.topic] : []};
+  else if (checked.setting) r = {kind: 'setting', setting: checked.setting, mode: wait.r.mode,
+    switchTo: wait.r.mode ? Elai.switchValue(checked.setting, wait.r.mode) : null, topics: [], also: []};
+  // The AI found nothing that fits. Elslicer's own answer stands if it was sure; otherwise say so, with the closest.
+  else if (wait.r.kind === 'topic' || wait.r.kind === 'setting') r = wait.r;
+  else r = {kind: 'none', topics: wait.request.topics.slice(0, 3), settings: []};
+  offline(r);
+  remember(wait.question, r);
+}
+// When the AI can't answer, the written answer still does, with the reason.
+function answerOffline(wait, reason) {
+  wait.bubble.remove();
+  offline(wait.r);
+  if (reason) add(`<p class="where">${esc(aiName())} couldn't answer, so this is Elslicer's own answer. ${esc(reason)}</p>`);
+  remember(wait.question, wait.r);
+}
+
+// When more than one answer could fit, ask which is meant rather than guess.
+function answerUnsure(r) {
+  const choices = (r.topics || []).map(t => ({ask: `topic:${t.id}`, label: t.title}))
+    .concat((r.settings || []).map(s => ({ask: `setting:${s.key}`, label: s.label})));
+  const html = `<p>${choices.length === 1 ? 'Did you mean this?' : 'I\'m not sure which you mean. Is it one of these?'}</p>
+    <div class="actions">${choices.map(c => `<button data-ask="${esc(c.ask)}">${esc(c.label)}</button>`).join('')}</div>
+    <p class="where">If none of these, try naming the problem or the setting in a few words.</p>`;
+  wire(add(html), []);
+}
+
+$('ask').onsubmit = e => {
+  e.preventDefault();
+  const q = $('question').value.trim();
+  if (q) ask(q);
+  $('question').value = '';
+};
+
+function loadScript(src) {
+  return new Promise(done => { const s = document.createElement('script'); s.src = src; s.onload = s.onerror = done; document.head.appendChild(s); });
+}
+
+window.fromApp = async message => {
+  if (aiPanel && aiPanel.handle(message)) return;
+  if (message.type === 'ai_reply') {
+    const wait = waiting.get(message.id);
+    if (!wait) return;
+    waiting.delete(message.id);
+    if (message.ok) answerAI(wait, message);
+    else answerOffline(wait, message.declined ? '' : message.reason);
+  } else if (message.type === 'context') {
+    ctx = message.guide;
+    settings = message.settings;
+    for (const file of GUIDES) await loadScript(`guides/${file}.js`);
+    await loadScript('elai/knowledge.js');
+    await loadScript('elai/knowledge_common.js');
+    await loadScript('elai/engine.js');
+    const guides = {};
+    for (const key of Object.keys(window.SETTINGS)) { const g = guideText(key); if (g) guides[key] = g; }
+    elai = window.Elai.create(window.ELAI_KNOWLEDGE, settings, guides);
+    const examples = ['I have rim area, how to remove it?', 'My print has strings', 'Supports are hard to remove', 'How do I print faster?', 'Corners are lifting'];
+    wire(add(`<p>Hi, I'm Elai. Ask me about any setting or printing problem, in your own words. You can follow up, like "no, I meant the other one".</p>
+      <div class="chips">${examples.map(q => `<button data-ask="${esc(q)}">${esc(q)}</button>`).join('')}</div>`), []);
+  } else if (message.type === 'changed') {
+    const lines = [];
+    for (const [key, value] of Object.entries(message.values || {})) {
+      const s = setting(key);
+      if (!s) continue;
+      s.value = value;
+      if (ctx && ctx.values && s.type === 'print') ctx.values[key] = value;
+      lines.push(`<b>${esc(s.label)}</b> is now <b>${esc(valueLabel(s))}</b>`);
+    }
+    if (lines.length)
+      add(`<p class="done">Done. ${lines.join(', ')}.</p><p class="where">Changed in your current settings, not saved to the preset. Slice again to see it.</p>`);
+    else
+      add(`<p>That didn't change anything: the value wasn't accepted.</p>`);
+  }
+};
+aiPanel = AIProvider.mount($('aiPanel'), {post, onChange: s => {
+  aiSettings = s;
+  describeAI();
+  if (s.saved !== undefined && !s.error) $('aiPanel').classList.add('hidden');
+}});
+$('aiButton').onclick = () => $('aiPanel').classList.toggle('hidden');
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

@@ -986,6 +986,9 @@ public:
     void on_change_color_mode(bool is_dark, bool reinit = true);
     const bool get_dark_mode_status() { return m_is_dark; }
     void set_as_dirty() { m_dirty = true; }
+    // Elslicer: shows or hides the colour gradient's direction on an object.
+    void show_gradient_arrow(int object_idx, const Vec3d &direction, const std::string &from_colour, const std::string &to_colour);
+    void hide_gradient_arrow();
     // True while any GLCanvas3D is inside _render_frame(). The other surfaces that share the app's one
     // GL context (the UV editor canvas) check this before making themselves current: a frame interrupted
     // by another surface finishes drawing into that surface and then presents a window the context no
@@ -1610,6 +1613,22 @@ private:
     bool _render_orient_menu(float left, float right, float bottom, float top);
     void _render_arrange_menu(float left, float right, float bottom, float top);
     void _render_3d_navigator();
+    void _render_measurements() const;
+    // Elslicer: an arrow drawn across an object, the way its colour gradient runs.
+    struct GradientArrow
+    {
+        int         object_idx{-1};
+        Vec3d       direction{Vec3d::UnitX()};
+        std::string from_colour, to_colour;
+    };
+    void _render_gradient_arrow(const GradientArrow &arrow) const;
+    // The arrows of painted gradients, and dials to turn the selected one, when shown from the view menu.
+    void _render_gradient_direction();
+    // The arrow the colour gradient window aims.
+    GradientArrow m_gradient_arrow;
+    // The dials' object and settings in degrees: around the bed from +X, and tilt up from the bed.
+    int    m_gradient_dial_object{-1};
+    double m_gradient_around{0.}, m_gradient_tilt{0.};
 
     void _update_volumes_hover_state();
 

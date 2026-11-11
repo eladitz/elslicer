@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Colour Gradient</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .pick { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .pick label, .row label { display: block; margin-bottom: 6px; color: var(--muted); }
+  select { width: 100%; }
+  .layout { display: grid; grid-template-columns: 180px 1fr; gap: 18px; align-items: start; }
+  #dial { width: 180px; height: 180px; cursor: grab; touch-action: none; }
+  .vertical { display: flex; gap: 8px; margin-top: 8px; }
+  .vertical button { flex: 1; }
+  .vertical button.on { border-color: var(--accent); color: var(--accent); }
+  #strip { display: flex; height: 34px; border-radius: 6px; overflow: hidden; margin: 10px 0 4px; }
+  #strip div { flex: 1; }
+</style>
+</head>
+<body>
+<h1>Colour gradient</h1>
+<p class="sub" id="object"></p>
+<div class="panel pick">
+  <div><label for="a">Starts with</label><select id="a"></select></div>
+  <div><label for="b">Ends with</label><select id="b"></select></div>
+</div>
+<div class="panel layout">
+  <div>
+    <svg id="dial" viewBox="-100 -100 200 200">
+      <circle r="92" fill="none" stroke="#3a3c42" stroke-width="2"/>
+      <text x="0" y="-74" text-anchor="middle" fill="#8a8d94" font-size="13">Back</text>
+      <text x="0" y="84" text-anchor="middle" fill="#8a8d94" font-size="13">Front</text>
+      <text x="-80" y="5" text-anchor="middle" fill="#8a8d94" font-size="13">L</text>
+      <text x="80" y="5" text-anchor="middle" fill="#8a8d94" font-size="13">R</text>
+      <g id="arrow">
+        <line x1="-60" y1="0" x2="52" y2="0" stroke="#e8e8ea" stroke-width="6" stroke-linecap="round"/>
+        <polygon points="70,0 46,-14 46,14" fill="#e8e8ea"/>
+        <circle id="dotA" cx="-60" cy="0" r="9"/>
+      </g>
+    </svg>
+    <div class="vertical">
+      <button id="up">Bottom to top</button>
+      <button id="down">Top to bottom</button>
+    </div>
+  </div>
+  <div class="row">
+    <div id="strip"></div>
+    <p id="note" class="muted"></p>
+  </div>
+</div>
+<p class="muted">Drag the arrow to aim it. The arrow on the object shows the same direction. The object prints with one gradient mix of the two filaments, aimed this way. It replaces any colours painted on this object. To turn it later, use Gradient direction in the view menu.</p>
+<div class="footer">
+  <button id="cancel">Cancel</button>
+  <button id="apply" class="primary" disabled>Apply gradient</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let filaments = [];
+let angle = 0;        // degrees: 0 is left to right, 90 is front to back
+let vertical = '';    // 'up', 'down' or ''
+let ok = false;
+
+function fill(select, chosen) {
+  select.innerHTML = '';
+  for (const filament of filaments) {
+    const option = document.createElement('option');
+    option.value = filament.index;
+    option.textContent = `${filament.index}: ${filament.name} (${filament.type})`;
+    select.append(option);
+  }
+  select.value = chosen;
+}
+
+const picked = id => filaments.find(filament => filament.index === Number($(id).value));
+
+function ask() {
+  const a = picked('a'), b = picked('b');
+  $('arrow').setAttribute('transform', `rotate(${-angle})`);
+  $('arrow').style.opacity = vertical ? 0.3 : 1;
+  $('up').classList.toggle('on', vertical === 'up');
+  $('down').classList.toggle('on', vertical === 'down');
+  if (a) $('dotA').setAttribute('fill', a.colour);
+  ok = false;
+  $('apply').disabled = true;
+  if (!a || !b) return;
+  if (a.index === b.index) return note('Pick two different filaments.');
+  if (a.type !== b.type) return note(`Only filaments of the same material mix well, and these are ${a.type} and ${b.type}.`);
+  post({cmd: 'preview', a: a.index, b: b.index, angle, vertical});
+}
+
+function note(text) { $('note').textContent = text; }
+
+// Dragging on the dial aims the arrow. Screen y grows downward, while "back" is up on the dial.
+function aim(event) {
+  const box = $('dial').getBoundingClientRect();
+  const x = event.clientX - box.left - box.width / 2, y = box.top + box.height / 2 - event.clientY;
+  angle = Math.round(Math.atan2(y, x) * 180 / Math.PI / 5) * 5;
+  vertical = '';
+  ask();
+}
+$('dial').addEventListener('pointerdown', event => { $('dial').setPointerCapture(event.pointerId); aim(event); });
+$('dial').addEventListener('pointermove', event => { if (event.buttons) aim(event); });
+$('up').onclick = () => { vertical = vertical === 'up' ? '' : 'up'; ask(); };
+$('down').onclick = () => { vertical = vertical === 'down' ? '' : 'down'; ask(); };
+
+window.fromApp = message => {
+  if (message.type === 'filaments') {
+    filaments = message.filaments;
+    $('object').textContent = `Gives ${message.object} a gradient that runs from one colour to the other, the way the arrow points.`;
+    fill($('a'), filaments[0] && filaments[0].index);
+    const other = filaments.find(filament => filament.index !== filaments[0].index && filament.type === filaments[0].type);
+    fill($('b'), (other || filaments[1] || {}).index);
+    ask();
+  } else if (message.type === 'preview') {
+    $('strip').innerHTML = '';
+    for (const colour of message.colours) {
+      const band = document.createElement('div');
+      band.style.background = colour;
+      $('strip').append(band);
+    }
+    ok = message.colours.length >= 2;
+    $('apply').disabled = !ok;
+    note(message.colours.length === 0 ? 'There is no room for another mixed filament. Remove one first.' :
+         message.new_mix ? 'Adds one gradient mixed filament of the two.' : 'Uses the gradient mix of the two that is already there.');
+  }
+};
+$('a').onchange = ask;
+$('b').onchange = ask;
+$('cancel').onclick = () => post({cmd: 'close'});
+$('apply').onclick = () => post({cmd: 'apply', a: Number($('a').value), b: Number($('b').value), angle, vertical});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

@@ -365,6 +365,28 @@ else ()
         COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_PREFIX_PATH}/libpython" "${BIN_DIR}/python"
         COMMENT "Copying Python runtime into the build tree"
         VERBATIM)
+    # Elai's helper for Apple's on-device model (FoundationModels), next to the binary as elai-local.
+    # Swift stays out of the C++ build: the helper is one file, built with swiftc and talked to over stdin/stdout.
+    if (APPLE AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_GREATER_EQUAL 27.0)
+        set(ELAI_LOCAL_ARCH arm64)
+        if (CMAKE_OSX_ARCHITECTURES)
+            list(GET CMAKE_OSX_ARCHITECTURES 0 ELAI_LOCAL_ARCH)
+        endif ()
+        set(ELAI_LOCAL_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/elslicer_ai_local/main.swift")
+        set(ELAI_LOCAL_BINARY "${CMAKE_CURRENT_BINARY_DIR}/elai-local")
+        add_custom_command(OUTPUT "${ELAI_LOCAL_BINARY}"
+            COMMAND xcrun swiftc -O -parse-as-library -target ${ELAI_LOCAL_ARCH}-apple-macos${CMAKE_OSX_DEPLOYMENT_TARGET}
+                    -o "${ELAI_LOCAL_BINARY}" "${ELAI_LOCAL_SOURCE}"
+            DEPENDS "${ELAI_LOCAL_SOURCE}"
+            COMMENT "Building elai-local"
+            VERBATIM)
+        add_custom_target(elai_local DEPENDS "${ELAI_LOCAL_BINARY}")
+        add_dependencies(OrcaSlicer elai_local)
+        add_custom_command(TARGET OrcaSlicer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different "${ELAI_LOCAL_BINARY}" "${BIN_DIR}/elai-local"
+            COMMENT "Copying elai-local into the build tree"
+            VERBATIM)
+    endif ()
     # Stage uv next to the binary for the build-tree/.app flows, which never
     # run install() -- see the layout map above; lookup is bundled_uv_path().
     if(ORCA_BUNDLED_UV_EXECUTABLE AND EXISTS "${ORCA_BUNDLED_UV_EXECUTABLE}")

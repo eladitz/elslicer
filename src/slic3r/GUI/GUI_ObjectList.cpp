@@ -1,3 +1,4 @@
+#include "libslic3r/HeadReference.hpp"
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/AppConfig.hpp"
 #include "libslic3r/PresetBundle.hpp"
@@ -2520,6 +2521,9 @@ static std::vector<PrimitiveSizeDialog::Field> primitive_size_fields(const std::
     if (type_name == "Torus")
         // TRN Size of a torus (ring): the diameter of its hole and the thickness of the ring.
         return {{_L("Inner diameter"), 0.75 * side}, {_L("Tube diameter"), 0.25 * side}};
+    if (type_name == "Head")
+        // TRN Size of a head, measured around the forehead, in mm. An adult's is about 560.
+        return {{_L("Head circumference"), 560.}};
     return {};
 }
 
@@ -2600,6 +2604,8 @@ static TriangleMesh create_mesh(const std::string& type_name, const std::vector<
         const double radius      = 0.5 * size[0] + tube_radius;
         mesh = TriangleMesh(its_make_torus(radius, tube_radius, primitive_angle_step(radius + tube_radius), primitive_angle_step(tube_radius)));
     }
+    else if (type_name == "Head")
+        mesh = HeadReference::make_mesh(size[0]);
     return mesh;
 }
 
@@ -2738,12 +2744,25 @@ void ObjectList::load_shape_object(const std::string &type_name, bool interactiv
     // calibration reuses it as an axis-aligned anchor and scales it by its bounding box,
     // so its orientation must stay fixed.
     const Slic3r::DynamicPrintConfig& full_config = wxGetApp().preset_bundle->full_config();
-    if (type_name != "Cube" && full_config.has("fan_direction") && full_config.has("auxiliary_fan")) {
+    // The head has to face the front for things to fit it.
+    if (type_name != "Cube" && type_name != "Head" && full_config.has("fan_direction") && full_config.has("auxiliary_fan")) {
         FanDirection config_dir = full_config.option<ConfigOptionEnum<FanDirection>>("fan_direction")->value;
         orientation::orient_for_cooling(mesh, config_dir);
     }
-    // BBS: remove "Shape" prefix
-    load_mesh_object(mesh, _(type_name));
+    if (type_name == "Head") {
+        // TRN Name of a see-through head of the given circumference, used for sizing and never printed.
+        load_mesh_object(mesh, format_wxstr(_L("Head %1% cm"), float_to_string_decimal_point((*size)[0] / 10., 1)));
+        // It stays where it's put and is never printed. The part's name is what marks it.
+        const int    head_idx = int(m_objects->size()) - 1;
+        ModelObject *head     = (*m_objects)[head_idx];
+        head->volumes.front()->name = HeadReference::PART_NAME;
+        for (ModelInstance *instance : head->instances)
+            instance->printable = false;
+        update_printable_state(head_idx, 0);
+        wxGetApp().plater()->update();
+    } else
+        // BBS: remove "Shape" prefix
+        load_mesh_object(mesh, _(type_name));
     wxGetApp().mainframe->update_title();
 }
 

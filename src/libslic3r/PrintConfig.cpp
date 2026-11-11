@@ -3586,6 +3586,13 @@ void PrintConfigDef::init_fff_params()
     def->mode    = comDevelop;
     def->set_default_value(new ConfigOptionStrings{""});
 
+    // Elslicer: set per object from the view menu's gradient arrow.
+    def          = this->add("elslicer_gradient_direction", coFloats);
+    def->label   = L("Gradient direction");
+    def->tooltip = L("The way a gradient mixed filament runs across this object, as x, y and z. Empty runs it from the bottom up.");
+    def->mode    = comDevelop;
+    def->set_default_value(new ConfigOptionFloats{});
+
     def          = this->add("filament_mixed_gradient_per_part", coBools);
     def->label   = L("Mixed filament per-part gradient");
     def->tooltip = L("When gradient mode is enabled, apply the gradient to each part of an "

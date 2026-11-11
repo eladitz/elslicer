@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Origami Animal</title>
+<link rel="stylesheet" href="style.css">
+<script src="origami/animals.js"></script>
+<style>
+  body { display: grid; grid-template-columns: 300px 1fr; gap: 18px; height: 100vh; box-sizing: border-box; }
+  .side { overflow-y: auto; padding-right: 4px; }
+  .choices { display: grid; grid-template-columns: 1fr; gap: 6px; margin-bottom: 12px; }
+  .choice { text-align: left; padding: 9px 12px; }
+  .choice.on, .animal.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .choice small { display: block; color: var(--muted); margin-top: 2px; }
+  .animals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 12px; }
+  .animal { padding: 7px 4px; }
+  #parts { margin: 6px 0 0 18px; padding: 0; color: var(--muted); font-size: 12px; }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+  .pair label, .one label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 3px; }
+  .pair input, .one input { width: 100%; box-sizing: border-box; }
+  .seg { display: flex; gap: 6px; margin: 8px 0; }
+  .seg button { flex: 1; padding: 5px; }
+  .check { display: block; margin-top: 8px; }
+  details { margin-top: 12px; }
+  summary { cursor: pointer; color: var(--muted); }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 10px; }
+  #shape { width: 100%; height: 46%; min-height: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #plates { flex: 1; min-height: 0; display: flex; gap: 12px; overflow: auto; }
+  .plate { flex: 1; min-width: 180px; max-width: 360px; display: flex; flex-direction: column; }
+  .plate h2 { margin: 0 0 6px; font-size: 13px; }
+  .plate svg { flex: 1; width: 100%; min-height: 140px; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  .hinge { fill: #2c2c4a; }
+  .bed { fill: none; stroke: var(--line); stroke-dasharray: 6 4; }
+  #steps { margin: 0 0 0 18px; padding: 0; color: var(--muted); font-size: 13px; }
+  #busy { color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Origami animal</h1>
+  <p class="sub">Prints flat as thin sheets with the fold lines grooved in. Fold it up by hand and glue the numbered tabs.</p>
+  <div class="choices">
+    <button class="choice" data-kind="animal">Animal<small>A whole animal of a few folded parts glued together</small></button>
+    <button class="choice" data-kind="mask">Mask<small>To wear, with eye holes and holes for elastic</small></button>
+    <button class="choice" data-kind="model" id="modelChoice">Your model<small id="modelName">The selected object, cut down to flat faces</small></button>
+  </div>
+  <div class="animals" id="animals"></div>
+  <div id="animalSize" class="one">
+    <label for="length">Longest side mm</label><input id="length" type="number" value="180" min="60" max="600" step="5">
+  </div>
+  <div class="animals hidden" id="masks">
+    <button class="animal" data-mask="fox">Fox</button>
+    <button class="animal" data-mask="wolf">Wolf</button>
+    <button class="animal" data-mask="cat">Cat</button>
+    <button class="animal" data-mask="bear">Bear</button>
+    <button class="animal" data-mask="rabbit">Rabbit</button>
+  </div>
+  <div id="maskSize" class="hidden">
+    <div class="one"><label for="width">Head width, temple to temple, mm</label><input id="width" type="number" value="150" min="80" max="220" step="1"></div>
+    <div class="seg">
+      <button data-width="150">Adult</button>
+      <button data-width="140">Teen</button>
+      <button data-width="128">Child</button>
+    </div>
+  </div>
+  <div id="modelSize" class="pair hidden">
+    <div><label for="size">Longest side mm</label><input id="size" type="number" value="150" min="20" step="1"></div>
+    <div><label for="faces">Faces</label><input id="faces" type="number" value="120" min="20" max="600" step="10"></div>
+  </div>
+  <label class="check"><input type="checkbox" id="tabs" checked> Glue tabs</label>
+  <label class="check"><input type="checkbox" id="numbers" checked> Number the edges that glue together</label>
+  <details>
+    <summary>Sheet and fold lines</summary>
+    <div class="pair">
+      <div><label for="sheet">Sheet mm</label><input id="sheet" type="number" value="0.6" step="0.05" min="0.2"></div>
+      <div><label for="hinge">Fold line mm</label><input id="hinge" type="number" value="0.2" step="0.05" min="0.08"></div>
+    </div>
+    <p class="muted" id="layers"></p>
+  </details>
+  <p class="note" id="sizes"></p>
+  <p class="note warn hidden" id="problem"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="shape"></canvas>
+  <div id="busy"></div>
+  <div id="plates"></div>
+  <ol id="steps">
+    <li>Print as it lies, with no supports. The side on the plate becomes the outside.</li>
+    <li>Fold along every line. Most fold with the grooves inside; the picture above shows the shape to aim for.</li>
+    <li>Glue each tab under the edge with the same number, on the inside. Gel superglue or hot glue works.</li>
+    <li id="partsStep">Fold each part, then glue the parts on where the picture shows them:<ul id="parts"></ul></li>
+    <li id="strapStep">Thread elastic cord through the two holes at the sides.</li>
+  </ol>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+const COLOURS = ['#8f8fe8', '#e8a85f', '#5fc98f', '#e86f8f', '#5fb5e8', '#c9c95f', '#b07fe0', '#7fd0d0', '#d08f5f', '#9fd05f'];
+let kind = 'animal', animal = ORIGAMI.animals[0].key, mask = 'fox';
+let bed = [256, 256], layer = 0.2, firstLayer = 0.2, timer = null, hasModel = false;
+let tint = [], mesh = null, yaw = 0.6, pitch = 0.25, spinning = true;
+const num = id => { const v = parseFloat($(id).value); return isFinite(v) ? v : 0; };
+const fmt = v => (Math.round(v * 10) / 10).toString();
+const fmt2 = v => (Math.round(v * 100) / 100).toString();
+const round = v => Math.round(v * 100) / 100;
+
+for (const a of ORIGAMI.animals) {
+  const b = document.createElement('button');
+  b.className = 'animal';
+  b.dataset.animal = a.key;
+  b.textContent = a.name;
+  $('animals').appendChild(b);
+}
+
+function params() {
+  const p = {kind, animal: mask, width: num('width'), size: num('size'), faces: Math.round(num('faces')),
+             tabs: $('tabs').checked, numbers: $('numbers').checked, sheet: num('sheet'), hinge: num('hinge')};
+  if (kind === 'animal') {
+    const a = ORIGAMI.animals.find(a => a.key === animal);
+    p.name = a.name;
+    p.parts = ORIGAMI.build(animal, num('length')).map(part => ({name: part.name, v: part.v.map(q => q.map(round)), f: part.f}));
+  }
+  return p;
+}
+
+function refresh() {
+  for (const b of document.querySelectorAll('.choice')) b.classList.toggle('on', b.dataset.kind === kind);
+  for (const b of document.querySelectorAll('[data-animal]')) b.classList.toggle('on', b.dataset.animal === animal);
+  for (const b of document.querySelectorAll('[data-mask]')) b.classList.toggle('on', b.dataset.mask === mask);
+  for (const b of document.querySelectorAll('[data-width]')) b.classList.toggle('on', +b.dataset.width === num('width'));
+  $('animals').classList.toggle('hidden', kind !== 'animal');
+  $('animalSize').classList.toggle('hidden', kind !== 'animal');
+  $('masks').classList.toggle('hidden', kind !== 'mask');
+  $('maskSize').classList.toggle('hidden', kind !== 'mask');
+  $('modelSize').classList.toggle('hidden', kind !== 'model');
+  $('strapStep').classList.toggle('hidden', kind !== 'mask');
+  $('partsStep').classList.toggle('hidden', kind !== 'animal');
+  const s = num('sheet');
+  $('layers').textContent = layer > 0 ? `At your ${fmt2(layer)} mm layers the sheet is about ${Math.round(s / layer)} layers. A thicker sheet is stiffer but harder to fold.` : '';
+  $('busy').textContent = 'Working out the folds…';
+  clearTimeout(timer);
+  timer = setTimeout(() => post({cmd: 'preview', ...params()}), 150);
+}
+
+// The folded shape, flat shaded in one colour per part, with lines only along the folds and the paper's edges.
+function drawShape() {
+  const canvas = $('shape');
+  const w = canvas.clientWidth, h = canvas.clientHeight, ratio = window.devicePixelRatio || 1;
+  if (canvas.width !== w * ratio || canvas.height !== h * ratio) { canvas.width = w * ratio; canvas.height = h * ratio; }
+  const g = canvas.getContext('2d');
+  g.setTransform(ratio, 0, 0, ratio, 0, 0);
+  g.clearRect(0, 0, w, h);
+  if (!mesh) return;
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const lo = [1e9, 1e9, 1e9], hi = [-1e9, -1e9, -1e9];
+  for (const v of mesh.v) for (let i = 0; i < 3; ++i) { lo[i] = Math.min(lo[i], v[i]); hi[i] = Math.max(hi[i], v[i]); }
+  const c = lo.map((l, i) => (l + hi[i]) / 2);
+  // z up in the model, y up on screen.
+  const P = mesh.v.map(([x, y, z]) => {
+    x -= c[0]; y -= c[1]; z -= c[2];
+    const X = x, Y = mesh.up === 'y' ? y : z, Z = mesh.up === 'y' ? z : -y;
+    const x1 = cy * X + sy * Z, z1 = -sy * X + cy * Z;
+    return [x1, cp * Y - sp * z1, sp * Y + cp * z1];
+  });
+  let r = 1;
+  for (const p of P) r = Math.max(r, Math.hypot(p[0], p[1], p[2]));
+  const k = Math.min(w, h) * 0.46 / r;
+  const normal = f => {
+    const [a, b, d] = f.map(j => mesh.v[j]);
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const l = Math.hypot(...n) || 1;
+    return n.map(x => x / l);
+  };
+  const N = mesh.f.map(normal), edges = {};
+  mesh.f.forEach((f, i) => { for (let e = 0; e < 3; ++e) { const a = f[e], b = f[(e + 1) % 3]; (edges[a < b ? a + ',' + b : b + ',' + a] ||= []).push(i); } });
+  const crease = (a, b) => {
+    const fs = edges[a < b ? a + ',' + b : b + ',' + a];
+    return fs.length !== 2 || N[fs[0]][0] * N[fs[1]][0] + N[fs[0]][1] * N[fs[1]][1] + N[fs[0]][2] * N[fs[1]][2] < 0.9995;
+  };
+  const order = mesh.f.map((f, i) => [i, P[f[0]][2] + P[f[1]][2] + P[f[2]][2]]).sort((a, b) => a[1] - b[1]);
+  for (const [i] of order) {
+    const f = mesh.f[i], pts = f.map(j => P[j]);
+    const [a, b, d] = pts;
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], v = [d[0] - a[0], d[1] - a[1], d[2] - a[2]];
+    const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+    const len = Math.hypot(...n) || 1;
+    // Paper: both sides lit, the inside a little darker.
+    const light = Math.abs((0.35 * n[0] + 0.55 * n[1] + 0.75 * n[2]) / len);
+    const colour = parseInt(COLOURS[tint[mesh.part[i]] % COLOURS.length].slice(1), 16);
+    const s = (n[2] > 0 ? 0.42 : 0.3) + 0.55 * light;
+    g.fillStyle = `rgb(${(colour >> 16 & 255) * s | 0},${(colour >> 8 & 255) * s | 0},${(colour & 255) * s | 0})`;
+    g.strokeStyle = g.fillStyle;
+    g.lineWidth = 0.6;
+    g.beginPath();
+    for (const p of pts) g.lineTo(w / 2 + p[0] * k, h / 2 - p[1] * k);
+    g.closePath();
+    g.fill();
+    g.stroke();
+    g.strokeStyle = 'rgba(15,18,20,.6)';
+    g.lineWidth = 0.9;
+    for (let e = 0; e < 3; ++e) {
+      if (!crease(f[e], f[(e + 1) % 3])) continue;
+      const p = pts[e], q = pts[(e + 1) % 3];
+      g.beginPath();
+      g.moveTo(w / 2 + p[0] * k, h / 2 - p[1] * k);
+      g.lineTo(w / 2 + q[0] * k, h / 2 - q[1] * k);
+      g.stroke();
+    }
+  }
+}
+
+function path(loops) {
+  return loops.map(loop => 'M' + loop.map(p => p[0] + ' ' + p[1]).join('L') + 'Z').join('');
+}
+
+function drawPlates(plates, parts) {
+  const div = $('plates');
+  div.innerHTML = '';
+  plates.forEach((plate, index) => {
+    const used = new Set(plate.map(p => p.part));
+    const names = [...used].map(i => parts[i].name);
+    const shown = [...new Set(names)].join(', ');
+    const pad = 4;
+    const el = document.createElement('div');
+    el.className = 'plate';
+    el.innerHTML = `<h2>Plate ${index + 1} of ${plates.length}${parts.length > 1 ? ': ' + shown : ''}</h2>
+      <svg viewBox="${-pad} ${-pad} ${bed[0] + 2 * pad} ${bed[1] + 2 * pad}" preserveAspectRatio="xMidYMid meet">
+        <rect class="bed" x="0" y="0" width="${bed[0]}" height="${bed[1]}" vector-effect="non-scaling-stroke"/>
+        <g transform="translate(0 ${bed[1]}) scale(1 -1)">
+          ${plate.map(p => `<path class="hinge" d="${path(p.hinges)}" fill-rule="evenodd"/>
+            <path d="${path(p.sheet)}" fill="${COLOURS[tint[p.part] % COLOURS.length]}" fill-rule="evenodd"/>`).join('')}
+        </g>
+      </svg>`;
+    div.appendChild(el);
+  });
+}
+
+function drawParts(parts) {
+  const list = $('parts');
+  list.innerHTML = '';
+  const seen = {};
+  parts.forEach((part, i) => {
+    if (seen[part.name]) { seen[part.name].count++; return; }
+    const li = document.createElement('li');
+    seen[part.name] = {li, count: 1, i};
+    list.appendChild(li);
+  });
+  for (const [name, {li, count, i}] of Object.entries(seen))
+    li.innerHTML = `<span style="color:${COLOURS[tint[i] % COLOURS.length]}">■</span> ${name.replace(/_/g, ' ')}${count > 1 ? ' × ' + count : ''}`;
+}
+
+const problems = {
+  empty: 'There is nothing to fold.',
+  hinge_too_thick: 'The fold lines must be thinner than the sheet, or they won\'t bend.',
+  too_thin: 'The sheet needs to be at least 0.2 mm and the fold lines 0.08 mm to print.',
+  face_too_big: 'One of its flat faces is bigger than your plate. Make it smaller, or give your model more faces.',
+};
+
+window.fromApp = message => {
+  if (message.type === 'printer') {
+    bed = message.bed;
+    layer = message.layer || 0.2;
+    firstLayer = message.first_layer || layer;
+    $('sheet').value = fmt2(Math.max(0.6, 3 * layer));
+    $('hinge').value = fmt2(firstLayer);
+    hasModel = !!message.model;
+    $('modelChoice').disabled = !hasModel;
+    if (hasModel) {
+      $('modelName').textContent = `${message.model.name}, cut down to flat faces`;
+      $('size').value = Math.round(message.model.size);
+      if (message.start === 'model') kind = 'model';
+    } else
+      $('modelName').textContent = 'Select an object first to fold it up';
+    refresh();
+  } else if (message.type === 'net') {
+    $('busy').textContent = '';
+    $('problem').textContent = problems[message.problem] || '';
+    $('problem').classList.toggle('hidden', !message.problem);
+    $('add').disabled = !!message.problem;
+    if (message.problem) { $('plates').innerHTML = ''; $('sizes').textContent = ''; mesh = null; drawShape(); return; }
+    const s = message.folded, n = message.pieces, plates = message.plates.length;
+    $('sizes').textContent = `Folded about ${fmt(s[0])} × ${fmt(s[1])} × ${fmt(s[2])} mm. ` +
+      `${n === 1 ? 'One piece' : n + ' pieces'} on ${plates === 1 ? 'one plate' : plates + ' plates'}, ` +
+      `${message.folds} folds and ${message.joins} edges to glue.`;
+    // Parts of the same name, like the two ears, share a colour.
+    const first = {};
+    tint = message.parts.map((p, i) => first[p.name] ??= Object.keys(first).length);
+    mesh = message.mesh;
+    drawShape();
+    drawPlates(message.plates, message.parts);
+    drawParts(message.parts);
+  }
+};
+
+// Drag to turn it; it spins slowly until then.
+let drag = null;
+$('shape').onpointerdown = e => { drag = [e.clientX, e.clientY, yaw, pitch]; spinning = false; $('shape').setPointerCapture(e.pointerId); };
+$('shape').onpointermove = e => {
+  if (!drag) return;
+  yaw = drag[2] + (e.clientX - drag[0]) * 0.01;
+  pitch = Math.max(-1.4, Math.min(1.4, drag[3] + (e.clientY - drag[1]) * 0.01));
+  drawShape();
+};
+$('shape').onpointerup = () => { drag = null; };
+setInterval(() => { if (spinning && mesh) { yaw += 0.012; drawShape(); } }, 40);
+window.onresize = drawShape;
+
+for (const b of document.querySelectorAll('.choice')) b.onclick = () => { if (!b.disabled) { kind = b.dataset.kind; refresh(); } };
+for (const b of document.querySelectorAll('[data-animal]')) b.onclick = () => { animal = b.dataset.animal; refresh(); };
+for (const b of document.querySelectorAll('[data-mask]')) b.onclick = () => { mask = b.dataset.mask; refresh(); };
+for (const b of document.querySelectorAll('[data-width]')) b.onclick = () => { $('width').value = b.dataset.width; refresh(); };
+for (const input of document.querySelectorAll('input')) input.oninput = refresh;
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => post({cmd: 'add', ...params()});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

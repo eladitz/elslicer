@@ -126,6 +126,33 @@ static bool parse_hex(const std::string &hex, unsigned char &r, unsigned char &g
     return true;
 }
 
+std::vector<int> palette_ratios(const std::string &hex_a, const std::string &hex_b, size_t max_mixes, double gap_delta_e)
+{
+    unsigned char r, g, b;
+    if (!parse_hex(hex_a, r, g, b) || !parse_hex(hex_b, r, g, b))
+        return {};
+    // How far along the mix has come at each 1% step, as the sum of the differences between neighbours.
+    std::vector<double> along(101, 0.);
+    prusa_fdm_mixer::LAB previous = prusa_fdm_mixer::rgb_to_lab(prusa_fdm_mixer::hex_to_rgb(blend_color(hex_a, hex_b, 0.f)));
+    for (int percent = 1; percent <= 100; ++percent) {
+        const prusa_fdm_mixer::LAB lab = prusa_fdm_mixer::rgb_to_lab(prusa_fdm_mixer::hex_to_rgb(blend_color(hex_a, hex_b, percent / 100.f)));
+        along[percent] = along[percent - 1] + prusa_fdm_mixer::delta_e_2000(previous, lab);
+        previous       = lab;
+    }
+    const double total = along.back();
+    const size_t mixes = std::min(max_mixes, size_t(std::max(0., std::round(total / gap_delta_e) - 1.)));
+
+    std::vector<int> ratios;
+    for (size_t i = 1; i <= mixes; ++i) {
+        const double wanted  = total * double(i) / double(mixes + 1);
+        const int    percent = int(std::lower_bound(along.begin(), along.end(), wanted) - along.begin());
+        const int    step    = std::clamp(5 * int(std::lround(percent / 5.)), 5, 95);
+        if (ratios.empty() || step > ratios.back())
+            ratios.push_back(step);
+    }
+    return ratios;
+}
+
 std::string blend_color(const std::string& hex_a, const std::string& hex_b, float ratio_b)
 {
     unsigned char r1 = 128, g1 = 128, b1 = 128;

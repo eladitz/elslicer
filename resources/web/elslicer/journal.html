@@ -41,7 +41,7 @@
     <div id="list"></div>
   </div>
   <div class="main">
-    <div id="empty" class="muted">Prints you send appear here. When one ends, the app takes a photo and asks what you saw, then Claude reads it all in one request.</div>
+    <div id="empty" class="muted">Prints you send appear here. When one ends, the app takes a photo and asks what you saw, then the AI chosen in AI Setup reads it all in one request.</div>
     <div id="detail" class="hidden">
       <div class="row spread"><h1 id="file"></h1><span id="overall" class="tag"></span></div>
       <p id="meta" class="sub"></p>
@@ -61,7 +61,7 @@
 
       <div class="panel">
         <h2>What you saw</h2>
-        <textarea id="note" placeholder="Anything the camera can't see, like a rough underside or a weak spot. Claude takes your word over the photo."></textarea>
+        <textarea id="note" placeholder="Anything the camera can't see, like a rough underside or a weak spot. The AI takes your word over the photo."></textarea>
         <div class="row" style="margin-top:10px">
           <button id="analyse" class="primary">Analyse</button>
           <span id="cost" class="muted"></span>
@@ -69,7 +69,7 @@
       </div>
 
       <div id="reportPanel" class="panel hidden">
-        <h2>What Claude found</h2>
+        <h2>What the AI found</h2>
         <p id="summary"></p>
         <div id="defects"></div>
         <p id="notVisible" class="muted" style="margin:12px 0 0"></p>
@@ -176,7 +176,7 @@ function drawRecord(record) {
   }
   $('analyse').textContent = report ? 'Analyse again' : 'Analyse';
   $('analyse').disabled = !images.length;
-  $('cost').textContent = record.cost ? `Spent on this print so far: $${record.cost.toFixed(3)}` : 'One request, about 5 to 8 cents.';
+  $('cost').textContent = record.cost ? `Spent on this print so far: $${record.cost.toFixed(3)}` : 'One request: about 5 to 15 cents on Claude, free on a free tier.';
 }
 
 function setBusy(on) {

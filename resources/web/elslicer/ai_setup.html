@@ -26,17 +26,14 @@
 </head>
 <body>
 <h1>AI setup</h1>
-<p class="sub">Choose what you know now. Claude is asked once, then you adjust the result with bars, which costs nothing. Only measurements of your model are sent, never the model itself.</p>
+<p class="sub">Choose what you know now. The AI is asked once, then you adjust the result with bars, which costs nothing. Only measurements of your model are sent, never the model itself.</p>
 
 <div id="error" class="note bad hidden"></div>
 
 <section id="keyView" class="panel hidden">
-  <h2>Anthropic API key</h2>
-  <p class="muted">Each request is billed to this key, separately from a Claude subscription. It's stored in your Mac's Keychain.</p>
-  <div class="row">
-    <input id="key" type="password" placeholder="Paste your API key" style="flex:1" autocomplete="off">
-    <button id="saveKey" class="primary">Save</button>
-  </div>
+  <h2>AI service</h2>
+  <p class="muted">AI setup needs a large model that can call tools, which Apple's on-device model can't do. Use an online service with your own API key, or Ollama or LM Studio on this Mac. Keys are stored in your Mac's Keychain.</p>
+  <div id="aiPanel"></div>
 </section>
 
 <section id="formView" class="hidden">
@@ -50,28 +47,27 @@
     <p id="supportHint" class="muted"></p>
     <div id="heads" class="swatches"></div>
     <div class="field"><label for="support">Supports</label>
-      <select id="support"><option value="auto">Let Claude decide</option><option value="on">Yes</option><option value="off">No</option></select></div>
+      <select id="support"><option value="auto">Let the AI decide</option><option value="on">Yes</option><option value="off">No</option></select></div>
     <div class="field supportOnly"><label for="style">Type</label>
-      <select id="style"><option value="auto">Let Claude decide</option><option value="tree">Tree</option><option value="normal">Normal</option></select></div>
+      <select id="style"><option value="auto">Let the AI decide</option><option value="tree">Tree</option><option value="normal">Normal</option></select></div>
     <div class="field supportOnly"><label for="body">Support material</label><select id="body"></select></div>
     <div class="field supportOnly"><label for="interface">Layer touching the part</label><select id="interface"></select></div>
   </div>
   <div class="panel">
     <h2>Anything else?</h2>
-    <textarea id="notes" rows="2" placeholder="Optional. Anything Claude should know or do"></textarea>
+    <textarea id="notes" rows="2" placeholder="Optional. Anything the AI should know or do"></textarea>
   </div>
   <div class="row spread">
     <div class="row">
-      <label for="model">Model</label>
-      <select id="model" style="width:auto"></select>
-      <button id="forgetKey">Remove API key</button>
+      <span class="muted" id="using"></span>
+      <button id="changeAI">Change AI service</button>
     </div>
     <button id="start" class="primary">Get settings</button>
   </div>
-  <p class="muted" style="margin-top:12px">One request, roughly $0.10 on Opus and less on the others, billed to your API key.</p>
+  <p class="muted" style="margin-top:12px" id="costNote"></p>
 </section>
 
-<section id="waitView" class="panel hidden"><span class="muted">Claude is working out the settings. This can take a minute…</span></section>
+<section id="waitView" class="panel hidden"><span class="muted">The AI is working out the settings. This can take a minute…</span></section>
 
 <section id="proposalView" class="hidden">
   <div class="panel"><p id="summary" style="margin:0"></p></div>
@@ -82,7 +78,7 @@
   </div>
   <div class="panel">
     <div class="row">
-      <input id="adjust" type="text" placeholder="Want something else? Tell Claude. This is another paid request" style="flex:1">
+      <input id="adjust" type="text" placeholder="Want something else? Tell the AI. This is another request" style="flex:1">
       <button id="sendAdjust">Send</button>
     </div>
   </div>
@@ -101,6 +97,7 @@
   </div>
 </div>
 
+<script src="ai_provider.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const post = message => window.wx.postMessage(JSON.stringify(message));
@@ -147,7 +144,7 @@ function drawHeads(heads) {
   }));
   for (const id of ['body', 'interface']) {
     const before = $(id).value;
-    $(id).replaceChildren(new Option('Let Claude decide', '-1'), new Option("Same as the part", '0'),
+    $(id).replaceChildren(new Option('Let the AI decide', '-1'), new Option("Same as the part", '0'),
       ...heads.filter(head => !head.empty).map(head => new Option(headName(head), head.head)));
     if ([...$(id).options].some(option => option.value === before)) $(id).value = before;
   }
@@ -210,7 +207,7 @@ function drawBars(bars) {
     const table = document.createElement('table');
     const draw = () => {
       const level = bar.levels[Number(slider.value)];
-      const suggested = Number(slider.value) === bar.recommended ? ' (Claude suggests this)' : '';
+      const suggested = Number(slider.value) === bar.recommended ? ' (suggested)' : '';
       label.textContent = level.label + suggested;
       drawRows(table, level.rows);
     };
@@ -221,10 +218,19 @@ function drawBars(bars) {
   }));
 }
 
+// Which AI service answers. Saving one that works goes back to the form.
+const aiPanel = AIProvider.mount($('aiPanel'), {post, onChange: s => {
+  const p = s.providers.find(p => p.id === s.choice.provider);
+  $('using').textContent = p && s.usable ? `Using ${p.label}, ${s.choice.model}` : '';
+  $('costNote').textContent = !p ? '' : p.kind === 'anthropic' ? 'One request, roughly $0.10 on Opus and less on the others, billed to your API key.'
+    : p.local ? 'Runs on this Mac, so it costs nothing.' : `Billed by ${p.label}, or counted against its free allowance.`;
+  if (s.saved !== undefined && s.usable && !s.error) show('formView');
+}});
+
 window.fromApp = message => {
+  if (aiPanel.handle(message)) return;
   switch (message.type) {
     case 'init':
-      message.models.forEach(model => $('model').add(new Option(model.label, model.id)));
       $('noModel').classList.toggle('hidden', message.has_model);
       $('start').disabled = !message.has_model;
       drawPurpose();
@@ -234,10 +240,6 @@ window.fromApp = message => {
       break;
     case 'heads':
       drawHeads(message.heads);
-      break;
-    case 'key_saved':
-      if (message.ok) { $('key').value = ''; show('formView'); }
-      else fail("The API key couldn't be saved to the Keychain.");
       break;
     case 'thinking':
       show('waitView');
@@ -254,7 +256,7 @@ window.fromApp = message => {
       break;
     case 'applied':
       $('doneNote').textContent = `Applied and saved as "${message.preset}". Slice when you're ready.`;
-      if (message.dropped.length) fail(`These didn't stay as Claude set them, so check them before slicing: ${message.dropped.join(', ')}`);
+      if (message.dropped.length) fail(`These didn't stay as the AI set them, so check them before slicing: ${message.dropped.join(', ')}`);
       show('doneView');
       $('undo').classList.remove('hidden');
       break;
@@ -270,11 +272,10 @@ window.fromApp = message => {
 };
 
 $('support').onchange = () => document.querySelectorAll('.supportOnly').forEach(row => row.classList.toggle('hidden', $('support').value === 'off'));
-$('saveKey').onclick = () => { if ($('key').value.trim()) post({cmd: 'save_key', key: $('key').value.trim()}); };
-$('forgetKey').onclick = () => { post({cmd: 'forget_key'}); show('keyView'); };
+$('changeAI').onclick = () => show('keyView');
 $('start').onclick = () => {
   $('error').classList.add('hidden');
-  post({cmd: 'start', model: $('model').value, purpose, notes: $('notes').value.trim(), support: $('support').value, style: $('style').value,
+  post({cmd: 'start', purpose, notes: $('notes').value.trim(), support: $('support').value, style: $('style').value,
         body: Number($('body').value), interface: Number($('interface').value)});
 };
 $('sendAdjust').onclick = () => {

@@ -494,7 +494,7 @@ std::string SceneBenchmarkDialog::report() const
         return collection.get_selected_preset_name() + (collection.get_edited_preset().is_dirty ? " (modified)" : "");
     };
     out << "Presets:    " << preset_name(presets.printers) << ", " << preset_name(presets.prints) << '\n'
-        << "Scene:      OrcaSliced Combo, " << PASS_FRAMES << " frames per pass\n";
+        << "Scene:      Elslicer Combo, " << PASS_FRAMES << " frames per pass\n";
     const GCodeViewer& gcode_viewer = wxGetApp().plater()->get_preview_canvas3D()->get_gcode_viewer();
     if (gcode_viewer.has_data())
         out << "Toolpaths:  " << gcode_viewer.get_vertices_count() << " vertices, " << gcode_viewer.get_layers_count() << " layers\n";
@@ -558,7 +558,7 @@ void run_scene_benchmark()
     }
 
     MessageDialog confirm(wxGetApp().mainframe,
-                          _L("The benchmark replaces the current project with the OrcaSliced Combo and slices it. It turns the camera "
+                          _L("The benchmark replaces the current project with the Elslicer Combo and slices it. It turns the camera "
                              "around the model in Prepare and in Preview, then moves the layer slider through the sliced layers, timing "
                              "every frame, and shows the results.") + "\n\n" +
                           _L("It uses the current graphics settings and usually takes less than a minute. The main window stays "

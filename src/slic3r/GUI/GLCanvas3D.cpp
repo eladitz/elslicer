@@ -1,3 +1,4 @@
+#include "libslic3r/HeadReference.hpp"
 #include "libslic3r/libslic3r.h"
 #include "libslic3r/Point.hpp"
 #include <limits>
@@ -65,6 +66,8 @@
 #include <string_view>
 #include "slic3r/GUI/Selection.hpp"
 #include "GLCanvas3D.hpp"
+#include "ElslicerDialogs.hpp"
+#include "libslic3r/GradientDirection.hpp"
 #include "SequentialPrintClearance.hpp"
 #ifdef SLIC3R_CAD
 #include "slic3r/GUI/CAD/DesignSketchTool.hpp"   // Design tab: interactive 2D sketch tool
@@ -1155,6 +1158,240 @@ GLCanvas3D::CenterOfMass::Markers GLCanvas3D::CenterOfMass::model_markers(const 
     return markers;
 }
 
+// Elslicer: the size of each object on the plate, or of the selected ones, drawn along three edges of its box,
+// in the axis colours. Raised objects also show how high they float.
+void GLCanvas3D::_render_measurements() const
+{
+    if (!wxGetApp().show_measurements() || m_canvas_type != ECanvasType::CanvasView3D || m_design_canvas || m_gizmos.is_running() ||
+        m_model == nullptr)
+        return;
+
+    std::map<std::pair<int, int>, BoundingBoxf3> boxes;
+    const bool       only_selected = !m_selection.is_empty();
+    PartPlate       *plate         = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+    for (const GLVolume *volume : m_volumes.volumes) {
+        const int object = volume->object_idx(), instance = volume->instance_idx();
+        if (object < 0 || object >= (int) m_model->objects.size() || volume->is_modifier || !volume->is_active ||
+            (only_selected && !volume->selected) || !plate->contain_instance(object, instance))
+            continue;
+        boxes[{object, instance}].merge(volume->transformed_convex_hull_bounding_box());
+    }
+
+    const Camera &camera = wxGetApp().plater()->get_camera();
+    const bool    inches = wxGetApp().app_config->get("use_inches") == "1";
+    const auto    length = [inches](double mm) {
+        return inches ? Slic3r::format("%.2f in", mm / 25.4) : Slic3r::format(mm < 100 ? "%.1f mm" : "%.0f mm", mm);
+    };
+    ImDrawList *draw = ImGui::GetBackgroundDrawList();
+    const auto  dimension = [&](const Vec3d &from, const Vec3d &to, ImU32 colour, const std::string &text) {
+        const Point a = CameraUtils::project(camera, from), b = CameraUtils::project(camera, to);
+        draw->AddLine(ImVec2(a.x(), a.y()), ImVec2(b.x(), b.y()), colour, 2.f);
+        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+        const ImVec2 middle((a.x() + b.x() - size.x) / 2.f, (a.y() + b.y() - size.y) / 2.f);
+        draw->AddRectFilled(ImVec2(middle.x - 4, middle.y - 2), ImVec2(middle.x + size.x + 4, middle.y + size.y + 2), IM_COL32(30, 30, 34, 220), 3.f);
+        draw->AddText(middle, colour, text.c_str());
+    };
+    for (const auto &[key, box] : boxes) {
+        const Vec3d &lo = box.min, &hi = box.max;
+        // The front edges, with the height at the front right corner.
+        dimension({lo.x(), lo.y(), lo.z()}, {hi.x(), lo.y(), lo.z()}, IM_COL32(235, 90, 90, 255), length(hi.x() - lo.x()));
+        dimension({hi.x(), lo.y(), lo.z()}, {hi.x(), hi.y(), lo.z()}, IM_COL32(120, 210, 90, 255), length(hi.y() - lo.y()));
+        dimension({hi.x(), lo.y(), lo.z()}, {hi.x(), lo.y(), hi.z()}, IM_COL32(100, 150, 255, 255), length(hi.z() - lo.z()));
+        if (lo.z() > 0.01)
+            dimension({lo.x(), lo.y(), 0.}, {lo.x(), lo.y(), lo.z()}, IM_COL32(200, 200, 200, 255), Slic3r::format(_u8L("%1% above the bed"), length(lo.z())));
+    }
+}
+
+void GLCanvas3D::show_gradient_arrow(int object_idx, const Vec3d &direction, const std::string &from_colour, const std::string &to_colour)
+{
+    m_gradient_arrow = {object_idx, direction.normalized(), from_colour, to_colour};
+    set_as_dirty();
+    m_canvas->Refresh();
+}
+
+void GLCanvas3D::hide_gradient_arrow()
+{
+    m_gradient_arrow = {};
+    set_as_dirty();
+    m_canvas->Refresh();
+}
+
+namespace {
+
+// The gradient an object prints with and can be aimed: painted bands, or a gradient mix it prints with.
+struct AimedGradient
+{
+    Vec3d       direction;
+    std::string from_colour, to_colour;
+    bool        bands{false};
+};
+
+std::optional<AimedGradient> aimed_gradient(const ModelObject &object, int object_idx, const std::vector<GradientDirection::Slot> &slots,
+                                            const std::vector<ColorRGBA> &colours)
+{
+    if (const ObjectGradient *painted = object_gradient(object_idx))
+        return AimedGradient{painted->direction, painted->from_colour, painted->to_colour, true};
+    const std::vector<unsigned int> used = GradientDirection::used_filaments(object);
+    for (const GradientDirection::Slot &slot : slots)
+        if (std::find(used.begin(), used.end(), slot.slot) != used.end() && slot.first <= colours.size() && slot.second <= colours.size()) {
+            const ColorRGBA &a = colours[slot.first - 1], &b = colours[slot.second - 1];
+            const auto       blend = [&](double t) {
+                const float share = float(GradientDirection::first_share(slot, t));
+                return encode_color(ColorRGBA(a.r() * share + b.r() * (1.f - share), a.g() * share + b.g() * (1.f - share),
+                                              a.b() * share + b.b() * (1.f - share), 1.f));
+            };
+            return AimedGradient{GradientDirection::direction_or_up(object), blend(0.), blend(1.), false};
+        }
+    return std::nullopt;
+}
+
+} // namespace
+
+void GLCanvas3D::_render_gradient_direction()
+{
+    if (!wxGetApp().show_gradient_direction() || m_canvas_type != ECanvasType::CanvasView3D || m_design_canvas || m_gizmos.is_running() ||
+        m_model == nullptr || m_gradient_arrow.object_idx >= 0) {
+        GLVolume::gradient_preview_object = -1;
+        return;
+    }
+    const std::vector<GradientDirection::Slot> slots   = GradientDirection::gradient_slots(wxGetApp().preset_bundle->project_config);
+    const std::vector<ColorRGBA>               colours = wxGetApp().plater()->get_extruders_colors();
+    const int selected = m_selection.is_empty() ? -1 : m_selection.get_object_idx();
+    std::optional<AimedGradient> chosen;
+    for (int idx = 0; idx < int(m_model->objects.size()); ++idx) {
+        const std::optional<AimedGradient> gradient = aimed_gradient(*m_model->objects[idx], idx, slots, colours);
+        if (!gradient)
+            continue;
+        if (idx == selected)
+            chosen = gradient;
+        else
+            _render_gradient_arrow({idx, gradient->direction, gradient->from_colour, gradient->to_colour});
+    }
+    if (!chosen) {
+        m_gradient_dial_object            = -1;
+        GLVolume::gradient_preview_object = -1;
+        return;
+    }
+    if (m_gradient_dial_object != selected) {
+        m_gradient_dial_object = selected;
+        const Vec3d &d          = chosen->direction;
+        m_gradient_tilt         = Geometry::rad2deg(std::asin(std::clamp(d.z(), -1., 1.)));
+        m_gradient_around       = std::abs(d.z()) > 0.9999 ? 0. : Geometry::rad2deg(std::atan2(d.y(), d.x()));
+        if (m_gradient_around < 0.)
+            m_gradient_around += 360.;
+    }
+    const auto direction = [this]() {
+        const double a = Geometry::deg2rad(m_gradient_around), t = Geometry::deg2rad(m_gradient_tilt);
+        return Vec3d(std::cos(t) * std::cos(a), std::cos(t) * std::sin(a), std::sin(t));
+    };
+    _render_gradient_arrow({selected, direction(), chosen->from_colour, chosen->to_colour});
+
+    ImGuiWrapper &imgui = *wxGetApp().imgui();
+    imgui.set_next_window_pos(10.f * get_scale(), m_main_toolbar.get_height() + 10.f * get_scale(), ImGuiCond_Always, 0.f, 0.f);
+    imgui.begin(_L("Gradient direction"), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
+    if (ImGui::IsWindowAppearing())
+        imgui.set_requires_extra_frame();
+    float around = float(m_gradient_around), tilt = float(m_gradient_tilt);
+    bool  done   = false;
+    ImGui::PushItemWidth(imgui.scaled(10.f));
+    // TRN Gradient direction: the angle around the bed, from the left-to-right direction.
+    if (ImGui::SliderFloat(_u8L("Around").c_str(), &around, 0.f, 360.f, "%.0f°"))
+        m_gradient_around = around;
+    done |= ImGui::IsItemDeactivatedAfterEdit();
+    bool turning = ImGui::IsItemActive();
+    // TRN Gradient direction: the angle up from the bed; 90 is bottom to top.
+    if (ImGui::SliderFloat(_u8L("Tilt").c_str(), &tilt, -90.f, 90.f, "%.0f°"))
+        m_gradient_tilt = tilt;
+    done |= ImGui::IsItemDeactivatedAfterEdit();
+    turning |= ImGui::IsItemActive();
+    ImGui::PopItemWidth();
+    // While a dial is turned the object shows its direction, painted or not. It is drawn before this, so a
+    // change needs one more frame.
+    const int  preview = turning && !chosen->bands ? selected : -1;
+    if (GLVolume::gradient_preview_object != preview || (preview >= 0 && !GLVolume::gradient_preview_direction.isApprox(direction()))) {
+        GLVolume::gradient_preview_object    = preview;
+        GLVolume::gradient_preview_direction = direction();
+        imgui.set_requires_extra_frame();
+    }
+    if (imgui.button(_L("Reverse"))) {
+        m_gradient_around = std::fmod(m_gradient_around + 180., 360.);
+        m_gradient_tilt   = -m_gradient_tilt;
+        done              = true;
+    }
+    ImGui::SameLine();
+    if (imgui.button(_L("Bottom to top"))) {
+        m_gradient_tilt = 90.;
+        done            = true;
+    }
+    imgui.text(chosen->bands ? _u8L("The bands are painted again when you let go.") : _u8L("The object is sliced again when you let go."));
+    imgui.end();
+    if (done) {
+        const Vec3d aim   = direction();
+        const bool  bands = chosen->bands;
+        // After this frame; changing the object rebuilds the scene being drawn.
+        wxGetApp().CallAfter([selected, aim, bands]() {
+            if (bands) {
+                repaint_gradient(selected, aim);
+                return;
+            }
+            Plater *plater = wxGetApp().plater();
+            if (selected < 0 || selected >= int(plater->model().objects.size()))
+                return;
+            Plater::TakeSnapshot snapshot(plater, _u8L("Change gradient direction"));
+            ModelObject *object = plater->model().objects[selected];
+            // Painting wins over the gradient where it is, so the object prints with the mix alone, as
+            // Colour gradient… makes it. Undo brings the painting back.
+            bool painted = false;
+            for (ModelVolume *volume : object->volumes)
+                if (volume->is_model_part() && !volume->mmu_segmentation_facets.empty()) {
+                    volume->mmu_segmentation_facets.reset();
+                    painted = true;
+                }
+            object->config.set_key_value(GradientDirection::KEY, new ConfigOptionFloats({aim.x(), aim.y(), aim.z()}));
+            if (painted)
+                wxGetApp().obj_list()->update_info_items(selected);
+            plater->changed_object(selected);
+            plater->get_current_canvas3D()->set_as_dirty();
+        });
+    }
+}
+
+void GLCanvas3D::_render_gradient_arrow(const GradientArrow &arrow) const
+{
+    if (arrow.object_idx < 0 || m_model == nullptr || arrow.object_idx >= int(m_model->objects.size()) || m_canvas_type != ECanvasType::CanvasView3D)
+        return;
+    const ModelObject  *object = m_model->objects[arrow.object_idx];
+    const BoundingBoxf3 box    = object->instance_bounding_box(0);
+    const Vec3d         size   = box.size();
+    const Vec3d        &d      = arrow.direction;
+    // A little more than the object's length along the arrow, so the arrow spans it.
+    const double  half   = 0.6 * (std::abs(d.x()) * size.x() + std::abs(d.y()) * size.y() + std::abs(d.z()) * size.z());
+    const Camera &camera = wxGetApp().plater()->get_camera();
+    const Point   from   = CameraUtils::project(camera, box.center() - half * d);
+    const Point   to     = CameraUtils::project(camera, box.center() + half * d);
+    const auto    colour = [](const std::string &hex) {
+        unsigned long rgb = 0xe8e8ea;
+        if (hex.size() == 7 && hex[0] == '#')
+            rgb = std::strtoul(hex.c_str() + 1, nullptr, 16);
+        return IM_COL32((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff, 255);
+    };
+    const ImVec2 a(float(from.x()), float(from.y())), b(float(to.x()), float(to.y()));
+    const float  length = std::hypot(b.x - a.x, b.y - a.y);
+    if (length < 1.f)
+        return;
+    ImDrawList  *draw    = ImGui::GetForegroundDrawList();
+    const ImU32  outline = IM_COL32(20, 20, 24, 255), white = IM_COL32(235, 235, 238, 255);
+    const ImVec2 along((b.x - a.x) / length, (b.y - a.y) / length), across(-along.y, along.x);
+    const float  head = std::min(26.f, 0.3f * length), wing = 0.55f * head;
+    const ImVec2 base(b.x - along.x * head, b.y - along.y * head);
+    draw->AddLine(a, base, outline, 8.f);
+    draw->AddLine(a, base, white, 4.f);
+    draw->AddTriangleFilled(b, ImVec2(base.x + across.x * wing, base.y + across.y * wing), ImVec2(base.x - across.x * wing, base.y - across.y * wing), white);
+    draw->AddCircleFilled(a, 10.f, outline);
+    draw->AddCircleFilled(a, 8.f, colour(arrow.from_colour));
+    draw->AddCircleFilled(base, 6.f, colour(arrow.to_colour));
+}
+
 void GLCanvas3D::CenterOfMass::render(GLCanvas3D& canvas)
 {
     m_drawn = {};
@@ -2181,7 +2418,7 @@ void GLCanvas3D::update_instance_printable_state_for_object(const size_t obj_idx
         for (GLVolume* volume : m_volumes.volumes) {
             if ((volume->object_idx() == (int)obj_idx) && (volume->instance_idx() == inst_idx))
                 volume->printable = instance->printable;
-                if (!volume->printable) {
+                if (!volume->printable && !volume->is_head_reference) {
                     volume->render_color = GLVolume::UNPRINTABLE_COLOR;
                 }
         }
@@ -3715,6 +3952,13 @@ void GLCanvas3D::reload_scene(bool refresh_immediately, bool force_full_scene_re
             if (opt != nullptr && opt->getBool()) {
                 volume->color.a(0.66f);
                 volume->force_transparent = true;
+            }
+            // Elslicer: the sizing head is a pale ghost that things are seen through.
+            if (HeadReference::is_head(*m_model->objects[obj_idx])) {
+                volume->color             = {0.85f, 0.78f, 0.72f, 0.3f};
+                volume->force_transparent = true;
+                volume->is_head_reference = true;
+                volume->set_render_color();
             }
         }
     }
@@ -5687,6 +5931,7 @@ void GLCanvas3D::do_move(const std::string& snapshot_type, bool force_volume_mov
         wxGetApp().plater()->take_snapshot(snapshot_type);
 
     std::set<std::pair<int, int>> done;  // keeps track of modified instances
+    std::set<int> lifted;                 // objects raised off where they were
     bool object_moved = false;
 
     // BBS: support wipe-tower for multi-plates
@@ -5727,6 +5972,9 @@ void GLCanvas3D::do_move(const std::string& snapshot_type, bool force_volume_mov
                         model_object->instances[instance_idx]->set_assemble_transformation(v->get_instance_transformation());
                     }
                 } else {
+                    // Lifted on purpose: keep it up there rather than dropping it back on the bed.
+                    if (v->get_instance_offset().z() - model_object->instances[instance_idx]->get_offset().z() > EPSILON)
+                        lifted.insert(object_idx);
                     model_object->instances[instance_idx]->set_transformation(v->get_instance_transformation());
                 }
             }
@@ -5757,6 +6005,16 @@ void GLCanvas3D::do_move(const std::string& snapshot_type, bool force_volume_mov
             if (notified.insert(key).second)
                 m_selection.notify_instance_update(key.first, key.second);
         }
+    }
+
+    for (const int object_idx : lifted) {
+        ModelObject *mo = m_model->objects[object_idx];
+        if (!mo->auto_drop)
+            continue;
+        mo->auto_drop = false;
+        // TRN %1% is an object's name. Auto Drop is the object's right-click switch that keeps it on the bed.
+        wxGetApp().plater()->get_notification_manager()->push_notification(
+            format(_u8L("Auto Drop is off for %1%, so it stays where you lifted it. It will print with support under it."), mo->name));
     }
 
     // Fixes sinking/flying instances (snaps object to buildplate)
@@ -7473,6 +7731,12 @@ void GLCanvas3D::_switch_toolbars_icon_filename()
         item = m_main_toolbar.get_item("arrange");
         item->set_icon_filename(m_is_dark ? "toolbar_arrange_dark.svg" : "toolbar_arrange.svg");
 
+        item = m_main_toolbar.get_item("drop");
+        item->set_icon_filename(m_is_dark ? "toolbar_drop_dark.svg" : "toolbar_drop.svg");
+
+        item = m_main_toolbar.get_item("fithead");
+        item->set_icon_filename(m_is_dark ? "toolbar_fit_head_dark.svg" : "toolbar_fit_head.svg");
+
         item = m_main_toolbar.get_item("more");
         item->set_icon_filename(m_is_dark ? "instance_add_dark.svg" : "instance_add.svg");
 
@@ -7622,6 +7886,26 @@ bool GLCanvas3D::_init_main_toolbar()
     item.right.toggable = false;
     item.right.render_callback = GLToolbarItem::Default_Render_Callback;
 
+    // Elslicer: puts the selection down on the plate, at 0 height.
+    item.name = "drop";
+    item.icon_filename = m_is_dark ? "toolbar_drop_dark.svg" : "toolbar_drop.svg";
+    item.sprite_id++;
+    item.left.render_callback = nullptr;
+    item.left.toggable = false;
+    item.left.action_callback = []() { wxGetApp().plater()->drop_selection(); };
+    item.enabling_callback = [this]() -> bool { return get_canvas_type() == CanvasView3D && m_selection.can_drop(); };
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
+    // Elslicer: how the selected object is worn on the sizing head.
+    item.name = "fithead";
+    item.icon_filename = m_is_dark ? "toolbar_fit_head_dark.svg" : "toolbar_fit_head.svg";
+    item.sprite_id++;
+    item.left.action_callback = []() { wxGetApp().plater()->fit_selected_to_head(); };
+    item.enabling_callback = [this]() -> bool { return get_canvas_type() == CanvasView3D && wxGetApp().plater()->can_fit_selected_to_head(); };
+    if (!m_main_toolbar.add_item(item))
+        return false;
+
     if (!m_main_toolbar.add_separator())
         return false;
 
@@ -7697,6 +7981,8 @@ void GLCanvas3D::update_shortcut_tooltips()
     m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("add"), shortcuts.with_key(_u8L("Add"), Shortcut::ImportModel));
     m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("orient"), shortcuts.with_key(_u8L("Auto orient all/selected objects"), Shortcut::Orient) + "\n" + shortcuts.with_key(_u8L("Auto orient all objects on current plate"), Shortcut::OrientPlate));
     m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("arrange"), shortcuts.with_key(_u8L("Arrange all objects"), Shortcut::Arrange) + "\n" + shortcuts.with_key(_u8L("Arrange objects on selected plates"), Shortcut::ArrangePlate));
+    m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("fithead"), _u8L("Fit to head: choose how the selected object is worn on the sizing head"));
+    m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("drop"), _u8L("Drop to plate: move the selection down until it touches the plate"));
     m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("more"), shortcuts.with_key(_u8L("Add instance"), Shortcut::AddInstance));
     m_main_toolbar.set_tooltip(m_main_toolbar.get_item_id("fewer"), shortcuts.with_key(_u8L("Remove instance"), Shortcut::RemoveInstance));
 }
@@ -9603,6 +9889,9 @@ void GLCanvas3D::_render_plane() const
 //BBS: add outline drawing logic
 void GLCanvas3D::_render_objects(GLVolumeCollection::ERenderType type, bool with_outline)
 {
+    // Elslicer: volumes printed with a gradient mix show it.
+    // The mixes live in the project's settings.
+    GLVolume::gradient_slots = GradientDirection::gradient_slots(wxGetApp().preset_bundle->project_config);
     if (m_volumes.empty())
         return;
 
@@ -10196,6 +10485,9 @@ void GLCanvas3D::_render_overlays()
             }*/
     }
     m_labels.render(sorted_instances);
+    _render_measurements();
+    _render_gradient_arrow(m_gradient_arrow);
+    _render_gradient_direction();
     m_center_of_mass.render_details(*this);
 
     _render_3d_navigator();
@@ -11314,6 +11606,18 @@ void GLCanvas3D::_render_canvas_toolbar()
             m_canvas_type != ECanvasType::CanvasAssembleView && !m_design_canvas, // work on prepare and preview
             wxGetApp().show_center_of_mass(),
             [this]{wxGetApp().toggle_show_center_of_mass(); m_dirty = true;}
+        );
+
+        create_menu_item( _utf8(L("Measurements")),
+            m_canvas_type == ECanvasType::CanvasView3D && !m_design_canvas, // work only on prepare
+            wxGetApp().show_measurements(),
+            [this]{wxGetApp().toggle_show_measurements(); m_dirty = true;}
+        );
+
+        create_menu_item( _utf8(L("Gradient direction")),
+            m_canvas_type == ECanvasType::CanvasView3D && !m_design_canvas, // work only on prepare
+            wxGetApp().show_gradient_direction(),
+            [this]{wxGetApp().toggle_show_gradient_direction(); m_gradient_dial_object = -1; m_dirty = true;}
         );
 
         // Belt printers, G-code preview only: show the raw machine-frame G-code instead of

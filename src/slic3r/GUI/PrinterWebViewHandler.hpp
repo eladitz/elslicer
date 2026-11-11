@@ -7,6 +7,8 @@
 #include <wx/webview.h>
 #include <wx/string.h>
 
+#include <nlohmann/json.hpp>
+
 class wxWebViewEvent;
 
 class wxWebView;
@@ -46,6 +48,11 @@ void capture_flashforge_photo(const std::string& print_host, std::function<void(
 // The same as read_flashforge_details, waiting for the answer. Runs other events meanwhile if called on the main thread.
 bool read_flashforge_details_sync(const std::string& print_host, const std::string& serial, const std::string& code,
                                   std::string& body, std::string& error);
+
+// Sends one /control command, such as stateCtrl_cmd, and waits for the answer, like read_flashforge_details_sync.
+// The Creator 5 answers Success to some commands it ignores, so check the next details report for the effect.
+bool send_flashforge_control_sync(const std::string& print_host, const std::string& serial, const std::string& code,
+                                  const std::string& command, const nlohmann::json& args, std::string& body, std::string& error);
 
 // Sends a file to the printer's /uploadGcode through a web view, which macOS's Local Network
 // permission doesn't block, and waits for the answer. Call it from a worker thread.

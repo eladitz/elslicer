@@ -1453,7 +1453,7 @@ void MainFrame::show_option(bool show)
 {
     if (!show) {
         if (m_slice_btn->IsShown()) {
-            m_ai_btn->Hide();
+            m_ai_btn->GetParent()->Hide();
             m_slice_btn->Hide();
             m_print_btn->Hide();
             m_slice_option_btn->Hide();
@@ -1462,7 +1462,7 @@ void MainFrame::show_option(bool show)
         }
     } else {
         if (!m_slice_btn->IsShown()) {
-            m_ai_btn->Show();
+            m_ai_btn->GetParent()->Show();
             m_slice_btn->Show();
             m_print_btn->Show();
             m_slice_option_btn->Show();
@@ -1829,7 +1829,7 @@ void MainFrame::fit_tab_labels()
 
     // Compact (last to first)
     for (size_t i = count - 1; i >= 1; --i) {
-        int right = ScreenToClient(m_ai_btn->ClientToScreen({})).x;
+        int right = ScreenToClient(m_ai_btn->GetParent()->ClientToScreen({})).x;
         int left  = sizer->GetSize().GetWidth();
         // The overflow button sits between the tab buttons and the side tools, so it is not free space.
         if (const wxWindow* overflow = ctrl->GetOverflowButton())
@@ -2341,7 +2341,11 @@ wxBoxSizer* MainFrame::create_side_tools()
     auto ai_panel = new wxPanel(this, wxID_ANY, wxDefaultPosition, wxDefaultSize);
     m_ai_btn = new SideButton(ai_panel, _L("AI Setup"), "");
     m_ai_btn->Bind(wxEVT_BUTTON, [](wxCommandEvent&) { show_ai_setup_dialog(); });
+    // Elslicer: Ask Elai shares AI Setup's panel, which shows, hides and styles both.
+    auto elai_btn = new SideButton(ai_panel, _L("Ask Elai"), "");
+    elai_btn->Bind(wxEVT_BUTTON, [](wxCommandEvent&) { show_elai(); });
     auto ai_sizer = new wxBoxSizer(wxHORIZONTAL);
+    ai_sizer->Add(elai_btn, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(6));
     ai_sizer->Add(m_ai_btn, 0, wxALIGN_CENTER_VERTICAL);
     ai_panel->SetSizer(ai_sizer);
 
@@ -2713,11 +2717,15 @@ void MainFrame::update_side_button_style()
     // m_publish_btn->SetBackgroundColour(wxColour(59,68,70));
     // m_publish_btn->SetTextColor(StateColor::darkModeColorFor("#FFFFFE"));
 
-    m_ai_btn->SetLayoutStyle(1); // stands alone, so rounded on both sides
-    m_ai_btn->SetTextLayout(SideButton::EHorizontalOrientation::HO_Center);
-    m_ai_btn->SetCornerRadius(FromDIP(12));
-    m_ai_btn->SetExtraSize(wxSize(FromDIP(30), FromDIP(10)));
-    m_ai_btn->SetMinSize(wxSize(-1, FromDIP(24)));
+    // AI Setup and Ask Elai each stand alone, so rounded on both sides.
+    for (wxWindow *child : m_ai_btn->GetParent()->GetChildren())
+        if (auto *btn = dynamic_cast<SideButton *>(child)) {
+            btn->SetLayoutStyle(1);
+            btn->SetTextLayout(SideButton::EHorizontalOrientation::HO_Center);
+            btn->SetCornerRadius(FromDIP(12));
+            btn->SetExtraSize(wxSize(FromDIP(30), FromDIP(10)));
+            btn->SetMinSize(wxSize(-1, FromDIP(24)));
+        }
 
     m_slice_btn->SetTextLayout(SideButton::EHorizontalOrientation::HO_Left, FromDIP(15));
     m_slice_btn->SetCornerRadius(FromDIP(12));
@@ -3884,12 +3892,24 @@ void MainFrame::init_menubar_as_editor()
 
     // Elslicer
     auto elslicer_menu = new wxMenu();
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Ask Elai") + dots, _L("Ask about a setting or a printing problem, answered offline"),
+        [](wxCommandEvent&) { show_elai(); }, "", nullptr, []() { return true; }, this);
     append_menu_item(elslicer_menu, wxID_ANY, _L("AI Setup") + dots, _L("Answer a few questions and let Claude choose the settings"),
         [](wxCommandEvent&) { show_ai_setup_dialog(); }, "", nullptr, []() { return true; }, this);
     append_menu_item(elslicer_menu, wxID_ANY, _L("Print Journal") + dots, _L("Past prints, with a photo and what to do better next time"),
         [](wxCommandEvent&) { show_print_journal(); }, "", nullptr, []() { return true; }, this);
     append_menu_item(elslicer_menu, wxID_ANY, _L("Continue Print From Layer") + dots, _L("Make a G-code file that continues a failed print"),
         [](wxCommandEvent&) { show_resume_dialog(); }, "", nullptr, []() { return true; }, this);
+    elslicer_menu->AppendSeparator();
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Fit to Head") + dots, _L("Choose how the selected object is worn on the sizing head"),
+        [this](wxCommandEvent&) { m_plater->fit_selected_to_head(); }, "", nullptr,
+        [this]() { return m_plater->can_fit_selected_to_head(); }, this);
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Nesting Doll Copy") + dots, _L("Add smaller copies of the selected hollow object that fit inside it"),
+        [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "", nullptr, []() { return can_make_nesting_doll(); }, this);
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Folding Box") + dots, _L("Make a box that prints flat and folds up by hand, without glue"),
+        [](wxCommandEvent&) { show_fold_box_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
+    append_menu_item(elslicer_menu, wxID_ANY, _L("Origami Animal") + dots, _L("Make a folded animal or mask, or fold up the selected object, from flat sheets"),
+        [](wxCommandEvent&) { show_origami_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
     m_menubar->Append(elslicer_menu, wxString::Format("&%s", _L("Print Tools")));
     if (helpMenu)
         m_menubar->Append(helpMenu, wxString::Format("&%s", _L("Help")));

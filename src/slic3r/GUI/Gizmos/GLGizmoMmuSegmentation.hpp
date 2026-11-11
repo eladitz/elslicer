@@ -10,6 +10,8 @@
 #include <string>
 #include "libslic3r/TriangleSelector.hpp"
 #include "libslic3r/Color.hpp"
+#include "libslic3r/PaintFromImage.hpp"
+#include "slic3r/GUI/GLTexture.hpp"
 #include <wx/string.h>
 #include <wx/gdicmn.h>
 #include <set>
@@ -115,6 +117,35 @@ protected:
     std::string get_gizmo_entering_text() const override { return _u8L("Entering color painting"); }
     std::string get_gizmo_leaving_text() const override { return _u8L("Leaving color painting"); }
     std::string get_action_snapshot_name() const override { return _u8L("Color painting editing"); }
+
+    // Elslicer: paint from image. A photo drawn over the 3D view, lined up by hand; Apply paints every part of the
+    // model in the filament nearest to the photo's colour over it (libslic3r/PaintFromImage.hpp).
+    struct Photo
+    {
+        std::string                  name;
+        std::vector<unsigned char>   rgba;
+        int                          width  = 0;
+        int                          height = 0;
+        bool                         shown  = true;
+        bool                         texture_dirty = false;
+        float                        opacity    = 0.5f;
+        float                        size       = 0.9f; // photo height over view height
+        float                        offset_x   = 0.f;  // centre, -1..1 across the view
+        float                        offset_y   = 0.f;
+        float                        brightness = 1.3f;
+        std::vector<bool>            allowed;           // filaments the photo may use
+        std::vector<paint_from_image::PhotoColour> colours; // from the last Apply
+        bool loaded() const { return !rgba.empty(); }
+    };
+    Photo     m_photo;
+    GLTexture m_photo_texture;
+    void open_photo();
+    void apply_photo();
+    void render_photo_overlay();
+    void render_photo_ui(float sliders_left_width, float sliders_width, float max_tooltip_width);
+    // Where the photo is drawn, in viewport pixels from the top left.
+    void photo_rect(Vec2d &top_left, Vec2d &size) const;
+    bool is_painting_paused() const override { return m_photo.loaded() && m_photo.shown; }
 
     // BBS
     size_t                            m_selected_extruder_idx = 0;

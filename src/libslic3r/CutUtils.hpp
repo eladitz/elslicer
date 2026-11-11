@@ -5,6 +5,8 @@
 #include "Point.hpp"
 #include "Model.hpp"
 
+#include <admesh/stl.h>
+
 #include <optional>
 #include <vector>
 
@@ -14,6 +16,14 @@ using ModelObjectPtrs = std::vector<ModelObject*>;
 
 // A connector hole reaches this far out of the cut face, so the face is open instead of covered by a coplanar skin.
 inline constexpr double CONNECTOR_HOLE_OVERLAP = 0.05;
+
+// Elslicer: screw connectors. The pitch follows the diameter, coarse enough to print: 1.5 mm at 10 mm, 2.8 mm at 21 mm.
+double screw_connector_pitch(double diameter);
+// Radial play the threaded hole always gets, on top of the size tolerance, so a printed screw turns.
+inline constexpr double SCREW_CONNECTOR_MIN_CLEARANCE = 0.2;
+// Threaded peg of the given radius and length in mm, scaled into the unit cylinder (radius 1, z 0..1) that every
+// connector mesh uses, so the connector's scale (radius, radius, height) gives it back in mm.
+indexed_triangle_set its_make_screw_connector(double radius, double height);
 
 enum class ModelObjectCutAttribute : int { KeepUpper, KeepLower, KeepAsParts, FlipUpper, FlipLower, PlaceOnCutUpper, PlaceOnCutLower, CreateDowels, InvalidateCutInfo, KeepPaint };
 using ModelObjectCutAttributes = enum_bitmask<ModelObjectCutAttribute>;

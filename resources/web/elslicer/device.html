@@ -31,6 +31,10 @@
   #colours button.chosen { outline: 2px solid var(--text); outline-offset: 1px; }
   #controlNote { position: sticky; top: 8px; z-index: 1; }
   body.sending button.act { opacity: .45; pointer-events: none; }
+  #clearAsk { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .6); display: flex; align-items: center; justify-content: center; }
+  #clearAsk.hidden { display: none; }
+  #clearAsk .panel { max-width: 380px; margin: 16px; }
+  #clearAsk .row { justify-content: flex-end; gap: 8px; margin-top: 14px; }
 </style>
 </head>
 <body>
@@ -46,6 +50,14 @@
 </div>
 <div id="error" class="note bad hidden"></div>
 <div id="controlNote" class="note hidden"></div>
+
+<div id="clearAsk" class="hidden">
+  <div class="panel">
+    <h2>Is the bed clear?</h2>
+    <p class="muted">The printer won't start a new print until it's told the last one is off the bed. Is the bed empty and ready for a new print?</p>
+    <div class="row"><button id="clearNo">Not yet</button><button id="clearYes" class="primary">Yes, it's clear</button></div>
+  </div>
+</div>
 
 <div class="layout">
   <div>
@@ -357,7 +369,7 @@ function drawJobButtons(status) {
     items.push(sureButton('Cancel print', 'Really cancel it?', () => command('jobCtl_cmd', {jobID: '', action: 'cancel'}, 'Cancel print', detail => !printing(String(detail.status).toLowerCase()))));
   }
   if (status === 'completed' || status === 'cancel') {
-    items.push(sureButton('The bed is clear', 'Is the part off the bed?', () => command('stateCtrl_cmd', {action: 'setClearPlatform'}, 'Bed marked clear', detail => String(detail.status).toLowerCase() === 'ready')));
+    items.push(button('Clear the bed…', () => $('clearAsk').classList.remove('hidden'), 'primary'));
   }
   // Rebuilt only when the choice changes, so a button waiting for its second click stays armed.
   const key = items.map(item => item.textContent).join();
@@ -366,6 +378,12 @@ function drawJobButtons(status) {
     $('jobButtons').replaceChildren(...items);
   }
 }
+
+$('clearNo').onclick = () => $('clearAsk').classList.add('hidden');
+$('clearYes').onclick = () => {
+  $('clearAsk').classList.add('hidden');
+  command('stateCtrl_cmd', {action: 'setClearPlatform'}, 'Bed marked clear', detail => String(detail.status).toLowerCase() === 'ready');
+};
 
 function drawSlotEditor(slot) {
   const box = $('slotEdit');
@@ -532,15 +550,19 @@ function showDetail(detail) {
   if (active) {
     let percent = Number(detail.printProgress) || 0;
     if (percent <= 1) percent *= 100;
+    // The printer resets its progress to 0 when a print finishes.
+    const done = /^completed$/i.test(status);
+    if (done) percent = 100;
     $('file').textContent = file;
     $('progress').style.width = `${Math.min(percent, 100)}%`;
     const parts = [`${Math.round(percent)}%`];
     if (detail.targetPrintLayer > 0) parts.push(`layer ${detail.printLayer} of ${detail.targetPrintLayer}`);
-    if (detail.estimatedTime > 0) parts.push(`${duration(detail.estimatedTime)} left`);
+    if (!done && detail.estimatedTime > 0) parts.push(`${duration(detail.estimatedTime)} left`);
     $('jobText').textContent = parts.join(' · ');
   }
   const lowered = status.toLowerCase();
   drawJobButtons(lowered);
+  if (lowered !== 'completed' && lowered !== 'cancel') $('clearAsk').classList.add('hidden');
   $('printRows').classList.toggle('hidden', !printing(lowered));
   const heads = Array.isArray(detail.nozzleTargetTemps) ? detail.nozzleTargetTemps.length : 0;
   if (!$('controlRows').children.length) {

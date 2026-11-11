@@ -21,6 +21,7 @@
 #include "Exception.hpp"
 #include "Flow.hpp"
 #include "I18N.hpp"
+#include "GradientDirection.hpp"
 #include "Layer.hpp"
 #include "Model.hpp"
 #include "MultiMaterialSegmentation.hpp"
@@ -1065,7 +1066,12 @@ template<typename ThrowOnCancel>
 static inline void apply_mm_segmentation(PrintObject &print_object, ThrowOnCancel throw_on_cancel)
 {
     // Returns MM segmentation based on painting in MM segmentation gizmo
-    std::vector<std::vector<ExPolygons>> segmentation = multi_material_segmentation_by_painting(print_object, throw_on_cancel);
+    std::vector<std::vector<ExPolygons>> segmentation;
+    if (print_object.is_mm_painted())
+        segmentation = multi_material_segmentation_by_painting(print_object, throw_on_cancel);
+    // Elslicer: a gradient mix running sideways splits into its two filaments, painted or not.
+    GradientDirection::split(print_object, segmentation);
+    segmentation.resize(print_object.layer_count(), std::vector<ExPolygons>(print_object.print()->config().filament_diameter.size()));
     assert(segmentation.size() == print_object.layer_count());
     tbb::parallel_for(
         tbb::blocked_range<size_t>(0, segmentation.size(), std::max(segmentation.size() / 128, size_t(1))),
@@ -1401,7 +1407,8 @@ void PrintObject::slice_volumes()
     // Is any ModelVolume multi-material painted?
     if (const auto& volumes = this->model_object()->volumes;
         m_print->config().filament_diameter.size() > 1 && // BBS
-        std::find_if(volumes.begin(), volumes.end(), [](const ModelVolume* v) { return !v->mmu_segmentation_facets.empty(); }) != volumes.end()) {
+        (std::find_if(volumes.begin(), volumes.end(), [](const ModelVolume* v) { return !v->mmu_segmentation_facets.empty(); }) != volumes.end() ||
+         !GradientDirection::split_filaments(*this->model_object(), m_print->config()).empty())) {
 
         // If XY Size compensation is also enabled, notify the user that XY Size compensation
         // would not be used because the object is multi-material painted.

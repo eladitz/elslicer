@@ -34,6 +34,7 @@
 #include "libslic3r/Format/bbs_3mf.hpp"
 #include "libslic3r/Print.hpp"
 #include "libslic3r/LocalesUtils.hpp"
+#include "libslic3r/HeadReference.hpp"
 #include <cstdlib>
 #include <limits>
 #include <memory>
@@ -4522,6 +4523,9 @@ bool PartPlate::check_outside(int obj_id, int instance_id, BoundingBoxf3* boundi
 
 	ModelObject* object = m_model->objects[obj_id];
 	ModelInstance* instance = object->instances[instance_id];
+	// Elslicer: the sizing head is never printed, so it may be bigger than the printer.
+	if (HeadReference::is_head(*object))
+		return false;
 
 	BoundingBoxf3 instance_box = bounding_box? *bounding_box: object->instance_convex_hull_bounding_box(instance_id);
 	// Reuse the hull across exclusion and IMEX checks, but do not build it for

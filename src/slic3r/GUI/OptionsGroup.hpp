@@ -175,6 +175,8 @@ public:
 
     std::function<void(wxWindow* win)> rescale_extra_column_item { nullptr };
     std::function<void(wxWindow* win)> rescale_near_label_widget { nullptr };
+    // Elslicer: when set, the section's title row gets a "Guide me" button that calls it.
+    std::function<void()> guide { nullptr };
 
     std::function<void(const t_config_option_key& opt_key)> edit_custom_gcode { nullptr };
 

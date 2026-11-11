@@ -4,6 +4,8 @@
 #include "IPrinterAgent.hpp"
 #include "CalibUtils.hpp"
 #include "Flashforge.hpp"
+#include "libslic3r/GradientDirection.hpp"
+#include "libslic3r/HeadReference.hpp"
 #include "libslic3r/Config.hpp"
 #include "libslic3r_version.h"
 
@@ -38,6 +40,7 @@
 #include "libslic3r/FlushVolCalc.hpp"
 #include "libslic3r/Point.hpp"
 #include "libslic3r/GCode/GCodeProcessor.hpp"
+#include "libslic3r/GCode/WipeTowerEstimate.hpp"
 #include "libslic3r/Technologies.hpp"
 #include "libslic3r/BoundingBox.hpp"
 #include "libslic3r/PrintBase.hpp"
@@ -950,6 +953,7 @@ struct Sidebar::priv
     // scrolled_sizer. BBS hosts the equivalent widgets inside an m_filament_area_wrapper
     // that Orca's sidebar has no counterpart for, so these are parented to p->scrolled.
     wxPanel*          m_btn_add_mixed_filament{nullptr};  // "+ Add Mixed Filament" full-width button
+    wxPanel*          m_btn_palette{nullptr};             // Elslicer: "Create a Palette", beside it
     wxPanel*          m_panel_mixed_title{nullptr};       // title row: "Mixed Filament" + add/del buttons
     StaticLine*       m_text_mixed_title{nullptr};
     ScalableButton*   m_btn_mixed_add{nullptr};
@@ -3458,6 +3462,29 @@ Sidebar::Sidebar(Plater *parent)
     }
     wrapper_sizer->Add(p->m_btn_add_mixed_filament, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP | wxBOTTOM, FromDIP(8));
 
+    // Elslicer: the mixes between two filaments at once.
+    p->m_btn_palette = new wxPanel(p->m_filament_area_wrapper, wxID_ANY);
+    p->m_btn_palette->SetBackgroundColour(StateColor::darkModeColorFor(wxColour("#F8F8F8")));
+    p->m_btn_palette->SetMinSize(wxSize(-1, FromDIP(23)));
+    {
+        auto* btn_sizer = new wxBoxSizer(wxHORIZONTAL);
+        auto* icon      = new ScalableButton(p->m_btn_palette, wxID_ANY, "color_palette", wxEmptyString, wxDefaultSize, wxDefaultPosition,
+                                             wxBU_EXACTFIT | wxNO_BORDER, false, 16);
+        auto* label     = new wxStaticText(p->m_btn_palette, wxID_ANY, _L("Create a Palette"), wxDefaultPosition, wxDefaultSize, 0);
+        label->SetFont(::Label::Body_13);
+        btn_sizer->AddStretchSpacer();
+        btn_sizer->Add(icon, 0, wxALIGN_CENTER_VERTICAL | wxRIGHT, FromDIP(4));
+        btn_sizer->Add(label, 0, wxALIGN_CENTER_VERTICAL);
+        btn_sizer->AddStretchSpacer();
+        p->m_btn_palette->SetSizer(btn_sizer);
+        p->m_btn_palette->SetCursor(wxCursor(wxCURSOR_HAND));
+        auto on_click = [](wxMouseEvent&) { show_palette_dialog(); };
+        p->m_btn_palette->Bind(wxEVT_LEFT_UP, on_click);
+        label->Bind(wxEVT_LEFT_UP, on_click);
+        icon->Bind(wxEVT_BUTTON, [](wxCommandEvent&) { show_palette_dialog(); });
+    }
+    wrapper_sizer->Add(p->m_btn_palette, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
+
     // 2) Title row with add / remove buttons, shown once a mixed filament exists.
     p->m_panel_mixed_title = new wxPanel(p->m_filament_area_wrapper, wxID_ANY);
     p->m_panel_mixed_title->SetBackgroundColour(StateColor::darkModeColorFor(*wxWHITE));
@@ -3483,6 +3510,12 @@ Sidebar::Sidebar(Plater *parent)
         p->m_btn_mixed_del_all->SetToolTip(_L("Remove all mixed filaments"));
         p->m_btn_mixed_del_all->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { remove_all_mixed_filaments(); });
         title_sizer->Add(p->m_btn_mixed_del_all, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(SidebarProps::IconSpacing()));
+
+        // Elslicer: the mixes between two filaments at once.
+        auto* btn_palette = new ScalableButton(p->m_panel_mixed_title, wxID_ANY, "color_palette");
+        btn_palette->SetToolTip(_L("Create a palette between two filaments"));
+        btn_palette->Bind(wxEVT_BUTTON, [](wxCommandEvent&) { show_palette_dialog(); });
+        title_sizer->Add(btn_palette, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, FromDIP(SidebarProps::IconSpacing()));
 
         p->m_btn_mixed_add = new ScalableButton(p->m_panel_mixed_title, wxID_ANY, "add_filament");
         p->m_btn_mixed_add->SetToolTip(_L("Add mixed filament"));
@@ -4553,6 +4586,7 @@ void Sidebar::update_mixed_filament_list()
 
     bool at_limit = (wxGetApp().preset_bundle->filament_presets.size() >= size_t(EnforcerBlockerType::ExtruderMax));
     p->m_btn_add_mixed_filament->Show(can_mix && !has_mixed && !at_limit);
+    p->m_btn_palette->Show(can_mix && !has_mixed && !at_limit);
     p->m_panel_mixed_title->Show(has_mixed);
     p->m_mixed_scroll_area->Show(has_mixed);
     p->m_panel_mixed_content->Show(has_mixed);
@@ -5325,6 +5359,31 @@ int Sidebar::ensure_mixed_filament(const std::vector<unsigned int> &components, 
     result.components = components;
     result.ratios     = ratios;
     const size_t created_at = wxGetApp().preset_bundle->filament_presets.size();
+    if (!create_mixed_filament_from_result(this, result, color_strs))
+        return -1;
+    return int(created_at);
+}
+
+int Sidebar::ensure_gradient_mixed_filament(unsigned int first, unsigned int second)
+{
+    if (first == second || p->combos_filament.size() < 2)
+        return -1;
+    // One already there, running the same way: its first filament dominates where it starts.
+    for (const GradientDirection::Slot &slot : GradientDirection::gradient_slots(wxGetApp().preset_bundle->project_config))
+        if (slot.first == first && slot.second == second && GradientDirection::first_share(slot, 0.) >= 0.5 &&
+            GradientDirection::first_share(slot, 1.) <= 0.5)
+            return int(slot.slot) - 1;
+    if (wxGetApp().preset_bundle->filament_presets.size() >= size_t(EnforcerBlockerType::ExtruderMax))
+        return -1;
+
+    std::vector<std::string> color_strs, names, types;
+    collect_physical_filament_info(color_strs, names, types);
+    MixedFilamentResult result;
+    result.components         = {first, second};
+    result.ratios             = {50, 50};
+    result.gradient_enabled   = true;
+    result.gradient_direction = 0;
+    const size_t created_at   = wxGetApp().preset_bundle->filament_presets.size();
     if (!create_mixed_filament_from_result(this, result, color_strs))
         return -1;
     return int(created_at);
@@ -7539,6 +7598,16 @@ struct Plater::priv
         POSTPONE_VALIDATION_ERROR_MESSAGE  = 4,
     };
     void update(unsigned int flags = 0);
+    // Elslicer: fits an object dropped onto a sizing head to it, and lets one moved off it drop to the bed again.
+    void fit_moved_to_head();
+    // The sizing head under an instance's middle, seen from above.
+    std::optional<BoundingBoxf3> head_under(const ModelObject &object, int inst_idx) const;
+    // Asks how it is worn and fits it. False if it couldn't be fitted.
+    bool ask_head_fit(ModelObject &object, int inst_idx, const BoundingBoxf3 &head);
+    std::set<ObjectID> fitted_to_head;
+    // Where each fitted object was before its first fit, so every fit starts from the same place.
+    std::map<ObjectID, Geometry::Transformation> head_fit_from;
+    std::map<ObjectID, HeadWear> head_wear;
     void select_view(const std::string& direction);
     //BBS: add no_slice option
     void select_view_3D(const std::string& name, bool no_slice = true);
@@ -7788,6 +7857,7 @@ struct Plater::priv
     void on_slicing_update(SlicingStatusEvent&);
     void on_slicing_completed(wxCommandEvent&);
     void on_process_completed(SlicingProcessCompletedEvent&);
+    bool move_wipe_tower_to_fit();
     void on_export_began(wxCommandEvent&);
     void on_export_finished(wxCommandEvent&);
     void on_slicing_began();
@@ -8281,7 +8351,7 @@ Plater::priv::priv(Plater *q, MainFrame *main_frame)
         });
         view3D_canvas->Bind(EVT_GLCANVAS_INCREASE_INSTANCES, [this](Event<int>& evt)
             { if (evt.data == 1) this->q->increase_instances(); else if (this->can_decrease_instances()) this->q->decrease_instances(); });
-        view3D_canvas->Bind(EVT_GLCANVAS_INSTANCE_MOVED, [this](SimpleEvent&) { update(); });
+        view3D_canvas->Bind(EVT_GLCANVAS_INSTANCE_MOVED, [this](SimpleEvent&) { fit_moved_to_head(); update(); });
         view3D_canvas->Bind(EVT_GLCANVAS_FORCE_UPDATE, [this](SimpleEvent&) { update(); });
         view3D_canvas->Bind(EVT_GLCANVAS_INSTANCE_ROTATED, [this](SimpleEvent&) { update(); });
         view3D_canvas->Bind(EVT_GLCANVAS_INSTANCE_SCALED, [this](SimpleEvent&) { update(); });
@@ -8588,6 +8658,118 @@ Plater::priv::~priv()
     // Saves the database of visited (already shown) hints into hints.ini.
     notification_manager->deactivate_loaded_hints();
     main_frame->m_tabpanel->Unbind(wxEVT_NOTEBOOK_PAGE_CHANGING, &priv::on_tab_selection_changing, this);
+}
+
+std::optional<BoundingBoxf3> Plater::priv::head_under(const ModelObject &object, int inst_idx) const
+{
+    const Vec3d                  middle = object.instance_bounding_box(inst_idx).center();
+    std::optional<BoundingBoxf3> head;
+    for (const ModelObject *other : model.objects)
+        if (HeadReference::is_head(*other))
+            for (size_t i = 0; i < other->instances.size(); ++i) {
+                const BoundingBoxf3 box = other->instance_bounding_box(i);
+                const Vec3d         d = middle - box.center(), half = 0.5 * box.size();
+                if (half.x() > 0. && half.y() > 0. && std::hypot(d.x() / half.x(), d.y() / half.y()) <= 1.)
+                    head = box;
+            }
+    return head;
+}
+
+void Plater::priv::fit_moved_to_head()
+{
+    const Selection &selection = view3D->get_canvas3d()->get_selection();
+    if (!selection.is_single_full_instance())
+        return;
+    const int obj_idx = selection.get_object_idx(), inst_idx = selection.get_instance_idx();
+    if (obj_idx < 0 || obj_idx >= int(model.objects.size()) || inst_idx < 0)
+        return;
+    ModelObject *object = model.objects[obj_idx];
+    if (HeadReference::is_head(*object))
+        return;
+
+    const std::optional<BoundingBoxf3> head = head_under(*object, inst_idx);
+    if (!head) {
+        // Moved off the head, so it can be printed again.
+        head_fit_from.erase(object->id());
+        if (fitted_to_head.erase(object->id()) > 0) {
+            object->auto_drop = true;
+            object->ensure_on_bed();
+        }
+        return;
+    }
+    const auto wear = head_wear.find(object->id());
+    if (wear != head_wear.end() && wear->second.keep_size) {
+        // Left where it was put, and floating there.
+        object->auto_drop = false;
+        fitted_to_head.insert(object->id());
+        return;
+    }
+    ask_head_fit(*object, inst_idx, *head);
+}
+
+bool Plater::priv::ask_head_fit(ModelObject &object, int inst_idx, const BoundingBoxf3 &head)
+{
+    ModelInstance                 *instance = object.instances[inst_idx];
+    const auto                     from_it  = head_fit_from.find(object.id());
+    const Geometry::Transformation from     = from_it != head_fit_from.end() ? from_it->second : instance->get_transformation();
+    const Geometry::Transformation now      = instance->get_transformation();
+    std::vector<Vec3d>             points;
+    for (const ModelVolume *volume : object.volumes)
+        if (volume->is_model_part()) {
+            const Transform3d to_bed = from.get_matrix() * volume->get_matrix();
+            for (const stl_vertex &vertex : volume->mesh().its.vertices)
+                points.push_back(to_bed * vertex.cast<double>());
+        }
+    const std::optional<HeadReference::Fit> tiara    = HeadReference::fit_to_head(points, head);
+    const std::optional<HeadReference::Fit> headband = HeadReference::fit_headband(points, head);
+    const std::optional<HeadReference::Fit> masks[2] = {HeadReference::fit_mask(points, head, false), HeadReference::fit_mask(points, head, true)};
+    std::vector<std::string> ways;
+    if (tiara)
+        ways.emplace_back("tiara");
+    if (headband)
+        ways.emplace_back("headband");
+    if (masks[0] && masks[1])
+        ways.emplace_back("mask");
+    if (ways.empty())
+        return false;
+
+    const auto fit_for = [&](const HeadWear &wear) -> const std::optional<HeadReference::Fit> & {
+        return wear.way == "headband" ? headband : wear.way == "mask" ? masks[wear.flipped ? 1 : 0] : tiara;
+    };
+    // Shows each way on the head as it is picked, always starting from the same place.
+    const auto place = [&](const std::optional<HeadReference::Fit> &fit) {
+        instance->set_transformation(fit ? Geometry::Transformation(fit->transform * from.get_matrix()) : now);
+        object.invalidate_bounding_box();
+        update();
+        return std::make_pair(fit ? int(std::lround(100. * fit->scale)) : 100, !fit || fit->around);
+    };
+    HeadWear initial;
+    if (const auto known = head_wear.find(object.id()); known != head_wear.end())
+        initial = known->second;
+    else
+        initial.way = wxGetApp().app_config->get("elslicer_head_wear");
+    q->take_snapshot(_u8L("Fit to head"));
+    const std::optional<HeadWear> wear = choose_head_wear(object.name, ways, initial, [&](const HeadWear &wear) { return place(fit_for(wear)); });
+    if (!wear) {
+        place(std::nullopt);
+        return false;
+    }
+    wxGetApp().app_config->set("elslicer_head_wear", wear->way);
+    const std::optional<HeadReference::Fit> &fit = fit_for(*wear);
+    place(fit);
+    head_fit_from[object.id()] = from;
+    head_wear[object.id()]     = *wear;
+    // On the head it floats, so it mustn't drop to the bed.
+    object.auto_drop = false;
+    fitted_to_head.insert(object.id());
+    if (fit->around)
+        // xgettext:no-c-format, no-boost-format
+        notification_manager->push_notification(Slic3r::format(_u8L("%1% now fits the head, at %2%%% of the size it was. Move it off the head to print it."),
+                                                               object.name, int(std::lround(100. * fit->scale))));
+    else
+        notification_manager->push_notification(Slic3r::format(_u8L("%1% doesn't go around the head, so it sits on top at its own size. Move it off the head to print it."),
+                                                               object.name));
+    return true;
 }
 
 void Plater::priv::update(unsigned int flags)
@@ -9179,6 +9361,57 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
 
     const bool plate_was_empty = model.objects.empty();
     bool       other_printer_project = false;
+    // Elslicer: puts a project's mixed filaments into the same slots here, without its other settings.
+    const auto restore_project_mixes = [this](const DynamicPrintConfig &file) {
+        const auto *file_mixed   = file.option<ConfigOptionBools>("filament_is_mixed");
+        const auto *file_colours = file.option<ConfigOptionStrings>("filament_colour");
+        if (file_mixed == nullptr || file_colours == nullptr ||
+            std::none_of(file_mixed->values.begin(), file_mixed->values.end(), [](unsigned char v) { return v != 0; }))
+            return;
+        const size_t count = std::min(file_colours->values.size(), size_t(MAXIMUM_EXTRUDER_NUMBER));
+        if (count < 2 || file_mixed->values.size() < count)
+            return;
+        PresetBundle &bundle = *wxGetApp().preset_bundle;
+        if (bundle.filament_presets.size() < count)
+            bundle.set_num_filaments(unsigned(count));
+        DynamicPrintConfig &project = bundle.project_config;
+        const size_t        slots   = bundle.filament_presets.size();
+        for (const char *key : {"filament_is_mixed", "filament_mixed_gradient", "filament_mixed_gradient_per_part"})
+            if (auto *to = project.option<ConfigOptionBools>(key)) {
+                const auto *from = file.option<ConfigOptionBools>(key);
+                to->values.resize(slots, false);
+                for (size_t i = 0; i < slots; ++i)
+                    to->values[i] = from != nullptr && i < count && i < from->values.size() && from->values[i];
+            }
+        for (const char *key : {"filament_mixed_components", "filament_mixed_sublayer_ratios", "filament_mixed_gradient_range",
+                                "filament_mixed_gradient_curve"})
+            if (auto *to = project.option<ConfigOptionStrings>(key)) {
+                const auto *from = file.option<ConfigOptionStrings>(key);
+                to->values.resize(slots, std::string{});
+                for (size_t i = 0; i < slots; ++i)
+                    to->values[i] = from != nullptr && i < count && i < from->values.size() ? from->values[i] : std::string{};
+            }
+        // A mix shows its own colour and takes its first filament's preset, as when it is made here.
+        auto       &colours       = project.option<ConfigOptionStrings>("filament_colour")->values;
+        auto       *multi_colours = project.option<ConfigOptionStrings>("filament_multi_colour");
+        const auto *components    = project.option<ConfigOptionStrings>("filament_mixed_components");
+        for (size_t i = 0; i < count; ++i) {
+            if (!file_mixed->values[i])
+                continue;
+            if (i < colours.size())
+                colours[i] = file_colours->values[i];
+            if (multi_colours != nullptr && i < multi_colours->values.size())
+                multi_colours->values[i] = file_colours->values[i];
+            const std::vector<unsigned int> parts = parse_mixed_components(components->values[i]);
+            if (!parts.empty() && parts.front() >= 1 && parts.front() <= slots)
+                bundle.filament_presets[i] = bundle.filament_presets[parts.front() - 1];
+        }
+        const size_t filament_count = bundle.filament_presets.size();
+        partplate_list.on_filament_added(filament_count);
+        q->on_filament_count_change(filament_count);
+        sidebar->update_mixed_filament_list();
+        bundle.export_selections(*wxGetApp().app_config);
+    };
     bool load_model = strategy & LoadStrategy::LoadModel;
     bool load_config = strategy & LoadStrategy::LoadConfig;
     bool imperial_units = strategy & LoadStrategy::ImperialUnits;
@@ -9557,6 +9790,9 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                         if (!project_presets.empty() || file_printer == nullptr || file_printer->value != local_printer) {
                             skip_project_config(wxString());
                             other_printer_project = true;
+                            // The objects name their filaments by slot, so the project's mixes come along
+                            // into the same slots; the physical filaments stay the local ones.
+                            restore_project_mixes(config_loaded);
                         }
                     }
 
@@ -9573,7 +9809,9 @@ std::vector<size_t> Plater::priv::load_files(const std::vector<fs::path>& input_
                         }
                         int size = extruderIds.size() == 0 ? 0 : *(extruderIds.rbegin());
 
-                        int filament_size = sidebar->combos_filament().size();
+                        // Elslicer: count every slot, mixes too. Counting only the physical ones (the
+                        // combo boxes) cut the list back to them and refilled it with plain filaments.
+                        int filament_size = int(wxGetApp().preset_bundle->filament_presets.size());
                         while (filament_size < MAXIMUM_EXTRUDER_NUMBER && filament_size < size) {
                             int         filament_count = filament_size + 1;
                             wxColour    new_col        = Plater::get_next_color_for_filament();
@@ -13549,6 +13787,56 @@ bool Plater::priv::warnings_dialog()
 }
 
 //BBS: add project slice logic
+// The slicer sizes the prime tower from what the plate prints, so it can come out deeper than the
+// estimate it was placed by and run off the plate. Moves it to the spot nearest where it was that
+// holds the real tower clear of the objects. False when it fits already (something else failed),
+// or when no spot on the plate holds it.
+bool Plater::priv::move_wipe_tower_to_fit()
+{
+    if (printer_technology != ptFFF || background_process.m_fff_print == nullptr)
+        return false;
+    const Print *print = background_process.m_fff_print;
+    PartPlate   *plate = background_process.get_current_plate();
+    if (plate == nullptr || !print->wipe_tower_data().wipe_tower_mesh_data)
+        return false;
+    const int           index    = plate->get_index();
+    DynamicPrintConfig &proj_cfg = wxGetApp().preset_bundle->project_config;
+    ConfigOptionFloats *xs       = proj_cfg.option<ConfigOptionFloats>("wipe_tower_x");
+    ConfigOptionFloats *ys       = proj_cfg.option<ConfigOptionFloats>("wipe_tower_y");
+    if (xs == nullptr || ys == nullptr || index >= int(xs->values.size()) || index >= int(ys->values.size()))
+        return false;
+
+    // The real footprint, brim included, about the tower's anchor, in plate coordinates.
+    Polygon tower = print->wipe_tower_data().wipe_tower_mesh_data->bottom;
+    tower.rotate(Geometry::deg2rad(print->config().wipe_tower_rotation_angle.value));
+    const Point at(scaled(xs->get_at(index)), scaled(ys->get_at(index)));
+    Polygon     placed = tower;
+    placed.translate(at);
+    const Polygons printable = print->get_extruder_shared_printable_polygon();
+    if (printable.empty() || diff(Polygons{placed}, printable).empty())
+        return false;
+
+    BoundingBox room = get_extents(printable);
+    room.offset(-scaled(WIPE_TOWER_MARGIN));
+    const BoundingBox size = get_extents(tower);
+    const BoundingBox anchors(room.min - size.min, room.max - size.max);
+    if (anchors.min.x() > anchors.max.x() || anchors.min.y() > anchors.max.y())
+        return false;
+    const std::optional<Point> clear = nearest_clear_wipe_tower_anchor(anchors, tower,
+        plate->wipe_tower_obstacles(wxGetApp().preset_bundle->full_config()), at);
+    if (!clear)
+        return false;
+
+    ConfigOptionFloat x(unscaled(clear->x())), y(unscaled(clear->y()));
+    xs->set_at(&x, index, 0);
+    ys->set_at(&y, index, 0);
+    notification_manager->push_notification(NotificationType::CustomNotification, NotificationManager::NotificationLevel::RegularNotificationLevel,
+        // TRN %1% is the plate number.
+        format(_u8L("The prime tower on plate %1% came out bigger than the space it was in, so it was moved to free space on the plate."), index + 1));
+    view3D->get_canvas3d()->reload_scene(true);
+    return true;
+}
+
 void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
 {
     BOOST_LOG_TRIVIAL(debug) << __FUNCTION__ << boost::format(": enter, m_ignore_event %1%, status %2%")%m_ignore_event %evt.status();
@@ -13587,7 +13875,13 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
     // This bool stops showing export finished notification even when process_completed_with_error is false
     bool has_error = false;
     std::string lifecycle_error_msg;
-    if (evt.error()) {
+    // A prime tower that came out too big for where it stood is moved and sliced again, not reported.
+    const bool tower_moved = evt.error() && !evt.cancelled() && move_wipe_tower_to_fit();
+    if (tower_moved) {
+        has_error   = true;
+        is_finished = true;
+    }
+    if (evt.error() && !tower_moved) {
         auto message = evt.format_error_message();
         lifecycle_error_msg = message.first;
         if (evt.critical_error()) {
@@ -13728,6 +14022,9 @@ void Plater::priv::on_process_completed(SlicingProcessCompletedEvent &evt)
 
 
 
+
+    if (tower_moved)
+        wxGetApp().CallAfter([this]() { q->reslice(); });
 
     if (is_finished)
     {
@@ -21236,7 +21533,7 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     PrintHostJob upload_job(physical_printer_config);
     if (upload_job.empty())
         return;
-    if (!journal_check_before_print())
+    if (!support_check_before_print() || !journal_check_before_print() || !printer_ready_check_before_print())
         return;
 
     // Orca: the use_3mf printer option makes us send a .gcode.3mf to the printer
@@ -22624,6 +22921,33 @@ BackgroundSlicingProcess& Plater::background_process() { return p->background_pr
 
 void Plater::center_selection()             { p->center_selection(); }
 void Plater::drop_selection()               { p->drop_selection(); }
+
+bool Plater::can_fit_selected_to_head() const
+{
+    const Selection &selection = p->view3D->get_canvas3d()->get_selection();
+    if (!selection.is_single_full_instance())
+        return false;
+    const int obj_idx = selection.get_object_idx();
+    if (obj_idx < 0 || obj_idx >= int(p->model.objects.size()) || HeadReference::is_head(*p->model.objects[obj_idx]))
+        return false;
+    return std::any_of(p->model.objects.begin(), p->model.objects.end(), [](const ModelObject *object) { return HeadReference::is_head(*object); });
+}
+
+void Plater::fit_selected_to_head()
+{
+    if (!can_fit_selected_to_head())
+        return;
+    const Selection &selection = p->view3D->get_canvas3d()->get_selection();
+    ModelObject     *object    = p->model.objects[selection.get_object_idx()];
+    const int        inst_idx  = selection.get_instance_idx();
+    const std::optional<BoundingBoxf3> head = p->head_under(*object, inst_idx);
+    if (!head) {
+        p->notification_manager->push_notification(_u8L("Move it onto the sizing head first."));
+        return;
+    }
+    p->ask_head_fit(*object, inst_idx, *head);
+    p->update();
+}
 void Plater::mirror(Axis axis)              { p->mirror(axis); }
 void Plater::split_object(bool auto_drop)   { p->split_object(auto_drop); }
 void Plater::split_volume()                 { p->split_volume(); }

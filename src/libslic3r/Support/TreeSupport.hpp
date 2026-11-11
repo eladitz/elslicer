@@ -409,6 +409,8 @@ public:
     bool  has_sharp_tails = false;
     bool  has_cantilever = false;
     double max_cantilever_dist = 0;
+    // Elslicer: area of every overhang past the threshold angle, summed over all layers (scaled units squared).
+    double overhang_area = 0;
     SupportType support_type;
 
     std::unique_ptr<FillLightning::Generator> generator;

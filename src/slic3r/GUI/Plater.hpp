@@ -305,6 +305,9 @@ public:
     // a texture displacement bake turns each mix it painted with into a slot, which is what moves the
     // interleaving from its own paint mask to the slicer, where it happens per layer.
     int ensure_mixed_filament(const std::vector<unsigned int> &components, const std::vector<int> &ratios);
+    // Elslicer: the gradient mix running from `first` to `second` (1-based physical filaments), creating it if
+    // there is none. Returns the 0-based filament index, or -1 when there is no room for another.
+    int ensure_gradient_mixed_filament(unsigned int first, unsigned int second);
     void edit_mixed_filament(size_t idx);
     void delete_mixed_filament_at(size_t idx);
     // Drops every mixed filament at once, after confirming. The texture displacement gizmo can create
@@ -772,6 +775,9 @@ public:
     void clone_selection();
     void center_selection();
     void drop_selection();
+    // Elslicer: asks how the selected object is worn on the sizing head it sits on, and fits it.
+    void fit_selected_to_head();
+    bool can_fit_selected_to_head() const;
     void search(bool plater_is_active, Preset::Type  type, wxWindow *tag, TextInput *etag, wxWindow *stag);
     void mirror(Axis axis);
     void split_object(bool auto_drop = true);

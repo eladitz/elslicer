@@ -425,6 +425,9 @@ public:
 	//BBS update plater presets if update_plater_presets = true
 	void			update_tab_ui(bool update_plater_presets = false);
 	void			load_config(const DynamicPrintConfig& config);
+    // Elslicer: the "Guide me" buttons on the sections, and putting in what the guide chose.
+    void            add_setting_guides();
+    virtual void    apply_guide_changes(const DynamicPrintConfig &changes);
 	// Host/plugin API: set one option of this tab's currently edited preset from its serialized
 	// string value, then run the same committed-change path a field edit runs. `opt_key` must be a
 	// setting of this tab's preset type, so a key of another preset type (e.g. a printer setting
@@ -606,6 +609,7 @@ public:
 	void build() override;
 
 	void set_model_config(std::map<ObjectBase *, ModelConfig *> const & object_configs);
+	void apply_guide_changes(const DynamicPrintConfig &changes) override;
 
 	bool has_model_config() const { return !m_object_configs.empty(); }
 

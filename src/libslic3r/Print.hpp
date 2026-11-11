@@ -345,6 +345,8 @@ public:
     // Print::apply compares it against the current one to detect a change that PrintRegionConfig
     // alone would not reveal, and regenerates the regions when it differs.
     std::vector<bool>                           last_slot_per_part_enabled;
+    // Elslicer: the painted filaments these regions were made for, so a change in them remakes the regions.
+    std::vector<unsigned int>                   last_painting_extruders;
 
     void ref_cnt_inc() { ++ m_ref_cnt; }
     void ref_cnt_dec() { if (-- m_ref_cnt == 0) delete this; }

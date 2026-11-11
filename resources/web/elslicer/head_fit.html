@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Fit to Head</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .ways { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .way { text-align: left; padding: 12px; }
+  .way.on { border-color: var(--accent); color: var(--accent); }
+  .way small { display: block; color: var(--muted); margin-top: 4px; }
+  .way:disabled { opacity: 0.4; }
+  #flip { margin-top: 10px; }
+  .tick { display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+</style>
+</head>
+<body>
+<h1>How is it worn?</h1>
+<p class="sub" id="object"></p>
+<div class="ways">
+  <button class="way" id="tiara">Tiara or crown<small>Around the head, at the forehead</small></button>
+  <button class="way" id="headband">Headband<small>Over the top, from ear to ear</small></button>
+  <button class="way" id="mask">Mask<small>Over the face</small></button>
+</div>
+<button id="flip" hidden>Turn it the other way up</button>
+<label class="tick"><input type="checkbox" id="keep_size"> Don't fit or resize it again when I move it on the head</label>
+<p id="note" class="muted"></p>
+<div class="footer">
+  <button id="cancel">Cancel</button>
+  <button id="keep" class="primary">Keep</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+const all = ['tiara', 'headband', 'mask'];
+let way = '', flipped = false;
+
+const choice = () => ({way, flipped, keep_size: $('keep_size').checked});
+
+function show() {
+  for (const id of all) $(id).classList.toggle('on', id === way);
+  $('flip').hidden = way !== 'mask';
+  post({cmd: 'preview', ...choice()});
+}
+
+function choose(chosen) {
+  if (chosen !== way) flipped = false;
+  way = chosen;
+  show();
+}
+
+window.fromApp = message => {
+  if (message.type === 'object') {
+    $('object').textContent = `${message.name} is shown on the head the way you pick, so you can see where it sits.`;
+    for (const id of all) $(id).disabled = !message.ways.includes(id);
+    $('keep_size').checked = message.keep_size;
+    way = message.ways.includes(message.way) ? message.way : message.ways[0];
+    flipped = message.flipped;
+    show();
+  } else if (message.type === 'fitted') {
+    $('note').textContent = message.around ? `At ${message.percent}% of the size it was.` :
+      "It doesn't go around the head, so it sits on top at its own size.";
+  }
+};
+for (const id of all) $(id).onclick = () => choose(id);
+$('flip').onclick = () => { flipped = !flipped; show(); };
+$('cancel').onclick = () => post({cmd: 'cancel'});
+$('keep').onclick = () => post({cmd: 'keep', ...choice()});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

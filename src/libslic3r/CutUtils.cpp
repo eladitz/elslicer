@@ -25,6 +25,77 @@ namespace Slic3r {
 
 using namespace Geometry;
 
+double screw_connector_pitch(double diameter)
+{
+    return std::clamp(0.12 * diameter + 0.3, 1.0, 4.0);
+}
+
+// A right-handed threaded rod in mm along +z from 0 to length, with 45 degree flanks and flat crests and roots a tenth
+// of the pitch wide, so it prints standing up. z_start is the z of the rod's bottom measured from the cut plane: the
+// helix is fixed to the cut plane, so a peg and its hole meet in their original places when the parts are screwed home.
+// A peg narrows to its root over the last thread depth, and a hole opens into a countersink at the cut plane, so the
+// first turn catches easily. A hole ends past its length in a 45 degree cone as tall as its radius instead of a flat
+// roof, so the part printed cut face down needs no support inside it.
+static indexed_triangle_set its_make_thread(double major_radius, double length, double pitch, double z_start, bool hole)
+{
+    const double depth   = 0.4 * pitch;
+    const double minor   = major_radius - depth;
+    const int    sectors = 96; // a multiple of 4, so the crests reach the bounding box on both axes
+    const int    rows    = std::max(2, int(std::ceil(length / (pitch / 20.))));
+    // 0 at the root, 1 at the crest. Rows are a twentieth of the pitch apart, so every crest and root is sampled.
+    auto profile = [](double t) {
+        t -= std::floor(t);
+        if (t < 0.4)
+            return t / 0.4;
+        if (t < 0.5)
+            return 1.;
+        if (t < 0.9)
+            return (0.9 - t) / 0.4;
+        return 0.;
+    };
+
+    indexed_triangle_set its;
+    its.vertices.reserve(2 + std::size_t(rows + 1) * sectors);
+    its.vertices.emplace_back(0.f, 0.f, 0.f);
+    its.vertices.emplace_back(0.f, 0.f, float(hole ? length + major_radius : length));
+    for (int k = 0; k <= rows; ++k) {
+        const double z  = length * k / rows;
+        const double zw = z_start + z;
+        for (int j = 0; j < sectors; ++j) {
+            const double turn = double(j) / sectors;
+            double       r    = minor + depth * profile(zw / pitch - turn);
+            r = hole ? std::max(r, major_radius - zw) : std::min(r, minor + (length - z));
+            const double a = 2. * PI * turn;
+            its.vertices.emplace_back(float(r * std::cos(a)), float(r * std::sin(a)), float(z));
+        }
+    }
+    auto v = [](int k, int j) { return 2 + k * sectors + (j % sectors); };
+    its.indices.reserve(2 * std::size_t(rows + 1) * sectors);
+    for (int j = 0; j < sectors; ++j) {
+        its.indices.emplace_back(0, v(0, j + 1), v(0, j));
+        its.indices.emplace_back(1, v(rows, j), v(rows, j + 1));
+        for (int k = 0; k < rows; ++k) {
+            its.indices.emplace_back(v(k, j), v(k, j + 1), v(k + 1, j + 1));
+            its.indices.emplace_back(v(k, j), v(k + 1, j + 1), v(k + 1, j));
+        }
+    }
+    return its;
+}
+
+// Scales a mesh made in mm into the unit cylinder of the connector meshes.
+static void to_unit_connector(indexed_triangle_set &its, double radius, double height)
+{
+    for (stl_vertex &p : its.vertices)
+        p = stl_vertex(float(p.x() / radius), float(p.y() / radius), float(p.z() / height));
+}
+
+indexed_triangle_set its_make_screw_connector(double radius, double height)
+{
+    indexed_triangle_set its = its_make_thread(radius, height, screw_connector_pitch(2. * radius), 0., false);
+    to_unit_connector(its, radius, height);
+    return its;
+}
+
 static void apply_tolerance(ModelVolume* vol)
 {
     ModelVolume::CutInfo& cut_info = vol->cut_info;
@@ -47,7 +118,8 @@ static void apply_tolerance(ModelVolume* vol)
     // A plug or snap sits on one side of the plane: its hole grows by the tolerance away from the cut face
     // and by the overlap through it, so its center moves by half the difference.
     if (cut_info.connector_type == CutConnectorType::Plug ||
-        cut_info.connector_type == CutConnectorType::Snap) {
+        cut_info.connector_type == CutConnectorType::Snap ||
+        cut_info.connector_type == CutConnectorType::Screw) {
         sf[Z] += CONNECTOR_HOLE_OVERLAP;
         const double z_offset = 0.5 * (static_cast<double>(cut_info.height_tolerance) - CONNECTOR_HOLE_OVERLAP);
         vol->set_offset(vol->get_offset() + rotation_transform(vol->get_rotation()) * (z_offset * Vec3d::UnitZ()));
@@ -119,6 +191,24 @@ static void process_connector_cut(  ModelVolume* volume, const Transform3d& inst
                 vol->set_type(ModelVolumeType::NEGATIVE_VOLUME);
 
                 vol->cut_info = volume->cut_info;
+                vol->name = volume->name;
+            }
+            else if (volume->cut_info.connector_type == CutConnectorType::Screw) {
+                // The hole is a thread of its own, not the peg scaled up: scaling would stretch the pitch. It is made
+                // at the size apply_tolerance() below scales it to, so its pitch stays the peg's.
+                const Vec3d  peg       = volume->get_scaling_factor(); // radius, radius, length in mm
+                const double clearance = std::max(double(volume->cut_info.radius_tolerance), SCREW_CONNECTOR_MIN_CLEARANCE);
+                const double radius    = peg.x() + clearance;
+                const double length    = peg.z() + double(volume->cut_info.height_tolerance) + CONNECTOR_HOLE_OVERLAP;
+                indexed_triangle_set its = its_make_thread(radius, length, screw_connector_pitch(2. * peg.x()), -CONNECTOR_HOLE_OVERLAP, true);
+                to_unit_connector(its, radius, length);
+                // Centred like the peg's mesh, on its threaded length: the cone past it must not move the centre.
+                for (stl_vertex &p : its.vertices)
+                    p.z() -= 0.5f;
+
+                vol = upper->add_volume(TriangleMesh(std::move(its)), ModelVolumeType::NEGATIVE_VOLUME, false);
+                vol->cut_info = volume->cut_info;
+                vol->cut_info.radius_tolerance = float(clearance);
                 vol->name = volume->name;
             }
             else

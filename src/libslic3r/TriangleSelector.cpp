@@ -25,6 +25,8 @@
 #include <utility>
 #include <vector>
 #include <queue>
+#include <limits>
+#include "BoundingBox.hpp"
 
 #ifndef NDEBUG
 //    #define EXPENSIVE_DEBUG_CHECKS
@@ -610,6 +612,250 @@ void TriangleSelector::bucket_fill_select_triangles(const Vec3f& hit, int facet_
 
         visited[current_facet] = true;
     }
+}
+
+// Elslicer: per-vertex concavity, k = 2 * (mean of the neighbours - vertex) . normal / mean squared edge length, smoothed
+// twice, then averaged per original facet. k > 0 in creases and pits, k < 0 on ridges. It is scaled by the size of the
+// model so the same crease reads the same on a small or a large copy of it.
+void TriangleSelector::compute_part_concavity()
+{
+    const indexed_triangle_set &its = m_mesh.its;
+    const size_t nv = its.vertices.size();
+    std::vector<Vec3f> vn(nv, Vec3f::Zero());
+    std::vector<std::vector<int>> adj(nv);
+    for (const stl_triangle_vertex_indices &t : its.indices) {
+        const Vec3f cr = (its.vertices[t[1]] - its.vertices[t[0]]).cross(its.vertices[t[2]] - its.vertices[t[0]]);
+        for (int j = 0; j < 3; ++j) {
+            vn[t[j]] += cr;
+            adj[t[j]].push_back(t[(j + 1) % 3]);
+            adj[t[j]].push_back(t[(j + 2) % 3]);
+        }
+    }
+    BoundingBoxf3 bb;
+    for (const Vec3f &v : its.vertices)
+        bb.merge(v.cast<double>());
+    const float scale = bb.defined ? float(bb.size().norm() / 211.) : 1.f;
+
+    std::vector<float> k(nv, 0.f);
+    for (size_t x = 0; x < nv; ++x) {
+        std::vector<int> &a = adj[x];
+        std::sort(a.begin(), a.end());
+        a.erase(std::unique(a.begin(), a.end()), a.end());
+        const float nn = vn[x].norm();
+        if (a.empty() || nn <= 0.f)
+            continue;
+        Vec3f  mean = Vec3f::Zero();
+        double e2   = 0.;
+        for (int y : a) {
+            mean += its.vertices[y];
+            e2 += (its.vertices[y] - its.vertices[x]).squaredNorm();
+        }
+        mean /= float(a.size());
+        e2 /= double(a.size());
+        if (e2 > 0.)
+            k[x] = float(2. * double((mean - its.vertices[x]).dot(vn[x] / nn)) / e2) * scale;
+    }
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<float> next(nv);
+        for (size_t x = 0; x < nv; ++x) {
+            float sum = k[x];
+            for (int y : adj[x])
+                sum += k[y];
+            next[x] = sum / float(1 + adj[x].size());
+        }
+        k.swap(next);
+    }
+    m_part_concavity.resize(its.indices.size());
+    for (size_t f = 0; f < its.indices.size(); ++f)
+        m_part_concavity[f] = (k[its.indices[f][0]] + k[its.indices[f][1]] + k[its.indices[f][2]]) / 3.f;
+}
+
+// Elslicer: grows a region from the seed facet, always taking the least concave facet next, and records how high the
+// concavity had to rise to reach each facet. Cutting that order at a level gives the region bounded by creases deeper
+// than the level. A part shows up as a plateau: a range of levels over which the region hardly grows. The last wide
+// plateau before the region spills over a large share of the model is the part. Returns the part's original facets, or
+// nothing when no part could be found.
+// A click often lands in a groove, such as between the twists of a rope. Grown from there, the region already spans most
+// of the model at the first level, so part fill first slides downhill to the nearest ridge of the part.
+int TriangleSelector::part_ridge(int seed, const ClippingPlane &clp) const
+{
+    for (int i = 0; i < 200; ++i) {
+        int best = seed;
+        for (int g : m_neighbors[seed])
+            if (g >= 0 && m_part_concavity[g] < m_part_concavity[best] && !is_facet_clipped(g, clp))
+                best = g;
+        if (best == seed)
+            break;
+        seed = best;
+    }
+    return seed;
+}
+
+std::vector<int> TriangleSelector::part_region(int seed, const ClippingPlane &clp, int step)
+{
+    if (m_part_concavity.size() != size_t(m_orig_size_indices))
+        compute_part_concavity();
+    const std::vector<float> &fk = m_part_concavity;
+    const int n = m_orig_size_indices;
+    seed = part_ridge(seed, clp);
+
+    // Regions larger than this are not parts, so the growth can stop once it is passed.
+    const size_t leak = size_t(0.08 * n);
+    std::vector<int>   order;
+    std::vector<float> level;
+    {
+        std::vector<bool> seen(n, false);
+        using Item = std::pair<float, int>;
+        std::priority_queue<Item, std::vector<Item>, std::greater<Item>> heap;
+        heap.emplace(fk[seed], seed);
+        seen[seed] = true;
+        float top  = -std::numeric_limits<float>::max();
+        while (!heap.empty() && order.size() <= leak) {
+            auto [c, f] = heap.top();
+            heap.pop();
+            top = std::max(top, c);
+            order.push_back(f);
+            level.push_back(top);
+            for (int g : m_neighbors[f])
+                if (g >= 0 && !seen[g]) {
+                    seen[g] = true;
+                    if (!is_facet_clipped(g, clp))
+                        heap.emplace(fk[g], g);
+                }
+        }
+    }
+
+    // Region size at levels on a fixed grid. level[] never decreases, so the size at L is the count of entries <= L.
+    constexpr float grid_step = 0.0025f;
+    struct Plateau { float start, end; size_t start_size, end_size; };
+    std::vector<Plateau> plateaus;
+    for (float L = std::floor(fk[seed] / grid_step) * grid_step; L <= 0.15f + 1e-6f; L += grid_step) {
+        const size_t size = size_t(std::upper_bound(level.begin(), level.end(), L + 1e-7f) - level.begin());
+        if (size == 0)
+            continue;
+        if (size > leak)
+            break;
+        if (plateaus.empty() || double(size) > 1.25 * double(plateaus.back().start_size))
+            plateaus.push_back({L, L, size, size});
+        else {
+            plateaus.back().end      = L;
+            plateaus.back().end_size = size;
+        }
+    }
+    if (plateaus.empty())
+        return {};
+    int pick = int(plateaus.size()) - 1;
+    for (int i = int(plateaus.size()) - 1; i >= 0; --i)
+        if (plateaus[i].end - plateaus[i].start + grid_step >= 0.0125f - 1e-6f) {
+            pick = i;
+            break;
+        }
+    pick = std::clamp(pick + step, 0, int(plateaus.size()) - 1);
+    order.resize(std::min(plateaus[pick].end_size, order.size()));
+    return order;
+}
+
+void TriangleSelector::select_leaves_by_seed_fill(int facet_idx)
+{
+    Triangle &tr = m_triangles[facet_idx];
+    if (!tr.valid())
+        return;
+    if (tr.is_split()) {
+        for (int i = 0; i <= tr.number_of_split_sides(); ++i)
+            select_leaves_by_seed_fill(tr.children[i]);
+    } else
+        tr.select_by_seed_fill();
+}
+
+void TriangleSelector::part_fill_select_triangles(const Vec3f &hit, int facet_start, const ClippingPlane &clp, int step, bool force_reselection)
+{
+    int start_facet_idx = select_unsplit_triangle(hit, facet_start);
+    if (start_facet_idx == -1 || (m_triangles[start_facet_idx].is_selected_by_seed_fill() && !force_reselection && !clp.is_active()))
+        return;
+    this->seed_fill_unselect_all_triangles();
+
+    const std::vector<int> region = part_region(m_triangles[start_facet_idx].source_triangle, clp, step);
+    if (region.empty())
+        select_leaves_by_seed_fill(start_facet_idx); // no part found: paint only the clicked facet rather than most of the model
+    for (int f : region)
+        select_leaves_by_seed_fill(f);
+}
+
+std::vector<int> TriangleSelector::segment_parts()
+{
+    if (m_part_concavity.size() != size_t(m_orig_size_indices))
+        compute_part_concavity();
+    const int n = m_orig_size_indices;
+    std::vector<int> part(n, -1);
+    // Seeds from the most convex facets first: those sit on the ridges of the parts.
+    std::vector<int> seeds(n);
+    for (int i = 0; i < n; ++i)
+        seeds[i] = i;
+    std::sort(seeds.begin(), seeds.end(), [this](int a, int b) { return m_part_concavity[a] < m_part_concavity[b]; });
+    // Smaller pieces are slivers left between parts already found; they join a neighbouring part below.
+    const size_t min_part = std::max<size_t>(20, size_t(0.0005 * n));
+    int          parts    = 0;
+    // Many seeds slide to the same ridge; each ridge is grown only once.
+    std::vector<bool> tried(n, false);
+    for (int seed : seeds) {
+        if (part[seed] != -1)
+            continue;
+        const int ridge = part_ridge(seed, ClippingPlane());
+        if (tried[ridge])
+            continue;
+        tried[ridge] = true;
+        std::vector<int> fresh;
+        for (int f : part_region(ridge, ClippingPlane(), 0)) {
+            tried[f] = true;
+            if (part[f] == -1)
+                fresh.push_back(f);
+        }
+        if (fresh.size() < min_part)
+            continue;
+        for (int f : fresh)
+            part[f] = parts;
+        ++parts;
+    }
+    // Facets left over, mostly in the creases, join the part next to them, spreading out from the parts found.
+    std::queue<int> queue;
+    for (int f = 0; f < n; ++f)
+        if (part[f] != -1)
+            queue.push(f);
+    while (!queue.empty()) {
+        const int f = queue.front();
+        queue.pop();
+        for (int g : m_neighbors[f])
+            if (g >= 0 && part[g] == -1) {
+                part[g] = part[f];
+                queue.push(g);
+            }
+    }
+    // A piece of the model with no part at all (a separate small body) becomes a part of its own.
+    for (int f = 0; f < n; ++f)
+        if (part[f] == -1) {
+            part[f] = parts;
+            queue.push(f);
+            while (!queue.empty()) {
+                const int c = queue.front();
+                queue.pop();
+                for (int g : m_neighbors[c])
+                    if (g >= 0 && part[g] == -1) {
+                        part[g] = parts;
+                        queue.push(g);
+                    }
+            }
+            ++parts;
+        }
+    return part;
+}
+
+void TriangleSelector::paint_facets(const std::vector<int> &facets, EnforcerBlockerType state)
+{
+    this->seed_fill_unselect_all_triangles();
+    for (int f : facets)
+        if (f >= 0 && f < m_orig_size_indices)
+            select_leaves_by_seed_fill(f);
+    this->seed_fill_apply_on_triangles(state);
 }
 
 // Selects either the whole triangle (discarding any children it had), or divides

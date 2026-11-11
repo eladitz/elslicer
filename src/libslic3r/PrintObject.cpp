@@ -5298,6 +5298,9 @@ SupportNecessaryType PrintObject::is_support_necessary()
         return SharpTail;
     else if (tree_support.has_cantilever && tree_support.max_cantilever_dist > cantilevel_dist_thresh)
         return Cantilever;
+    // Elslicer: more than 1 cm2 of overhang seen from below, the size of a 20 mm wide shelf 5 mm deep.
+    else if (tree_support.overhang_area > SQ(scale_(10)))
+        return LargeOverhang;
 
     return NoNeedSupp;
 }

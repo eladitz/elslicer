@@ -1,6 +1,7 @@
 #include <boost/date_time/posix_time/ptime.hpp>
 #include <boost/date_time/posix_time/posix_time_types.hpp>
 #include <cassert>
+#include <numeric>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -1080,8 +1081,24 @@ void TreeSupport::detect_overhangs(bool check_support_necessity/* = false*/)
     ); // end tbb::parallel_for
 
     BOOST_LOG_TRIVIAL(info) << "max_cantilever_dist=" << max_cantilever_dist;
-    if (check_support_necessity)
+    if (check_support_necessity) {
+        // Elslicer: a gentle slope never reaches cantilever length on any one layer, but it adds up. Each layer
+        // counts all it adds past the layer below wherever that holds an overhang, so the sum is the overhang's
+        // area seen from below. The overhang itself is only the part past the threshold angle, a thin strip.
+        std::vector<double> added(m_object->layer_count(), 0.);
+        tbb::parallel_for(tbb::blocked_range<size_t>(0, m_object->layer_count()), [&](const tbb::blocked_range<size_t> &range) {
+            for (size_t layer_nr = range.begin(); layer_nr < range.end(); ++layer_nr) {
+                const Layer *layer = m_object->get_layer(layer_nr);
+                if (overhangs_all_layers[layer_nr].empty() || layer->lower_layer == nullptr)
+                    continue;
+                for (const ExPolygon &part : diff_ex(layer->lslices_extrudable, layer->lower_layer->lslices_extrudable))
+                    if (overlaps(overhangs_all_layers[layer_nr], part))
+                        added[layer_nr] += part.area();
+            }
+        });
+        overhang_area = std::accumulate(added.begin(), added.end(), 0.);
         return;
+    }
 
     // check if the sharp tails should be extended higher
     if (is_auto(stype) && config_detect_sharp_tails) {

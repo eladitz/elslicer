@@ -83,6 +83,11 @@ void filament_mixer_lerp_linear_float(float r1, float g1, float b1,
 // Returns "#RRGGBB" string.
 std::string blend_color(const std::string& hex_a, const std::string& hex_b, float ratio_b);
 
+// Elslicer: the mixes for a palette from hex_a to hex_b, as the percentage of b in each, in 5% steps and in
+// order from a. They are spread evenly by how different the colours look, about gap_delta_e apart (CIEDE2000),
+// and there are at most max_mixes of them.
+std::vector<int> palette_ratios(const std::string &hex_a, const std::string &hex_b, size_t max_mixes, double gap_delta_e = 10.);
+
 // Predict N hex colors printed as layers, by integer weights: a measured recipe if one matches,
 // otherwise Prusa's model.
 // Returns "#RRGGBB".

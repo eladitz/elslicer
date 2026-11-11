@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Nesting Doll Copy</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 12px; }
+  .pair label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+  .pair input { width: 100%; box-sizing: border-box; }
+</style>
+</head>
+<body>
+<h1>Nesting doll copy</h1>
+<p class="sub" id="object"></p>
+<div class="pair">
+  <div><label for="count">How many copies</label><input id="count" type="number" value="1" min="1" max="12" step="1"></div>
+  <div><label for="gap">Room around each, mm</label><input id="gap" type="number" value="0.4" min="0.05" step="0.05"></div>
+</div>
+<p class="muted">Each copy is the same shape, scaled down evenly until it sits on the floor inside the one before, or hangs from its roof if it is open at the bottom, with this much room all round. The copies go on the plate beside it to print on their own.</p>
+<p class="note hidden" id="result"></p>
+<div class="footer">
+  <button id="cancel">Close</button>
+  <button id="make" class="primary">Make copies</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+function result(text, kind) {
+  $('result').textContent = text;
+  $('result').className = 'note ' + (kind || '');
+}
+window.fromApp = message => {
+  if (message.type === 'object') {
+    const names = message.names;
+    $('object').textContent = names.length === 1 ?
+      `Smaller copies of ${names[0]} that fit inside it, each inside the one before. It works on hollow shapes: a cup, a bowl, a box or an egg shell. For something in pieces, like an egg in two halves, select all the pieces first, so their copies come out the same size and still fit together.` :
+      `Smaller copies of ${names.join(' and ')}, each fitting inside the piece before. Every piece gets the same sizes, so the copies still fit together.`;
+  } else if (message.type === 'problem') {
+    $('make').disabled = false;
+    result(message.problem === 'no_room' ? `${message.name} is hollow, but even a very small copy touches its walls. Try less room around each.` :
+      `There is no closed-in space in the middle of ${message.name}, so nothing fits inside. It needs to be hollow, like a cup, a box or half an egg.`, 'warn');
+  } else if (message.type === 'made') {
+    $('make').disabled = false;
+    const sizes = message.scales.map(s => s + '%').join(', ');
+    const short = message.scales.length < message.asked ? ` Only ${message.scales.length} fit; the next would be too small.` : '';
+    const each = message.pieces > 1 ? ' of each piece' : '';
+    result(`Added ${message.scales.length === 1 ? 'a copy' : message.scales.length + ' copies'}${each} at ${sizes} of the original size.${short}`, 'good');
+  }
+};
+$('cancel').onclick = () => post({cmd: 'cancel'});
+$('make').onclick = () => {
+  $('make').disabled = true;
+  result('Measuring the inside…');
+  post({cmd: 'make', count: parseInt($('count').value) || 1, gap: parseFloat($('gap').value) || 0.4});
+};
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

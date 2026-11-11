@@ -300,6 +300,7 @@ GLVolume::GLVolume(float r, float g, float b, float a)
     , selected(false)
     , disabled(false)
     , printable(true)
+    , is_head_reference(false)
     , visible(true)
     , is_active(true)
     , on_hidden_plate(false)
@@ -325,6 +326,27 @@ GLVolume::GLVolume(float r, float g, float b, float a)
     mmuseg_ts = 0;
 }
 
+
+std::vector<GradientDirection::Slot> GLVolume::gradient_slots;
+int                                  GLVolume::gradient_preview_object = -1;
+Vec3d                                GLVolume::gradient_preview_direction = Vec3d::UnitZ();
+
+namespace {
+
+// Steps of colour a gradient mix is shown in.
+constexpr int GRADIENT_STEPS = 32;
+
+// The gradient mix a volume prints with, if any.
+const GradientDirection::Slot *gradient_slot_of(const ModelVolume &volume)
+{
+    const int extruder = volume.extruder_id();
+    for (const GradientDirection::Slot &slot : GLVolume::gradient_slots)
+        if (int(slot.slot) == extruder)
+            return &slot;
+    return nullptr;
+}
+
+} // namespace
 
 // BBS
 float GLVolume::explosion_ratio = 1.0;
@@ -392,7 +414,7 @@ void GLVolume::set_render_color()
     }
 
     //BBS set unprintable color
-    if (!printable) {
+    if (!printable && !is_head_reference) {
         if (selected) {
             render_color = brighten_color(UNPRINTABLE_COLOR, 1.25f);
         } else {
@@ -738,6 +760,87 @@ void GLVolume::simple_render(GLShaderProgram* shader, ModelObjectPtrs& model_obj
             mmuseg_ts = model_volume->mmu_segmentation_facets.timestamp();
         }
     } while (0);
+
+    // Elslicer: a volume printed with a gradient mix shows the gradient, in steps along its direction.
+    if ((!color_volume || this->object_idx() == gradient_preview_object) && !picking && !ban_color_volume && model_volume != nullptr &&
+        model_volume->is_model_part() &&
+        tverts_range == std::make_pair<size_t, size_t>(0, -1)) {
+        const GradientDirection::Slot *slot = gradient_slot_of(*model_volume);
+        if (slot != nullptr && slot->first <= extruder_colors.size() && slot->second <= extruder_colors.size()) {
+            const Vec3d        direction = this->object_idx() == gradient_preview_object ? gradient_preview_direction :
+                                                                                           GradientDirection::direction_or_up(*model_object);
+            const ColorRGBA    first = extruder_colors[slot->first - 1], second = extruder_colors[slot->second - 1];
+            const int          instance_idx = std::clamp(this->instance_idx(), 0, int(model_object->instances.size()) - 1);
+            const Transform3d  instance = model_object->instances[instance_idx]->get_matrix();
+            const Transform3d  to_bed   = instance * model_volume->get_matrix();
+            std::vector<double> key = {direction.x(), direction.y(), direction.z(), slot->start, slot->end, double(slot->curve.points.size()),
+                                       double(model_volume->mesh().its.indices.size()), double(model_object->volumes.size())};
+            for (const float c : {first.r(), first.g(), first.b(), second.r(), second.g(), second.b()})
+                key.push_back(c);
+            for (int i = 0; i < 16; ++i)
+                key.push_back(instance.matrix().data()[i]);
+            for (int i = 0; i < 16; ++i)
+                key.push_back(to_bed.matrix().data()[i]);
+            if (key != gradient_key) {
+                gradient_key = key;
+                gradient_models.clear();
+                // The gradient runs from one end of the whole object to the other, as it prints.
+                double low = std::numeric_limits<double>::max(), high = std::numeric_limits<double>::lowest();
+                for (const ModelVolume *part : model_object->volumes)
+                    if (part->is_model_part()) {
+                        const Transform3d place = instance * part->get_matrix();
+                        for (const stl_vertex &vertex : part->mesh().its.vertices) {
+                            const double along = direction.dot(place * vertex.cast<double>());
+                            low                = std::min(low, along);
+                            high               = std::max(high, along);
+                        }
+                    }
+                if (high > low) {
+                    std::vector<indexed_triangle_set> steps(GRADIENT_STEPS);
+                    const indexed_triangle_set       &its = model_volume->mesh().its;
+                    for (const stl_triangle_vertex_indices &face : its.indices) {
+                        const Vec3d middle = (to_bed * its.vertices[face[0]].cast<double>() + to_bed * its.vertices[face[1]].cast<double>() +
+                                              to_bed * its.vertices[face[2]].cast<double>()) / 3.;
+                        const int step = std::clamp(int((direction.dot(middle) - low) / (high - low) * GRADIENT_STEPS), 0, GRADIENT_STEPS - 1);
+                        indexed_triangle_set &out = steps[step];
+                        const int base = int(out.vertices.size());
+                        for (int corner = 0; corner < 3; ++corner)
+                            out.vertices.push_back(its.vertices[face[corner]]);
+                        out.indices.emplace_back(base, base + 1, base + 2);
+                    }
+                    gradient_models.resize(GRADIENT_STEPS);
+                    for (int step = 0; step < GRADIENT_STEPS; ++step) {
+                        if (steps[step].indices.empty())
+                            continue;
+                        const float share = float(GradientDirection::first_share(*slot, (step + 0.5) / GRADIENT_STEPS));
+                        ColorRGBA   mixed(first.r() * share + second.r() * (1.f - share), first.g() * share + second.g() * (1.f - share),
+                                          first.b() * share + second.b() * (1.f - share), 1.f);
+                        gradient_models[step].init_from(steps[step]);
+                        gradient_models[step].set_color(adjust_color_for_rendering(mixed));
+                    }
+                }
+            }
+            if (!gradient_models.empty()) {
+                const bool brighten_selected = selected && !disabled && !force_native_color && !force_neutral_color;
+                for (GUI::GLModel &step : gradient_models) {
+                    if (!step.is_initialized())
+                        continue;
+                    ColorRGBA shown = step.get_color();
+                    if (render_color.is_transparent())
+                        shown.a(render_color.a());
+                    if (brighten_selected)
+                        shown = brighten_color(shown, 1.25f);
+                    const ColorRGBA kept = step.get_color();
+                    step.set_color(shown);
+                    step.render(shader);
+                    step.set_color(kept);
+                }
+                if (this->is_left_handed())
+                    glFrontFace(GL_CCW);
+                return;
+            }
+        }
+    }
 
     if (color_volume && !picking && !ban_color_volume) {
         const bool brighten_selected = selected && !disabled && !force_native_color && !force_neutral_color;
@@ -1502,6 +1605,11 @@ bool GLVolumeCollection::check_outside_state(const BuildVolume &build_volume, Mo
     const ModelObjectPtrs &model_objects = model.objects;
     for (GLVolume* volume : this->volumes)
     {
+        // Elslicer: the sizing head is never printed, so it may be bigger than the printer.
+        if (volume->is_head_reference) {
+            volume->is_outside = false;
+            continue;
+        }
         std::vector<bool> inside_extruders;
         if (! volume->is_modifier && (volume->shader_outside_printer_detection_enabled || (! volume->is_wipe_tower && volume->composite_id.volume_id >= 0))) {
             BuildVolume::ObjectState state;

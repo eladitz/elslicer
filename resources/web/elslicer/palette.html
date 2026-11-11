@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Create a Palette</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .pick { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .pick label { display: block; margin-bottom: 6px; color: var(--muted); }
+  select { width: 100%; }
+  #swatches { display: flex; gap: 6px; margin: 14px 0 6px; min-height: 64px; }
+  .swatch { flex: 1; border-radius: 6px; min-height: 64px; display: flex; align-items: flex-end; justify-content: center;
+            font-size: 12px; padding-bottom: 4px; color: #fff; text-shadow: 0 0 3px #000, 0 0 2px #000; }
+  .end { outline: 2px solid var(--line); outline-offset: 2px; }
+</style>
+</head>
+<body>
+<h1>Create a palette</h1>
+<p class="sub">Pick two filaments of the same material. Elslicer adds the mixes between them, spaced so each looks clearly different from the next.</p>
+<div class="panel pick">
+  <div><label for="a">From</label><select id="a"></select></div>
+  <div><label for="b">To</label><select id="b"></select></div>
+</div>
+<div id="swatches"></div>
+<p id="note" class="muted"></p>
+<div class="footer">
+  <button id="cancel">Cancel</button>
+  <button id="create" class="primary" disabled>Add mixes</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let filaments = [];
+let mixes = [];
+
+function fill(select, chosen) {
+  select.innerHTML = '';
+  for (const filament of filaments) {
+    const option = document.createElement('option');
+    option.value = filament.index;
+    option.textContent = `${filament.index}: ${filament.name} (${filament.type})`;
+    select.append(option);
+  }
+  select.value = chosen;
+}
+
+function picked(id) { return filaments.find(filament => filament.index === Number($(id).value)); }
+
+function ask() {
+  const a = picked('a'), b = picked('b');
+  $('create').disabled = true;
+  mixes = [];
+  draw();
+  if (!a || !b) return;
+  if (a.index === b.index) return note('Pick two different filaments.');
+  if (a.type !== b.type) return note(`Only filaments of the same material mix well, and these are ${a.type} and ${b.type}.`);
+  post({cmd: 'preview', a: a.index, b: b.index});
+}
+
+function note(text) { $('note').textContent = text; }
+
+function draw() {
+  const a = picked('a'), b = picked('b');
+  $('swatches').innerHTML = '';
+  const add = (colour, text, end) => {
+    const swatch = document.createElement('div');
+    swatch.className = 'swatch' + (end ? ' end' : '');
+    swatch.style.background = colour;
+    swatch.textContent = text;
+    $('swatches').append(swatch);
+  };
+  if (a) add(a.colour, `${a.index}`, true);
+  for (const mix of mixes) add(mix.colour, `${100 - mix.ratio}:${mix.ratio}`);
+  if (b) add(b.colour, `${b.index}`, true);
+}
+
+window.fromApp = message => {
+  if (message.type === 'filaments') {
+    filaments = message.filaments;
+    fill($('a'), filaments[0] && filaments[0].index);
+    const other = filaments.find(filament => filament.index !== filaments[0].index && filament.type === filaments[0].type);
+    fill($('b'), (other || filaments[1] || {}).index);
+    ask();
+  } else if (message.type === 'preview') {
+    mixes = message.mixes;
+    draw();
+    if (message.room === 0) note('There is no room for more filaments. Remove some mixes first.');
+    else if (mixes.length === 0) note('These two look too alike to mix anything between them.');
+    else note(`Adds ${mixes.length} mixed filament${mixes.length > 1 ? 's' : ''}${message.existing ? `, ${message.existing} of them already there` : ''}. Each mix alternates the two filaments layer by layer.`);
+    $('create').disabled = mixes.length === 0;
+  }
+};
+$('a').onchange = ask;
+$('b').onchange = ask;
+$('cancel').onclick = () => post({cmd: 'close'});
+$('create').onclick = () => post({cmd: 'create', a: Number($('a').value), b: Number($('b').value)});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

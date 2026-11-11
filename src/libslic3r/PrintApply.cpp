@@ -3,6 +3,7 @@
 #include "Geometry.hpp"
 #include "CustomGCode.hpp"
 #include "Config.hpp"
+#include "GradientDirection.hpp"
 #include "Model.hpp"
 #include "Point.hpp"
 #include "Polygon.hpp"
@@ -1256,6 +1257,7 @@ static PrintObjectRegions* generate_print_object_regions(
     // change. Always written — including an empty vector — so the snapshot always reflects
     // the exact input used to generate the current regions.
     out->last_slot_per_part_enabled = slot_per_part_enabled;
+    out->last_painting_extruders    = painting_extruders;
     return out.release();
 }
 
@@ -2117,6 +2119,11 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                     painting_extruders.emplace_back(state_idx);
             }
         }
+        // Elslicer: a gradient mix running sideways is split into its two filaments like painting.
+        for (unsigned int filament : GradientDirection::split_filaments(*print_object.model_object(), m_config))
+            if (filament <= num_extruders && std::find(painting_extruders.begin(), painting_extruders.end(), filament) == painting_extruders.end())
+                painting_extruders.push_back(filament);
+        std::sort(painting_extruders.begin(), painting_extruders.end());
         if (model_object_status.print_object_regions_status == ModelObjectStatus::PrintObjectRegionsStatus::Valid) {
             // Verify that the trafo for regions & volume bounding boxes thus for regions is still applicable.
             auto invalidate = [it_print_object, it_print_object_end, update_apply_status]() {
@@ -2145,7 +2152,8 @@ Print::ApplyStatus Print::apply(const Model &model, DynamicPrintConfig new_full_
                 // have per-part enabled, so compare against the snapshot taken when these regions
                 // were generated and regenerate on any difference (slot toggled, per-part moved
                 // between slots, eligibility changed via components / gradient / is_mixed).
-                if (print_object_regions->last_slot_per_part_enabled != slot_per_part_enabled) {
+                if (print_object_regions->last_slot_per_part_enabled != slot_per_part_enabled ||
+                    print_object_regions->last_painting_extruders != painting_extruders) {
                     invalidate();
                     model_object_status.print_object_regions_status = ModelObjectStatus::PrintObjectRegionsStatus::PartiallyValid;
                     print_regions_reshuffled = true;

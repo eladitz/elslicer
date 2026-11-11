@@ -56,6 +56,7 @@
 #include "slic3r/GUI/Plater.hpp"
 #include "slic3r/GUI/Gizmos/GizmoObjectManipulation.hpp"
 #include "slic3r/GUI/format.hpp"
+#include "libslic3r/LocalesUtils.hpp"
 #include "slic3r/Utils/UndoRedo.hpp"
 #include "libslic3r/AppConfig.hpp"
 #include "GLGizmoUtils.hpp"
@@ -250,7 +251,8 @@ GLGizmoCut3D::GLGizmoCut3D(GLCanvas3D& parent, const std::string& icon_filename,
 
     m_connector_modes = { _u8L("Auto"), _u8L("Manual") };
 
-    m_connector_types = { _u8L("Plug"), _u8L("Dowel"), _u8L("Snap") };
+    // Indexed by CutConnectorType; Undef has no button.
+    m_connector_types = { _u8L("Plug"), _u8L("Dowel"), _u8L("Snap"), std::string(), _u8L("Screw") };
 
     m_connector_styles = { _u8L("Prism"), _u8L("Frustum")
 //              , _u8L("Claw")
@@ -2452,12 +2454,13 @@ void GLGizmoCut3D::render_connectors_input_window(CutConnectors &connectors, flo
     bool type_changed = render_connect_type_radio_button(CutConnectorType::Plug);
     type_changed     |= render_connect_type_radio_button(CutConnectorType::Dowel);
     type_changed     |= render_connect_type_radio_button(CutConnectorType::Snap);
+    type_changed     |= render_connect_type_radio_button(CutConnectorType::Screw);
     if (type_changed)
         apply_selected_connectors([this, &connectors] (size_t idx) { connectors[idx].attribs.type = CutConnectorType(m_connector_type); });
     ImGuiWrapper::pop_radio_style();
 
     m_imgui->disabled_begin(m_connector_type != CutConnectorType::Plug);
-        if (type_changed && m_connector_type == CutConnectorType::Dowel) {
+        if (type_changed && (m_connector_type == CutConnectorType::Dowel || m_connector_type == CutConnectorType::Screw)) {
             m_connector_style = int(CutConnectorStyle::Prism);
             apply_selected_connectors([this, &connectors](size_t idx) { connectors[idx].attribs.style = CutConnectorStyle(m_connector_style); });
         }
@@ -2465,8 +2468,8 @@ void GLGizmoCut3D::render_connectors_input_window(CutConnectors &connectors, flo
             apply_selected_connectors([this, &connectors](size_t idx) { connectors[idx].attribs.style = CutConnectorStyle(m_connector_style); });
     m_imgui->disabled_end();
 
-    m_imgui->disabled_begin(m_connector_type == CutConnectorType::Snap);
-        if (type_changed && m_connector_type == CutConnectorType::Snap) {
+    m_imgui->disabled_begin(m_connector_type == CutConnectorType::Snap || m_connector_type == CutConnectorType::Screw);
+        if (type_changed && (m_connector_type == CutConnectorType::Snap || m_connector_type == CutConnectorType::Screw)) {
             m_connector_shape_id = int(CutConnectorShape::Circle);
             apply_selected_connectors([this, &connectors](size_t idx) { connectors[idx].attribs.shape = CutConnectorShape(m_connector_shape_id); });
         }
@@ -2495,6 +2498,18 @@ void GLGizmoCut3D::render_connectors_input_window(CutConnectors &connectors, flo
         apply_selected_connectors([this, &connectors](size_t idx) {
             connectors[idx].z_angle = m_connector_angle;
         });
+
+    if (m_connector_type == CutConnectorType::Screw && m_connector_size > 0.f) {
+        const double clearance = std::max(0.5 * std::max(m_connector_size_tolerance, 0.f), SCREW_CONNECTOR_MIN_CLEARANCE);
+        // TRN Cut tool, screw connector. %1% is the thread pitch, %2% the play between the screw and its hole, %3% how far
+        // the hole's pointed end reaches past the screw, all in mm.
+        m_imgui->text_wrapped(GUI::format(_u8L("Thread pitch %1% mm, %2% mm play. The threaded hole goes in the upper part and "
+                                               "ends in a point %3% mm past the screw, so it prints without support."),
+                                     float_to_string_decimal_point(screw_connector_pitch(m_connector_size), 1),
+                                     float_to_string_decimal_point(clearance, 2),
+                                     float_to_string_decimal_point(0.5 * m_connector_size + clearance, 1)),
+                              m_editing_window_width + m_label_width);
+    }
 
     if (m_connector_type == CutConnectorType::Snap) {
         render_snap_specific_input(_u8L("Bulge"), _L("Bulge proportion related to radius"), m_snap_bulge_proportion, 0.15f, 5.f, 100.f * m_snap_space_proportion);
@@ -3770,7 +3785,7 @@ void GLGizmoCut3D::reset_connectors()
 
 void GLGizmoCut3D::init_connector_shapes()
 {
-    for (const CutConnectorType& type : {CutConnectorType::Dowel, CutConnectorType::Plug, CutConnectorType::Snap})
+    for (const CutConnectorType& type : {CutConnectorType::Dowel, CutConnectorType::Plug, CutConnectorType::Snap, CutConnectorType::Screw})
         for (const CutConnectorStyle& style : {CutConnectorStyle::Frustum, CutConnectorStyle::Prism}) {
             if (type == CutConnectorType::Dowel && style == CutConnectorStyle::Frustum)
                 continue;
@@ -4091,6 +4106,9 @@ indexed_triangle_set GLGizmoCut3D::get_connector_mesh(CutConnectorAttributes con
 
     if (connector_attributes.type == CutConnectorType::Snap)
         connector_mesh = its_make_snap(1.0, 1.0, m_snap_space_proportion, m_snap_bulge_proportion);
+    else if (connector_attributes.type == CutConnectorType::Screw)
+        // Only the look of the connectors while placing them; the cut makes each screw at its own size.
+        connector_mesh = its_make_screw_connector(5.0, 10.0);
     else if (connector_attributes.style == CutConnectorStyle::Prism)
         connector_mesh = its_make_cylinder(1.0, 1.0, (2 * PI / sectorCount));
     else if (connector_attributes.type == CutConnectorType::Plug)
@@ -4108,7 +4126,9 @@ void GLGizmoCut3D::apply_cut_connectors(ModelObject* mo, const std::string& conn
 
     size_t connector_id = mo->cut_id.connectors_cnt();
     for (const CutConnector& connector : mo->cut_connectors) {
-        TriangleMesh mesh = TriangleMesh(get_connector_mesh(connector.attribs));
+        TriangleMesh mesh = TriangleMesh(connector.attribs.type == CutConnectorType::Screw ?
+                                             its_make_screw_connector(connector.radius, connector.height) :
+                                             get_connector_mesh(connector.attribs));
         // Mesh will be centered when loading.
         ModelVolume* new_volume = mo->add_volume(std::move(mesh), ModelVolumeType::NEGATIVE_VOLUME);
 

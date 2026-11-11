@@ -8,6 +8,7 @@
 #include "PluginPickerDialog.hpp"
 #include "Widgets/StaticLine.hpp"
 #include "Widgets/LabeledStaticBox.hpp"
+#include "Widgets/Button.hpp"
 
 #include <boost/any.hpp>
 #include <boost/log/trivial.hpp>
@@ -553,6 +554,17 @@ bool OptionsGroup::activate(std::function<void()> throw_if_canceled /* = [](){}*
             sizer = new wxBoxSizer(wxVERTICAL);
             if (title.IsEmpty()) {
                 stl->Hide();
+            } else if (guide) {
+                // TRN Button on a settings section: walks through its settings one at a time, with explanations.
+                auto *button = new ::Button(m_parent, _L("Guide me"));
+                button->SetStyle(ButtonStyle::Regular, ButtonType::Compact);
+                button->SetToolTip(_L("Go through these settings one at a time, with what each does to the print"));
+                button->Bind(wxEVT_BUTTON, [this](wxCommandEvent &) { if (guide) guide(); });
+                auto *row = new wxBoxSizer(wxHORIZONTAL);
+                row->Add(stl, 1, wxALIGN_CENTER_VERTICAL);
+                row->Add(button, 0, wxALIGN_CENTER_VERTICAL | wxLEFT, 8);
+                sizer->Add(row, 0, wxEXPAND);
+                sizer->AddSpacer(8);
             } else {
                 sizer->Add(stl, 0, wxEXPAND);
                 sizer->AddSpacer(8);

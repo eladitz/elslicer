@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Settings guide</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { padding: 22px 28px 20px; }
+  .progress { display: flex; gap: 6px; margin: 10px 0 18px; }
+  .progress span { flex: 1; height: 4px; border-radius: 2px; background: var(--line); }
+  .progress span.done { background: #4a4a9c; }
+  .progress span.on { background: var(--accent); }
+  .step-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .current { color: var(--muted); font-size: 13px; white-space: nowrap; }
+  .explain p { line-height: 1.6; }
+  .explain b { color: #fff; }
+  .picture { background: #121316; border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin: 14px 0; }
+  .picture svg { display: block; width: 100%; height: auto; }
+  .caption { color: var(--muted); font-size: 12.5px; margin-top: 8px; }
+  .effects { display: grid; grid-template-columns: 110px 1fr; gap: 6px 14px; margin: 14px 0; }
+  .effects .aspect { color: var(--muted); font-weight: 600; }
+  .choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 12px 0; }
+  .choice { text-align: left; padding: 10px 12px; }
+  .choice.on { border-color: var(--accent); background: #2a2a4a; }
+  .choice small { display: block; color: var(--muted); margin-top: 3px; font-size: 12px; }
+  .exact { display: flex; align-items: center; gap: 10px; margin-top: 6px; }
+  .exact input[type=number] { width: 110px; }
+  .warning { color: var(--warn); }
+  .summary td { padding: 6px 12px 6px 0; vertical-align: top; }
+  .summary .arrow { color: var(--muted); }
+  .changed { color: #fff; font-weight: 600; }
+  .footer { position: sticky; bottom: 0; background: var(--bg); padding-top: 12px; }
+</style>
+</head>
+<body>
+<h1 id="title">Settings guide</h1>
+<div class="progress" id="progress"></div>
+<div id="screen"></div>
+<div class="footer">
+  <button id="cancel">Cancel</button>
+  <div class="row">
+    <button id="back">Back</button>
+    <button id="next" class="primary">Start</button>
+  </div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+
+// The guide files fill these: SETTINGS by setting key, SECTIONS by section title.
+window.SETTINGS = {};
+window.SECTIONS = {};
+const FILES = ['common', 'quality', 'quality_lines', 'quality_seam', 'quality_precision', 'quality_surface', 'quality_walls',
+  'quality_overhangs', 'strength', 'speed', 'support', 'multimaterial', 'others'];
+let ctx = null, steps = [], chosen = {}, index = -1;
+
+const same = (a, b) => {
+  const x = parseFloat(a), y = parseFloat(b);
+  if (!isNaN(x) && !isNaN(y) && String(a).endsWith('%') === String(b).endsWith('%')) return Math.abs(x - y) < 1e-9;
+  return String(a) === String(b);
+};
+const valueOf = key => key in chosen ? chosen[key] : ctx.values[key];
+// What a step needs from its setting, with the app's definition filling what the guide leaves out.
+function makeStep(setting) {
+  const entry = window.SETTINGS[setting.key] || {};
+  const def = setting.def || {};
+  const unit = def.unit || '';
+  const format = entry.format || (v => {
+    if (def.kind === 'bool') return v === '1' ? 'On' : 'Off';
+    if (def.options) { const o = def.options.find(o => o.value === v); if (o) return o.label; }
+    return String(v).endsWith('%') || !unit ? String(v) : `${v} ${unit}`;
+  });
+  let choices = entry.choices;
+  if (!choices && def.kind === 'bool')
+    choices = () => [{value: '1', label: 'On', note: (entry.notes || {})['1'] || ''}, {value: '0', label: 'Off', note: (entry.notes || {})['0'] || ''}];
+  if (!choices && def.options)
+    choices = () => def.options.filter(o => !(entry.hide || []).includes(o.value))
+      .map(o => ({value: o.value, label: o.label, note: (entry.notes || {})[o.value] || ''}));
+  let exact = entry.exact;
+  if (!exact && ['number', 'int', 'percent', 'number_or_percent'].includes(def.kind))
+    exact = () => ({min: def.min ?? '', max: def.max ?? '', step: def.kind === 'int' ? 1 : 'any',
+      unit: def.kind === 'percent' ? '%' : unit, percent: def.kind === 'percent' || def.kind === 'number_or_percent'});
+  return {key: setting.key, def, title: entry.title || def.label || setting.key, written: !!window.SETTINGS[setting.key],
+    format, explain: entry.explain, picture: entry.picture, effects: entry.effects, choices: choices || (() => []), exact};
+}
+
+function render() {
+  $('progress').innerHTML = steps.map((_, i) => `<span class="${i < index ? 'done' : i === index ? 'on' : ''}"></span>`).join('') +
+    `<span class="${index === steps.length ? 'on' : ''}"></span>`;
+  $('back').disabled = index < 0;
+  if (index < 0) {
+    const section = window.SECTIONS[`${ctx.page}/${ctx.section}`] || window.SECTIONS[ctx.section];
+    $('screen').innerHTML = `<div class="explain">${section ? section.intro(ctx) : ''}</div>
+      ${ctx.for_objects ? '<p class="note good">These are the settings of the selected object: what you choose here applies to it alone.</p>' : ''}
+      <p class="muted">${steps.length} ${steps.length === 1 ? 'setting' : 'settings'}, one at a time. Nothing changes until you press Apply at the end.</p>`;
+    $('next').textContent = 'Start';
+  } else if (index < steps.length) {
+    renderStep(steps[index]);
+    $('next').textContent = index === steps.length - 1 ? 'Review' : 'Next';
+  } else {
+    renderSummary();
+    $('next').textContent = 'Apply';
+  }
+}
+
+function renderStep(step) {
+  $('screen').innerHTML = `
+    <div class="step-head"><h2>${index + 1}. ${step.title}</h2><span class="current">Now: ${step.format(ctx.values[step.key])}</span></div>
+    <div class="explain">${step.explain ? step.explain(ctx) : '<p class="muted">The explanation for this setting is not written yet.</p>'}</div>
+    ${step.picture ? '<div class="picture" id="picture"></div>' : ''}
+    <h2>Pick one</h2>
+    <div class="choices" id="choices"></div>
+    <div id="exact"></div>
+    ${step.effects ? '<h2 style="margin-top:16px">What your choice does</h2><div class="effects" id="effects"></div>' : ''}`;
+  const choices = step.choices(ctx);
+  $('choices').innerHTML = choices.map((c, i) =>
+    `<button class="choice" data-i="${i}"><b>${c.label}</b><small>${c.note || ''}</small></button>`).join('');
+  document.querySelectorAll('.choice').forEach(button => button.onclick = () => {
+    chosen[step.key] = String(choices[+button.dataset.i].value);
+    update(step);
+  });
+  if (step.exact) {
+    const e = step.exact(ctx);
+    $('exact').innerHTML = `<div class="exact"><span class="muted">${choices.length ? 'Or exactly:' : 'Value:'}</span>
+      <input type="text" id="exact_value" inputmode="decimal" style="width:110px">
+      <span class="muted">${e.unit || ''}</span><span id="exact_note" class="warning"></span></div>`;
+    $('exact_value').oninput = () => {
+      const text = $('exact_value').value.trim().replace(',', '.');
+      if (text !== '' && !isNaN(parseFloat(text))) { chosen[step.key] = text; update(step, true); }
+    };
+  }
+  update(step);
+}
+
+// Redraws what depends on the value: the picture, the effects and which choice is lit.
+function update(step, typing) {
+  const value = valueOf(step.key);
+  if (step.picture) $('picture').innerHTML = step.picture(ctx, value);
+  if (step.effects) $('effects').innerHTML = step.effects(ctx, value).map(([aspect, text]) =>
+    `<div class="aspect">${aspect}</div><div>${text}</div>`).join('');
+  const choices = step.choices(ctx);
+  document.querySelectorAll('.choice').forEach(button => button.classList.toggle('on', same(choices[+button.dataset.i].value, value)));
+  if (step.exact) {
+    if (!typing) $('exact_value').value = value;
+    const e = step.exact(ctx), v = parseFloat(value);
+    const outside = (e.min !== '' && v < e.min) || (e.max !== '' && v > e.max);
+    $('exact_note').textContent = !String(value).endsWith('%') && outside ? `Outside what this setting takes (${e.min}–${e.max}).` : '';
+  }
+}
+
+function renderSummary() {
+  const rows = steps.map(step => {
+    const before = ctx.values[step.key], after = valueOf(step.key), changed = !same(before, after);
+    return `<tr><td>${step.title}</td><td>${step.format(before)}</td><td class="arrow">→</td>
+      <td class="${changed ? 'changed' : 'muted'}">${changed ? step.format(after) : 'unchanged'}</td></tr>`;
+  }).join('');
+  const any = steps.some(step => !same(ctx.values[step.key], valueOf(step.key)));
+  $('screen').innerHTML = `<h2>Your choices</h2><table class="summary">${rows}</table>
+    <p class="muted" style="margin-top:14px">${!any ? 'Nothing changed.' : ctx.for_objects ?
+      'Apply sets these on the selected object only, the same as typing them into its settings.' :
+      'Apply puts these into the print settings, the same as typing them in. Save the settings afterwards to keep them for other projects.'}</p>`;
+}
+
+$('next').onclick = () => {
+  if (index === steps.length) {
+    const changes = {};
+    for (const step of steps) if (!same(ctx.values[step.key], valueOf(step.key))) changes[step.key] = String(valueOf(step.key));
+    post({cmd: 'apply', changes});
+    return;
+  }
+  index++;
+  render();
+  window.scrollTo(0, 0);
+};
+$('back').onclick = () => { index--; render(); window.scrollTo(0, 0); };
+$('cancel').onclick = () => post({cmd: 'cancel'});
+
+function load(files, done) {
+  if (!files.length) return done();
+  const script = document.createElement('script');
+  script.src = `guides/${files[0]}.js`;
+  script.onload = script.onerror = () => load(files.slice(1), done);
+  document.head.appendChild(script);
+}
+
+window.fromApp = message => {
+  if (message.type !== 'section') return;
+  ctx = message;
+  load(FILES, () => {
+    $('title').textContent = `${ctx.section}, step by step`;
+    steps = ctx.settings.map(makeStep);
+    render();
+  });
+};
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

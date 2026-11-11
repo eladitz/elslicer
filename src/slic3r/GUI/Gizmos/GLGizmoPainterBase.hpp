@@ -253,6 +253,8 @@ protected:
     // BBS
     virtual ColorRGBA get_cursor_hover_color() const { return { 0.f, 0.f, 0.f, 0.25f }; }
 
+    // Elslicer: true while clicks on the model should not paint, such as while a photo is being lined up over it.
+    virtual bool is_painting_paused() const { return false; }
     virtual EnforcerBlockerType get_left_button_state_type() const { return EnforcerBlockerType::ENFORCER; }
     virtual EnforcerBlockerType get_right_button_state_type() const { return EnforcerBlockerType::BLOCKER; }
 
@@ -297,6 +299,10 @@ protected:
     bool     m_triangle_splitting_enabled = true;
     ToolType m_tool_type                  = ToolType::BRUSH;
     float    m_smart_fill_angle           = 30.f;
+    // Elslicer: the Fill tool paints the whole part under the cursor, found from the creases around it (see
+    // TriangleSelector::part_fill_select_triangles). m_part_fill_step picks a smaller (< 0) or larger (> 0) part.
+    bool     m_part_fill                  = false;
+    float    m_part_fill_step             = 0.f;
 
     bool     m_paint_on_overhangs_only          = false;
     float    m_highlight_by_angle_threshold_deg = 0.f;

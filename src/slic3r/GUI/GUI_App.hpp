@@ -467,6 +467,11 @@ public:
 
     bool show_center_of_mass() const { return app_config->get_bool("show_center_of_mass"); }
     void toggle_show_center_of_mass() const { app_config->set_bool("show_center_of_mass", !show_center_of_mass()); }
+    // Elslicer: each object's size drawn along its box.
+    bool show_measurements() const { return app_config->get_bool("show_measurements"); }
+    void toggle_show_measurements() const { app_config->set_bool("show_measurements", !show_measurements()); }
+    bool show_gradient_direction() const { return app_config->get_bool("show_gradient_direction"); }
+    void toggle_show_gradient_direction() const { app_config->set_bool("show_gradient_direction", !show_gradient_direction()); }
 
     wxString get_inf_dialog_contect () {return m_info_dialog_content;};
 

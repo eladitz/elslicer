@@ -190,6 +190,62 @@ TEST_CASE("The no-check flag skips the support-needed check", "[SupportMaterial]
     CHECK(support_needed_statuses(true).empty());
 }
 
+// A round shelf that widens from radius 5 mm at the bed to radius `top` at height 5 mm.
+static TriangleMesh widening_shelf(double top)
+{
+    const int sides = 64;
+    indexed_triangle_set its;
+    for (const auto &[radius, z] : {std::pair{5., 0.}, std::pair{top, 5.}})
+        for (int i = 0; i < sides; ++i)
+            its.vertices.emplace_back(radius * std::cos(2 * PI * i / sides), radius * std::sin(2 * PI * i / sides), z);
+    its.vertices.emplace_back(0, 0, 0);
+    its.vertices.emplace_back(0, 0, 5);
+    const int bottom = 2 * sides, cap = 2 * sides + 1;
+    for (int i = 0; i < sides; ++i) {
+        const int next = (i + 1) % sides;
+        its.indices.emplace_back(bottom, next, i);
+        its.indices.emplace_back(cap, sides + i, sides + next);
+        its.indices.emplace_back(i, next, sides + next);
+        its.indices.emplace_back(i, sides + next, sides + i);
+    }
+    return TriangleMesh(its);
+}
+
+// The support-needed warnings left on the object after slicing with support off.
+static std::vector<std::string> support_needed_warnings(TriangleMesh &&mesh)
+{
+    Slic3r::Print print;
+    Slic3r::Model model;
+    Slic3r::Test::init_print({std::move(mesh)}, print, model,
+                             {{"enable_support", 0}, {"layer_height", 0.2}, {"initial_layer_print_height", 0.2}, {"support_threshold_angle", 30}});
+    print.process();
+    std::vector<std::string> messages;
+    for (const PrintStateBase::Warning &warning : print.objects().front()->step_state_with_warnings(posSupportMaterial).warnings)
+        if (warning.message_id == PrintStateBase::SlicingNeedSupportOn)
+            messages.push_back(warning.message);
+    return messages;
+}
+
+TEST_CASE("A gentle overhang slope sliced with support off reports large overhangs", "[SupportMaterial]")
+{
+    // From radius 5 to 15 over 5 mm is a slope of about 27 degrees, under the 30 degree threshold, but each
+    // layer reaches only 0.4 mm past the one below, far short of a cantilever.
+    const std::vector<std::string> warnings = support_needed_warnings(widening_shelf(15));
+    REQUIRE(warnings.size() == 1);
+    CHECK_THAT(warnings.front(), Catch::Matchers::ContainsSubstring("large overhangs"));
+}
+
+TEST_CASE("A slope steeper than the threshold sliced with support off needs no support", "[SupportMaterial]")
+{
+    // From radius 5 to 7 over 5 mm is about 68 degrees from the bed.
+    CHECK(support_needed_warnings(widening_shelf(7)).empty());
+}
+
+TEST_CASE("A cube sliced with support off needs no support", "[SupportMaterial]")
+{
+    CHECK(support_needed_warnings(Slic3r::Test::cube(20)).empty());
+}
+
 SCENARIO("Support layer Z honors contact distance", "[SupportMaterial]")
 {
     // Box h = 20mm, hole bottom at 5mm, hole height 10mm (top edge at 15mm).
