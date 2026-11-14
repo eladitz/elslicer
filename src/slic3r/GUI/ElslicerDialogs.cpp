@@ -31,6 +31,7 @@
 #include "libslic3r/Print.hpp"
 #include "libslic3r/PrintJournal.hpp"
 #include "libslic3r/PrintConfig.hpp"
+#include "libslic3r/TriangleMesh.hpp"
 #include "slic3r/Utils/Http.hpp"
 
 #include <set>
@@ -40,10 +41,15 @@
 #include <boost/log/trivial.hpp>
 #include <nlohmann/json.hpp>
 
+#ifdef __APPLE__
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 #include <wx/base64.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
 #include <wx/image.h>
+#include <wx/mstream.h>
 #include <wx/utils.h>
 #include <wx/secretstore.h>
 #include <wx/sizer.h>
@@ -52,9 +58,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <ctime>
 #include <map>
 #include <memory>
+#include <unordered_map>
 
 using json = nlohmann::json;
 
@@ -2781,6 +2789,227 @@ void show_fold_box_dialog()
 
 namespace {
 
+// ---------------------------------------------------------------------------
+// Lampshades and lithophanes
+// ---------------------------------------------------------------------------
+
+// A closed sheet from its page: a grid of nu by nv points, each with a front and a back position, joined along its
+// edges, and round when it wraps. The same triangles as sheetIndices() in lampkit.js.
+indexed_triangle_set sheet_mesh(int nu, int nv, bool wrap, const float *points)
+{
+    indexed_triangle_set its;
+    its.vertices.reserve(size_t(2) * nu * nv);
+    for (size_t k = 0; k < size_t(2) * nu * nv; ++k)
+        its.vertices.emplace_back(points[3 * k], points[3 * k + 1], points[3 * k + 2]);
+    const auto F = [nu](int i, int j) { return j * nu + i; };
+    const auto B = [nu, nv](int i, int j) { return nu * nv + j * nu + i; };
+    const auto add = [&its](int a, int b, int c) { its.indices.emplace_back(a, b, c); };
+    const int cols = wrap ? nu : nu - 1, t = nv - 1;
+    for (int j = 0; j + 1 < nv; ++j)
+        for (int i = 0; i < cols; ++i) {
+            const int k = (i + 1) % nu;
+            add(F(i, j), F(k, j), F(k, j + 1)); add(F(i, j), F(k, j + 1), F(i, j + 1));
+            add(B(i, j), B(k, j + 1), B(k, j)); add(B(i, j), B(i, j + 1), B(k, j + 1));
+        }
+    for (int i = 0; i < cols; ++i) {
+        const int k = (i + 1) % nu;
+        add(F(k, 0), F(i, 0), B(i, 0)); add(F(k, 0), B(i, 0), B(k, 0));
+        add(F(i, t), F(k, t), B(k, t)); add(F(i, t), B(k, t), B(i, t));
+    }
+    if (!wrap) {
+        const int r = nu - 1;
+        for (int j = 0; j + 1 < nv; ++j) {
+            add(F(0, j), F(0, j + 1), B(0, j + 1)); add(F(0, j), B(0, j + 1), B(0, j));
+            add(F(r, j + 1), F(r, j), B(r, j)); add(F(r, j + 1), B(r, j), B(r, j + 1));
+        }
+    }
+    // Where the sheet has no thickness (the empty parts of a lace or a design laid over a heightfield) its front
+    // and back would lie on each other as a skin of no volume. Share those points, then drop the faces that fold
+    // onto one another, so only the solid parts are left, closed where they thin to nothing.
+    const size_t half = size_t(nu) * nv;
+    std::vector<int> same(2 * half);
+    for (size_t k = 0; k < 2 * half; ++k)
+        same[k] = int(k);
+    bool flat = false;
+    for (size_t k = 0; k < half; ++k)
+        if (its.vertices[k] == its.vertices[half + k]) { same[half + k] = int(k); flat = true; }
+    if (flat && 2 * half < (size_t(1) << 21)) {
+        std::vector<stl_triangle_vertex_indices> kept;
+        kept.reserve(its.indices.size());
+        std::unordered_map<uint64_t, int> count;
+        const auto key = [](stl_triangle_vertex_indices t) {
+            std::sort(t.data(), t.data() + 3);
+            return (uint64_t(t[0]) << 42) | (uint64_t(t[1]) << 21) | uint64_t(t[2]);
+        };
+        for (auto &t : its.indices) {
+            for (int c = 0; c < 3; ++c)
+                t[c] = same[t[c]];
+            if (t[0] != t[1] && t[1] != t[2] && t[0] != t[2])
+                ++count[key(t)];
+        }
+        for (const auto &t : its.indices)
+            if (t[0] != t[1] && t[1] != t[2] && t[0] != t[2] && count[key(t)] == 1)
+                kept.push_back(t);
+        its.indices = std::move(kept);
+        its_compactify_vertices(its);
+    }
+    // Which way round the triangles face depends on how the page laid the grid out; outwards encloses a positive volume.
+    if (its_volume(its) < 0.f)
+        its_flip_triangles(its);
+    return its;
+}
+
+// A page that makes a model from closed sheets and adds it to the plate: the lampshade, lithophane, box, stamp, bag, star map, frame and mask makers.
+class SheetMakerDialog : public WebPageDialog
+{
+public:
+    SheetMakerDialog(const wxString &title, const std::string &page) : WebPageDialog(title, page, wxSize(1060, 760)) {}
+
+protected:
+    void on_message(const std::string &cmd, const json &data) override
+    {
+        if (cmd == "ready") {
+            const BoundingBoxf        bed    = wxGetApp().plater()->build_volume().bounding_volume2d();
+            const DynamicPrintConfig &config = wxGetApp().preset_bundle->full_config();
+            send({{"type", "printer"},
+                  {"bed", {bed.size().x(), bed.size().y()}},
+                  {"height", config.opt_float("printable_height")},
+                  {"layer", config.opt_float("layer_height")}});
+        } else if (cmd == "pick_image")
+            pick_image();
+        else if (cmd == "add")
+            add(data);
+    }
+
+private:
+    void pick_image()
+    {
+        wxFileDialog dialog(this, _L("Choose a picture"), wxEmptyString, wxEmptyString,
+                            "Pictures (*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff)|*.jpg;*.jpeg;*.png;*.bmp;*.gif;*.tif;*.tiff",
+                            wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+            return;
+        wxImage image;
+        if (!image.LoadFile(dialog.GetPath()) || !image.IsOk()) {
+            send({{"type", "image"}, {"error", _u8L("That picture could not be read.")}});
+            return;
+        }
+        // The page only needs as much detail as it prints: about a pixel per tenth of a millimetre.
+        const int most = 2000, w = image.GetWidth(), h = image.GetHeight();
+        if (std::max(w, h) > most) {
+            const double scale = double(most) / std::max(w, h);
+            image.Rescale(std::max(1, int(w * scale)), std::max(1, int(h * scale)), wxIMAGE_QUALITY_HIGH);
+        }
+        if (image.HasAlpha()) {
+            // Clear parts print as white, the thinnest.
+            wxImage flat(image.GetWidth(), image.GetHeight());
+            flat.SetRGB(wxRect(0, 0, image.GetWidth(), image.GetHeight()), 255, 255, 255);
+            flat.Paste(image, 0, 0, wxIMAGE_ALPHA_BLEND_COMPOSE);
+            image = flat;
+        }
+        wxMemoryOutputStream out;
+        image.SetOption(wxIMAGE_OPTION_QUALITY, 92);
+        image.SaveFile(out, wxBITMAP_TYPE_JPEG);
+        std::vector<unsigned char> bytes(out.GetSize());
+        out.CopyTo(bytes.data(), bytes.size());
+        send({{"type", "image"},
+              {"name", into_u8(wxFileName(dialog.GetPath()).GetFullName())},
+              {"data", "data:image/jpeg;base64," + wxBase64Encode(bytes.data(), bytes.size()).ToStdString()}});
+    }
+
+    // data.objects: [{name, parts: [{name, sheets}]}], each object added beside the one before.
+    void add(const json &data)
+    {
+        // TRN Undo history: a lampshade, lithophane, box, stamp, bag, star map or frame made in its maker and added to the plate.
+        Plater::TakeSnapshot snapshot(wxGetApp().plater(), _u8L("Add model"));
+        bool added = false;
+        for (const json &object : data.value("objects", json::array())) {
+            std::vector<TriangleMesh> meshes;
+            std::vector<wxString>     names;
+            for (const json &part : object.value("parts", json::array())) {
+                indexed_triangle_set its;
+                for (const json &sheet : part.value("sheets", json::array())) {
+                    const int  nu = sheet.value("nu", 0), nv = sheet.value("nv", 0);
+                    const bool wrap = sheet.value("wrap", false);
+                    const wxMemoryBuffer points = wxBase64Decode(wxString::FromUTF8(sheet.value("pos", std::string())));
+                    if (nu < 2 || nv < 2 || points.GetDataLen() != size_t(2) * nu * nv * 3 * sizeof(float))
+                        continue;
+                    std::vector<float> floats(size_t(2) * nu * nv * 3);
+                    std::memcpy(floats.data(), points.GetData(), points.GetDataLen());
+                    its_merge(its, sheet_mesh(nu, nv, wrap, floats.data()));
+                }
+                if (its.indices.empty())
+                    continue;
+                meshes.emplace_back(std::move(its));
+                names.push_back(from_u8(part.value("name", std::string())));
+            }
+            if (meshes.empty())
+                continue;
+            std::vector<std::pair<const TriangleMesh *, wxString>> parts;
+            for (size_t k = 0; k < meshes.size(); ++k)
+                parts.emplace_back(&meshes[k], names[k]);
+            wxGetApp().obj_list()->load_mesh_object(parts, from_u8(object.value("name", std::string("Model"))));
+            // The next object looks for an empty place on the plate, so this one must be in the scene first.
+            wxGetApp().plater()->update();
+            added = true;
+        }
+        if (added)
+            EndModal(wxID_OK);
+    }
+};
+
+} // namespace
+
+void show_lampshade_dialog()
+{
+    SheetMakerDialog dialog(_L("Lampshade"), "lampshade.html");
+    dialog.ShowModal();
+}
+
+void show_lithophane_dialog()
+{
+    SheetMakerDialog dialog(_L("Lithophane"), "lithophane.html");
+    dialog.ShowModal();
+}
+
+void show_box_maker_dialog()
+{
+    SheetMakerDialog dialog(_L("Box Maker"), "box_maker.html");
+    dialog.ShowModal();
+}
+
+void show_stamp_maker_dialog()
+{
+    SheetMakerDialog dialog(_L("Stamp Maker"), "stamp_maker.html");
+    dialog.ShowModal();
+}
+
+void show_bag_maker_dialog()
+{
+    SheetMakerDialog dialog(_L("Bag Maker"), "bag_maker.html");
+    dialog.ShowModal();
+}
+
+void show_star_map_dialog()
+{
+    SheetMakerDialog dialog(_L("Star Map"), "star_map.html");
+    dialog.ShowModal();
+}
+
+void show_picture_frame_dialog()
+{
+    SheetMakerDialog dialog(_L("Picture Frame"), "picture_frame.html");
+    dialog.ShowModal();
+}
+
+void show_mask_maker_dialog()
+{
+    SheetMakerDialog dialog(_L("Mask Maker"), "mask_maker.html");
+    dialog.ShowModal();
+}
+
+namespace {
+
 // The whole objects selected, each with one instance.
 std::vector<std::pair<int, int>> selected_pieces()
 {
@@ -2817,6 +3046,132 @@ void show_nesting_doll_dialog()
         return;
     NestingDollDialog dialog(std::move(pieces));
     dialog.ShowModal();
+}
+
+
+// ---------------------------------------------------------------------------------------------------------------
+// The once-a-month "enjoying it?" question and the Ko-fi link, as in the other itzkin apps (Donate.swift there).
+// It asks only after three days of use. Donating, or saying you already have, pauses it for a year in every itzkin
+// app (the shared "com.itzkin.apps" preferences hold the date); anything else pauses it for a month.
+namespace {
+
+const char *DONATION_PAGE = "https://ko-fi.com/eladitzkin";
+constexpr long long DAY_SECONDS = 24 * 3600, MONTH_SECONDS = 30 * DAY_SECONDS, YEAR_SECONDS = 365 * DAY_SECONDS;
+
+long long config_number(const std::string &key)
+{
+    try { return std::stoll(wxGetApp().app_config->get(key)); } catch (...) { return 0; }
+}
+void set_config_number(const std::string &key, long long value) { wxGetApp().app_config->set(key, std::to_string(value)); }
+
+// Until when a donation keeps every itzkin app quiet, as seconds since 1970; 0 if none.
+long long donated_until()
+{
+#ifdef __APPLE__
+    long long until = 0;
+    if (CFPropertyListRef value = CFPreferencesCopyAppValue(CFSTR("donatedUntil"), CFSTR("com.itzkin.apps"))) {
+        if (CFGetTypeID(value) == CFDateGetTypeID())
+            until = (long long) (CFDateGetAbsoluteTime((CFDateRef) value) + kCFAbsoluteTimeIntervalSince1970);
+        CFRelease(value);
+    }
+    return until;
+#else
+    return config_number("elslicer_donated_until");
+#endif
+}
+void set_donated_until(long long until)
+{
+#ifdef __APPLE__
+    // A date, as the Swift apps write it, so a donation through any of them quiets the others.
+    CFDateRef date = CFDateCreate(nullptr, double(until) - kCFAbsoluteTimeIntervalSince1970);
+    CFPreferencesSetAppValue(CFSTR("donatedUntil"), date, CFSTR("com.itzkin.apps"));
+    CFPreferencesAppSynchronize(CFSTR("com.itzkin.apps"));
+    CFRelease(date);
+#else
+    set_config_number("elslicer_donated_until", until);
+#endif
+}
+
+void record_day_of_use()
+{
+    const long long today = (long long) std::time(nullptr) / DAY_SECONDS;
+    if (config_number("elslicer_last_use_day") == today)
+        return;
+    set_config_number("elslicer_last_use_day", today);
+    set_config_number("elslicer_use_days", config_number("elslicer_use_days") + 1);
+}
+
+void ask_about_donation()
+{
+    const long long now = (long long) std::time(nullptr);
+    MessageDialog like(wxGetApp().mainframe,
+                       format_wxstr(_L("You've used it on %1% days so far."), config_number("elslicer_use_days")),
+                       _L("Enjoying Elslicer?"), wxICON_QUESTION);
+    like.AddButton(wxID_YES, _L("Yes, I like it"), true);
+    like.AddButton(wxID_NO, _L("Not really"), false);
+    if (like.ShowModal() != wxID_YES) {
+        set_config_number("elslicer_next_donation_ask", now + MONTH_SECONDS);
+        return;
+    }
+    MessageDialog give(wxGetApp().mainframe,
+                       _L("Elslicer is free and made by one person. If it saves you a failed print, a coffee on Ko-fi helps keep it going."),
+                       _L("Glad to hear it!"), wxICON_INFORMATION);
+    give.AddButton(wxID_YES, _L("Buy me a coffee"), true);
+    give.AddButton(wxID_CANCEL, _L("Maybe later"), false);
+    give.AddButton(wxID_APPLY, _L("I've already donated"), false);
+    const int answer = give.ShowModal();
+    if (answer == wxID_YES)
+        wxLaunchDefaultBrowser(DONATION_PAGE);
+    if (answer == wxID_YES || answer == wxID_APPLY) {
+        set_donated_until(now + YEAR_SECONDS);
+        set_config_number("elslicer_next_donation_ask", now + YEAR_SECONDS);
+    } else
+        set_config_number("elslicer_next_donation_ask", now + MONTH_SECONDS);
+}
+
+void donation_check()
+{
+    MainFrame *frame = wxGetApp().mainframe;
+    if (frame == nullptr || !frame->IsShown() || !frame->IsActive())
+        return;
+    record_day_of_use();
+    const long long now = (long long) std::time(nullptr), next = config_number("elslicer_next_donation_ask");
+    // Never over another window that is waiting for an answer, nor in the middle of a drag.
+    if (now < next || config_number("elslicer_use_days") < 3 || !frame->IsEnabled() || wxGetMouseState().ButtonIsDown(wxMOUSE_BTN_ANY))
+        return;
+    if (const long long until = donated_until(); now < until) {
+        set_config_number("elslicer_next_donation_ask", until);
+        return;
+    }
+    ask_about_donation();
+}
+
+} // namespace
+
+void start_donation_prompt()
+{
+    MainFrame *frame = wxGetApp().mainframe;
+    if (frame == nullptr)
+        return;
+    if (config_number("elslicer_next_donation_ask") == 0)
+        set_config_number("elslicer_next_donation_ask", (long long) std::time(nullptr) + MONTH_SECONDS);
+    // Slicing sessions run for days, so look again every few hours, and once soon after start-up.
+    auto *timer = new wxTimer(frame);
+    frame->Bind(wxEVT_TIMER, [timer](wxTimerEvent &event) {
+        if (event.GetTimer().GetId() == timer->GetId()) donation_check(); else event.Skip();
+    });
+    timer->Start(4 * 3600 * 1000);
+    auto *soon = new wxTimer(frame);
+    frame->Bind(wxEVT_TIMER, [soon](wxTimerEvent &event) {
+        if (event.GetTimer().GetId() == soon->GetId()) donation_check(); else event.Skip();
+    });
+    soon->StartOnce(90 * 1000);
+    frame->Bind(wxEVT_ACTIVATE, [](wxActivateEvent &event) { if (event.GetActive()) record_day_of_use(); event.Skip(); });
+}
+
+void open_donation_page()
+{
+    wxLaunchDefaultBrowser(DONATION_PAGE);
 }
 
 }} // namespace Slic3r::GUI

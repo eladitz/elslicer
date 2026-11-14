@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Picture Frame</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  #canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Picture Frame</h1>
+  <p class="sub">A frame for a photo or print: four mitred sides that pin together, a back, clips, a stand and a hanging notch.</p>
+
+  <h3>Picture</h3>
+  <div class="grid" id="presets"></div>
+  <div class="seg">
+    <button data-turn="portrait">Portrait</button>
+    <button data-turn="landscape">Landscape</button>
+  </div>
+  <div id="sizeSliders"></div>
+
+  <h3>Frame</h3>
+  <div id="frameSliders"></div>
+  <div class="field"><span class="muted" style="font-size:12px">Profile</span></div>
+  <div class="seg">
+    <button data-profile="flat">Flat</button>
+    <button data-profile="bevel">Bevel</button>
+    <button data-profile="round">Rounded</button>
+    <button data-profile="step">Stepped</button>
+  </div>
+  <div class="field"><span class="muted" style="font-size:12px">Face</span></div>
+  <div class="seg">
+    <button data-face="plain">Plain</button>
+    <button data-face="wood">Wood grain</button>
+    <button data-face="ribbed">Ribbed</button>
+  </div>
+
+  <h3>With it</h3>
+  <label class="check"><input type="checkbox" id="back" checked> A back plate, held by turn clips</label>
+  <label class="check"><input type="checkbox" id="stand" checked> A stand on the back, for a desk or shelf</label>
+  <label class="check"><input type="checkbox" id="hang" checked> A notch to hang it on a nail</label>
+  <label class="check"><input type="checkbox" id="mat"> A mat round the picture, with a bevelled window</label>
+  <div id="matSliders" class="hidden"></div>
+
+  <h3>View</h3>
+  <div class="seg">
+    <button data-view="front">Front</button>
+    <button data-view="back">Back</button>
+    <button data-view="parts">As printed</button>
+  </div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+const PRESETS = [
+  {name: '10 × 15', w: 100, h: 150}, {name: '13 × 18', w: 130, h: 180}, {name: '15 × 20', w: 150, h: 200}, {name: '20 × 25', w: 200, h: 250},
+  {name: 'A5', w: 148, h: 210}, {name: 'A4', w: 210, h: 297}, {name: '4 × 6 in', w: 101.6, h: 152.4}, {name: '5 × 7 in', w: 127, h: 177.8},
+  {name: '8 × 10 in', w: 203.2, h: 254}, {name: 'Square 15', w: 150, h: 150}, {name: 'Square 20', w: 200, h: 200}, {name: 'Polaroid', w: 79, h: 79},
+];
+const p = {pw: 100, ph: 150, turn: 'portrait', face: 'wood', profile: 'bevel', width: 22, depth: 14, overlap: 5,
+           matBorder: 20, matT: 1.4, backT: 1.6, view: 'front'};
+// Fixed sizes: the room round the picture, the pins and their holes, the clips.
+const FIT = {clear: 0.5, photo: 0.4, hole: 2.2, peg: 1.95, pocket: 5, pegLen: 4.6, plate: 2.5, arm: 18, clipLen: 16, clipW: 7, clipT: 2.4};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('sizeSliders'), 'pw', 'Picture wide mm', 40, 420, 0.5);
+slider($('sizeSliders'), 'ph', 'Picture high mm', 40, 420, 0.5);
+slider($('frameSliders'), 'width', 'Frame width mm', 14, 50, 0.5);
+slider($('frameSliders'), 'depth', 'Frame depth mm', 9, 30, 0.5);
+slider($('frameSliders'), 'overlap', 'Covers edge mm', 3, 10, 0.5);
+slider($('matSliders'), 'matBorder', 'Mat border mm', 8, 60, 1);
+slider($('matSliders'), 'matT', 'Mat mm', 1, 3, 0.1);
+for (const pr of PRESETS) {
+  const b = document.createElement('button');
+  b.textContent = pr.name;
+  b.onclick = () => { const [a, c] = p.turn === 'landscape' ? [pr.h, pr.w] : [pr.w, pr.h]; p.pw = a; p.ph = c; sync(); update(); };
+  $('presets').appendChild(b);
+}
+for (const b of document.querySelectorAll('[data-turn]')) b.onclick = () => {
+  const want = b.dataset.turn;
+  if (want !== p.turn && (want === 'landscape') !== (p.pw > p.ph)) { [p.pw, p.ph] = [p.ph, p.pw]; }
+  p.turn = want; sync(); update();
+};
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('profile', 'profile'); choose('face', 'face'); choose('view', 'view');
+for (const id of ['back', 'stand', 'hang', 'mat']) $(id).onchange = update;
+function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Solids from a flat outline: a prism between z0 and z1, fanned from a point that sees all of the outline.
+// map turns (x, y, z) into where the point goes.
+function prism(pts, centre, z0, z1, map = (x, y, z) => [x, y, z]) {
+  return Lamp.sheet(pts.length, 2, true, (i, j, front) => {
+    const q = j ? pts[i] : [centre[0] + 0.002 * (pts[i][0] - centre[0]), centre[1] + 0.002 * (pts[i][1] - centre[1])];
+    return map(q[0], q[1], front ? z1 : z0);
+  });
+}
+const diamond = (x, y, a) => [[x + a, y], [x, y + a], [x - a, y], [x, y - a]];
+const circle = (x, y, r, n = 32) => Array.from({length: n}, (_, i) => [x + r * Math.cos(2 * Math.PI * i / n), y + r * Math.sin(2 * Math.PI * i / n)]);
+const rectPts = (x0, y0, x1, y1) => [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+// A rectangle's outline as n points a side, corners included, so two rectangles' points pair up corner to corner.
+function rectLoop(a, b, n) {
+  const out = [], c = [[a, b], [-a, b], [-a, -b], [a, -b]];
+  for (let s = 0; s < 4; ++s) for (let i = 0; i < n; ++i) { const f = i / n, p0 = c[s], p1 = c[(s + 1) % 4]; out.push([p0[0] + f * (p1[0] - p0[0]), p0[1] + f * (p1[1] - p0[1])]); }
+  return out;
+}
+// Turns sheets as a whole: (x, y, z) to f(x, y, z).
+function mapSheets(sheets, f) {
+  return sheets.map(s => {
+    const pos = new Float32Array(s.pos.length);
+    for (let k = 0; k < pos.length; k += 3) { const q = f(s.pos[k], s.pos[k + 1], s.pos[k + 2]); pos[k] = q[0]; pos[k + 1] = q[1]; pos[k + 2] = q[2]; }
+    return {...s, pos};
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The frame lies face up, centred, in mm: z = 0 is its back, z = depth its front. Each side is a strip running
+// along u (from its outer corner, clockwise seen from the front) and across w (from the opening's edge outwards),
+// cut at 45° at both ends.
+function build() {
+  const F = p.width, D = p.depth, mat = $('mat').checked, back = $('back').checked;
+  // With a mat, the picture sits behind the mat's window and the frame is sized for the mat.
+  const PW = mat ? p.pw + 2 * p.matBorder : p.pw, PH = mat ? p.ph + 2 * p.matBorder : p.ph;
+  const Ow = PW - 2 * p.overlap, Oh = PH - 2 * p.overlap, rw = p.overlap + FIT.clear;
+  const stack = (mat ? p.matT : 0) + FIT.photo + (back ? p.backT : 0), rabbet = stack + 0.3;
+  if (Ow < 20 || Oh < 20) return {problem: 'The picture is too small for that much frame over its edge.'};
+  if (F - rw < 9) return {problem: 'Make the frame wider, or cover less of the picture’s edge: the clips and pins need 9 mm behind the picture.'};
+  if (D - rabbet < 6) return {problem: `Make the frame deeper: ${rabbet.toFixed(1)} mm at the back holds the picture${mat ? ', mat' : ''}${back ? ' and back' : ''}, and the pins need 6 mm in front of that.`};
+
+  const sides = [
+    {name: 'Top', n: [0, 1], t: [1, 0], half: Oh / 2, L: Ow + 2 * F},
+    {name: 'Right', n: [1, 0], t: [0, -1], half: Ow / 2, L: Oh + 2 * F},
+    {name: 'Bottom', n: [0, -1], t: [-1, 0], half: Oh / 2, L: Ow + 2 * F},
+    {name: 'Left', n: [-1, 0], t: [0, 1], half: Ow / 2, L: Oh + 2 * F},
+  ];
+  for (const s of sides) {
+    s.toGlobal = (u, w) => [s.n[0] * (s.half + w) + s.t[0] * (u - s.L / 2), s.n[1] * (s.half + w) + s.t[1] * (u - s.L / 2)];
+    s.toLocal = (x, y) => [s.t[0] * x + s.t[1] * y + s.L / 2, s.n[0] * x + s.n[1] * y - s.half];
+  }
+  const maxLen = Math.max(...printer.bed) - 10;
+  // Holes in the back of the sides, as [x, y, half-diagonal] diamonds (they print as 45° roofs) and rectangles.
+  const holes = [], notches = [], parts = {brackets: [], clips: [], splices: []};
+  const w1 = rw + 0.6, w2 = F - 0.6, wp = (rw + F) / 2, armLen = F + FIT.arm;
+  // A pin: a diamond peg standing on a plate on the back, from z = -plate to z = pegLen.
+  const peg = (x, y) => prism(diamond(x, y, FIT.peg), [x, y], 0, FIT.pegLen);
+  // Corner brackets: an L on the back across each mitre, pinned into both sides.
+  for (const [sx, sy] of [[1, 1], [1, -1], [-1, -1], [-1, 1]]) {
+    const X0 = Ow / 2 + F - 0.6, Y0 = Oh / 2 + F - 0.6, xi = Ow / 2 + w1, yi = Oh / 2 + w1, Xa = Ow / 2 + F - armLen, Ya = Oh / 2 + F - armLen;
+    const L = [[X0, Y0], [Xa, Y0], [Xa, yi], [xi, yi], [xi, Ya], [X0, Ya]].map(([x, y]) => [sx * x, sy * y]);
+    if (sx * sy < 0) L.reverse();
+    const c = [sx * (xi + X0) / 2, sy * (yi + Y0) / 2];
+    const pegs = [[sx * (Ow / 2 + F - F - 10), sy * (Oh / 2 + wp)], [sx * (Ow / 2 + wp), sy * (Oh / 2 + F - F - 10)]];
+    for (const [x, y] of pegs) holes.push([x, y, FIT.hole]);
+    parts.brackets.push([prism(L, c, -FIT.plate, 0), ...pegs.map(([x, y]) => peg(x, y))]);
+  }
+  // Each side, cut into pieces that fit the plate, with a splice plate pinned across each cut.
+  for (const s of sides) {
+    const n = Math.ceil(s.L / maxLen);
+    s.cuts = Array.from({length: n + 1}, (_, k) => s.L * k / n);
+    for (let k = 1; k < n; ++k) {
+      const u = s.cuts[k], q = [...s.toGlobal(u - 20, w1), ...s.toGlobal(u + 20, w2)];
+      const box = rectPts(Math.min(q[0], q[2]), Math.min(q[1], q[3]), Math.max(q[0], q[2]), Math.max(q[1], q[3]));
+      const pegs = [s.toGlobal(u - 12, wp), s.toGlobal(u + 12, wp)];
+      for (const [x, y] of pegs) holes.push([x, y, FIT.hole]);
+      parts.splices.push([prism(box, s.toGlobal(u, wp), -FIT.plate, 0), ...pegs.map(([x, y]) => peg(x, y))]);
+    }
+    // Clips: one in the middle of each piece, or two on a long one, kept clear of the brackets and splices.
+    // The top's middle is for the hanging notch, so its clips go either side.
+    const wc = rw + 3.2, at = [];
+    for (let k = 0; k + 1 < s.cuts.length; ++k) {
+      const a = s.cuts[k], b = s.cuts[k + 1], m = (a + b) / 2, len = b - a;
+      if (s.name === 'Top' && $('hang').checked) { at.push(m - 16, m + 16); notches.push([s, m]); }
+      else if (len > 170) at.push(a + len / 4 + 6, b - len / 4 - 6);
+      else at.push(m);
+    }
+    if (back)
+      for (const u of at) {
+        if (u < armLen + 6 || u > s.L - armLen - 6) continue;
+        const [x, y] = s.toGlobal(u, wc), inward = [-s.n[0], -s.n[1]], side = [s.t[0], s.t[1]];
+        holes.push([x, y, FIT.hole]);
+        // A flat tab that turns on a round peg: along the side to load the back, turned in to hold it.
+        const r = FIT.clipW / 2, len = FIT.clipLen - FIT.clipW, tab = [];
+        for (let i = 0; i <= 16; ++i) { const a = Math.PI / 2 + Math.PI * i / 16; tab.push([r * Math.cos(a), r * Math.sin(a)]); }
+        for (let i = 0; i <= 16; ++i) { const a = -Math.PI / 2 + Math.PI * i / 16; tab.push([len + r * Math.cos(a), r * Math.sin(a)]); }
+        const place = ([px, py]) => [x + inward[0] * px + side[0] * py, y + inward[1] * px + side[1] * py];
+        const pts = tab.map(place);
+        if (inward[0] * side[1] - inward[1] * side[0] < 0) pts.reverse();
+        parts.clips.push([prism(pts, place([len / 2, 0]), -FIT.clipT, 0), prism(circle(x, y, 1.35), [x, y], 0, FIT.pegLen)]);
+      }
+  }
+  // The hanging notch: a pocket in the back of the top, wide enough for a nail's head, which then rests on its upper side.
+  for (const [s, u] of notches) {
+    const g0 = s.toGlobal(u - 6, F - 9), g1 = s.toGlobal(u + 6, F - 3);
+    s.notch = [u - 6, u + 6, F - 9, F - 3];
+  }
+
+  // The face: how far below the front each point across the side is, and the texture along it.
+  const drop = w => {
+    let d = Math.max(0, 1 - (F - w)) + Math.max(0, 0.6 - w);
+    if (p.profile === 'bevel') d = Math.max(d, Math.min(5, F / 3) - w);
+    if (p.profile === 'round') d += Math.min(3, 0.9 * F / Math.PI) * (1 - Math.sin(Math.PI * Math.min(1, w / F)));
+    if (p.profile === 'step') { const e = 0.45 * F; d = Math.max(d, Math.min(2.5, Math.max(0, e - w))); }
+    return d;
+  };
+  const tex = (u, w) => {
+    if (p.face === 'wood') {
+      const g = Math.sin(w * 2.3 + 1.6 * Math.sin(u * 0.029 + w * 0.37) + 0.9 * Math.sin(u * 0.0131 - w * 0.2));
+      return 0.28 * Math.pow(0.5 + 0.5 * g, 3);
+    }
+    if (p.face === 'ribbed') return 0.22 * (0.5 + 0.5 * Math.sin(2 * Math.PI * w / 1.6));
+    return 0;
+  };
+  let thinnest = Infinity;
+  for (let w = 0; w <= rw; w += 0.1) thinnest = Math.min(thinnest, D - drop(w) - 0.3 - rabbet);
+  if (thinnest < 1.6) return {problem: 'The front over the picture would be under 1.6 mm thick: make the frame deeper or choose a flatter profile.'};
+
+  // Points across the side: fine everywhere, with the rabbet's step kept sharp.
+  const ws = [];
+  for (let w = 0; w < F; w += 0.25) ws.push(w);
+  ws.push(F, rw - 0.02, rw);
+  ws.sort((a, b) => a - b);
+  const pieces = [];
+  for (const s of sides) {
+    const local = holes.map(([x, y, a]) => [...s.toLocal(x, y), a]).filter(([u, w]) => w > 0 && w < F && u > -5 && u < s.L + 5);
+    const back = (u, w) => {
+      if (w < rw) return rabbet;
+      let z = 0;
+      for (const [hu, hw, a] of local) if (Math.abs(u - hu) + Math.abs(w - hw) <= a + 0.15) z = FIT.pocket;
+      if (s.notch && u >= s.notch[0] && u <= s.notch[1] && w >= s.notch[2] && w <= s.notch[3]) z = Math.max(z, 3.5);
+      return z;
+    };
+    for (let k = 0; k + 1 < s.cuts.length; ++k) {
+      const a = s.cuts[k], b = s.cuts[k + 1], nu = Math.max(2, Math.round((b - a) / 0.4) + 1);
+      const sheet = Lamp.sheet(nu, ws.length, false, (i, j, front) => {
+        const w = ws[j], ua = Math.max(a, F - w), ub = Math.min(b, s.L - (F - w)), u = ua + (ub - ua) * i / (nu - 1);
+        const z = front ? D - drop(w) - tex(u, w) : back(u, w);
+        return [u, w, z];
+      });
+      pieces.push({side: s, name: s.cuts.length > 2 ? `${s.name} ${k + 1}` : s.name, a, b, local: sheet});
+    }
+  }
+  // Each piece twice: in place in the frame, and as it prints, lying on its outer edge with its face to the front.
+  for (const pc of pieces) {
+    const s = pc.side;
+    pc.inFrame = mapSheets([pc.local], (u, w, z) => [...s.toGlobal(u, w), z]);
+    pc.printed = mapSheets([pc.local], (u, w, z) => [u - pc.a, z, F - w]);
+  }
+
+  // The back plate, with a pocket on it that the stand plugs into; the mat; the stand.
+  const BW = PW + 2 * FIT.clear - 0.6, BH = PH + 2 * FIT.clear - 0.6, extra = {};
+  if (back) {
+    extra.back = [Lamp.box(-BW / 2, BW / 2, -BH / 2, BH / 2, 0, p.backT)];
+    if ($('stand').checked) {
+      // The pocket's walls on the back, z below 0; the stand's tongue goes in square to the back.
+      const yb = -BH / 2 + 0.45 * BH, tw = 20.4, tt = 3.4, wall = 1.8, hgt = 5;
+      const x0 = -tw / 2, x1 = tw / 2, y0 = yb - tt / 2, y1 = yb + tt / 2;
+      extra.back.push(Lamp.box(x0 - wall, x1 + wall, y1, y1 + wall, -hgt, 0), Lamp.box(x0 - wall, x1 + wall, y0 - wall, y0, -hgt, 0),
+                      Lamp.box(x0 - wall, x0, y0, y1, -hgt, 0), Lamp.box(x1, x1 + wall, y0, y1, -hgt, 0));
+      // The stand's side outline: q is away from the back, v down along it. A tongue, then a leg at 25° to the back.
+      const gam = 25 * Math.PI / 180, tq = hgt + 4, th = 3.5;
+      const dFrame = (F - rw) + 0.3 + (yb + BH / 2);
+      const legLen = 1.26 * dFrame - tq * 0.3;
+      const dir = [Math.cos(gam), Math.sin(gam)], nrm = [-Math.sin(gam), Math.cos(gam)], e0 = [0, tq - 1.5];
+      const leg = [[e0[0] - nrm[0] * th / 2, e0[1] - nrm[1] * th / 2], [e0[0] + dir[0] * legLen - nrm[0] * th / 2, e0[1] + dir[1] * legLen - nrm[1] * th / 2],
+                   [e0[0] + dir[0] * legLen + nrm[0] * th / 2, e0[1] + dir[1] * legLen + nrm[1] * th / 2], [e0[0] + nrm[0] * th / 2, e0[1] + nrm[1] * th / 2]];
+      // Tongue and leg as one outline, round from the corner where they meet.
+      const t0 = -(tt - 0.35) / 2, t1 = (tt - 0.35) / 2;
+      const outline = [[t0, 0], [t1, 0], [t1, leg[0][1] + (t1 - leg[0][0]) * Math.tan(gam)], leg[1], leg[2], leg[3], [t0, tq + 1]];
+      const centre = [0, tq - 1.2], tongueW = tw - 0.4;
+      extra.stand = [prism(outline, centre, -tongueW / 2, tongueW / 2, (v, q, x) => [x, yb - v, -q])];
+      extra.standPrint = [prism(outline, centre, 0, tongueW, (v, q, x) => [v, q, x])];
+      extra.legLen = legLen;
+    }
+  }
+  if (mat) {
+    // A bevelled window: wider at the front, so the cut edge shows as a fine line, as on a card mat.
+    const n = 24, z0 = p.backT * back + FIT.photo, out = rectLoop(BW / 2, BH / 2, n), win = [p.pw / 2 - 2, p.ph / 2 - 2];
+    const inner = rectLoop(win[0], win[1], n), innerFront = rectLoop(win[0] + p.matT, win[1] + p.matT, n);
+    extra.mat = [Lamp.sheet(4 * n, 2, true, (i, j, front) => {
+      const q = j ? out[i] : (front ? innerFront[i] : inner[i]);
+      return [q[0], q[1], front ? z0 + p.matT : z0];
+    })];
+  }
+  return {pieces, parts, extra, F, D, PW, PH, rw, rabbet, BW, BH, maxLen,
+          outer: [Ow + 2 * F, Oh + 2 * F]};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+const viewer = new Lamp.Viewer($('canvas'));
+let built = null, timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+const WOOD = [0.62, 0.45, 0.3], PAPER = [0.93, 0.91, 0.86], GREY = [0.62, 0.62, 0.66], PHOTO = [0.38, 0.5, 0.62];
+function update() {
+  on('turn', p.turn); on('profile', p.profile); on('face', p.face); on('view', p.view);
+  $('matSliders').classList.toggle('hidden', !$('mat').checked);
+  $('stand').disabled = !$('back').checked;
+  clearTimeout(timer);
+  timer = setTimeout(render, 150);
+}
+// Everything each object holds, as it prints: the pieces of the sides, then the small parts in rows.
+function printedObjects() {
+  const objs = built.pieces.map(pc => ({name: `Frame ${pc.name.toLowerCase()}`, parts: [{name: pc.name, sheets: pc.printed}]}));
+  const flat = (sheets, dz) => mapSheets(sheets, (x, y, z) => [x, y, z + dz]);
+  if (built.extra.back) objs.push({name: 'Frame back', parts: [{name: 'Back', sheets: mapSheets(built.extra.back, (x, y, z) => [x, -y, p.backT - z])}]});
+  if (built.extra.standPrint) objs.push({name: 'Frame stand', parts: [{name: 'Stand', sheets: built.extra.standPrint}]});
+  if (built.extra.mat) objs.push({name: 'Frame mat', parts: [{name: 'Mat', sheets: flat(built.extra.mat, -Lamp.bounds(built.extra.mat)[0][2])}]});
+  // Small parts go together in one object, as they print on their plates with pins up.
+  const small = [];
+  for (const group of [...built.parts.brackets, ...built.parts.splices, ...built.parts.clips]) small.push(flat(group, group === undefined ? 0 : -Lamp.bounds(group)[0][2]));
+  if (small.length) {
+    // Packed in rows a few mm apart, each row no wider than the plate, biggest first.
+    const room = Math.min(...printer.bed) - 20;
+    small.sort((a, b) => { const [la, ha] = Lamp.bounds(a), [lb, hb] = Lamp.bounds(b); return (hb[1] - lb[1]) - (ha[1] - la[1]); });
+    let x = 0, y = 0, rowH = 0, sheets = [];
+    for (const g of small) {
+      const [lo, hi] = Lamp.bounds(g), w = hi[0] - lo[0], h = hi[1] - lo[1];
+      if (x > 0 && x + w > room) { x = 0; y += rowH + 4; rowH = 0; }
+      sheets.push(...Lamp.moved(g, x - lo[0], y - lo[1]));
+      x += w + 4; rowH = Math.max(rowH, h);
+    }
+    objs.push({name: 'Frame corners and clips', parts: [{name: 'Pins and clips', sheets}]});
+  }
+  return objs;
+}
+function render() {
+  built = build();
+  let warn = built.problem || '';
+  if (!warn && (built.extra.back || built.extra.mat)) {
+    const bed = [...printer.bed].sort((a, b) => a - b), size = [built.BW, built.BH].sort((a, b) => a - b);
+    if (size[0] > bed[0] || size[1] > bed[1])
+      warn = `The ${built.extra.mat ? 'back and mat are' : 'back is'} ${built.BW.toFixed(0)} × ${built.BH.toFixed(0)} mm, bigger than your plate: ` +
+             'cut them from card or mount board instead, and untick them here.';
+  }
+  $('problem').textContent = warn;
+  $('problem').classList.toggle('hidden', !warn);
+  $('add').disabled = !!built.problem;
+  if (built.problem) { viewer.show([], false, false); return; }
+  const longest = Math.max(...built.pieces.map(pc => pc.b - pc.a));
+  if (p.view === 'parts') {
+    const objs = printedObjects(), shown = [];
+    let y = 0;
+    for (const o of objs) {
+      const sheets = o.parts.flatMap(q => q.sheets), [lo, hi] = Lamp.bounds(sheets);
+      shown.push({sheets: Lamp.moved(sheets, -lo[0], y - lo[1]), colour: o.name.includes('mat') ? PAPER : o.name.includes('Frame ') && !/back|stand|corners/.test(o.name) ? WOOD : GREY});
+      y += hi[1] - lo[1] + 8;
+    }
+    viewer.show(shown, false, false);
+  } else {
+    const parts = [{sheets: built.pieces.flatMap(pc => pc.inFrame), colour: WOOD}];
+    const photoZ = (built.extra.back ? p.backT : 0);
+    parts.push({sheets: [Lamp.box(-built.PW / 2 + 1, built.PW / 2 - 1, -built.PH / 2 + 1, built.PH / 2 - 1, photoZ, photoZ + FIT.photo)], colour: PHOTO});
+    if (built.extra.mat) parts.push({sheets: built.extra.mat, colour: PAPER});
+    if (built.extra.back) parts.push({sheets: built.extra.back, colour: GREY});
+    if (built.extra.stand) parts.push({sheets: built.extra.stand, colour: GREY});
+    parts.push({sheets: [...built.parts.brackets, ...built.parts.splices, ...built.parts.clips].flat(), colour: GREY});
+    viewer.show(parts, false, p.view === 'back');
+  }
+  const [ow, oh] = built.outer, n = built.pieces.length;
+  $('facts').textContent = `${ow.toFixed(0)} × ${oh.toFixed(0)} mm outside, ${p.depth} mm deep, for a picture of ${p.pw} × ${p.ph} mm` +
+    `${$('mat').checked ? ` in a mat of ${built.PW.toFixed(0)} × ${built.PH.toFixed(0)} mm` : ''}. ` +
+    `${n} side pieces${n > 4 ? ', as the long sides are cut to fit your plate and spliced' : ''}; the longest is ${longest.toFixed(0)} mm. ` +
+    'Each side prints lying on its outer edge, so the face is a smooth wall and nothing needs supports. ' +
+    'Push the corner pins into the holes in the back of the sides (glue makes them permanent), lay in the picture and back, and turn the clips over it.' +
+    (built.extra.stand ? ' The stand’s tongue plugs into the pocket on the back.' : '');
+}
+
+window.fromApp = message => { if (message.type === 'printer') { printer = message; update(); } };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || built.problem) return;
+  const [first, ...more] = printedObjects();
+  post(Lamp.addMessage(first.name, first.parts, more));
+};
+window.onresize = () => { clearTimeout(timer); timer = setTimeout(render, 150); };
+sync();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

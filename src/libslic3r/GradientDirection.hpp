@@ -24,7 +24,24 @@ namespace GradientDirection {
 // The object setting holding the direction, in bed coordinates, as three numbers.
 extern const char *const KEY;
 
-// The direction set on an object, if it is set and isn't straight up, which the mix already does by itself.
+// The object setting holding where along the object the gradient starts and ends, as two shares of its length.
+extern const char *const SPAN_KEY;
+
+// Where the gradient runs along the object: from and to are shares of the object's length along the direction.
+// Before from the object prints the gradient's first colour, after to its last.
+struct Span
+{
+    double from{0.}, to{1.};
+    bool   whole() const { return from <= 0. && to >= 1.; }
+    bool   operator==(const Span &other) const { return from == other.from && to == other.to; }
+};
+// The shortest span, so a gradient never becomes a hard step.
+constexpr double MIN_SPAN = 0.02;
+Span span(const ModelObject &object);
+// t along the object, 0 at one end and 1 at the other, as t along the gradient.
+double within(const Span &span, double t);
+
+// The direction set on an object, unless it is straight up over the whole object, which the mix does by itself.
 std::optional<Vec3d> of(const ModelObject &object);
 // The way the object's gradient runs: its direction, or straight up.
 Vec3d direction_or_up(const ModelObject &object);
@@ -47,6 +64,12 @@ double first_share(const Slot &slot, double t);
 // Whether layer number layer prints the first filament at t. Over many layers that happens in the share
 // first_share gives.
 bool first_on_layer(const Slot &slot, double t, size_t layer);
+
+// The first filament's share at t along the object, 0 at one end and 1 at the other: the gradient within the
+// span, and the filament at that end alone outside it.
+double share_along(const Slot &slot, const Span &span, double t);
+// Whether layer number layer prints the first filament at t along the object.
+bool first_along(const Slot &slot, const Span &span, double t, size_t layer);
 
 // The 1-based filaments the object prints with, from its parts and its painting.
 std::vector<unsigned int> used_filaments(const ModelObject &object);

@@ -60,6 +60,20 @@ std::optional<HeadWear> choose_head_wear(const std::string &name, const std::vec
                                          std::function<std::pair<int, bool>(const HeadWear &)> preview);
 // Makes a box that prints flat with grooved fold lines and folds up by hand, and adds it to the plate.
 void show_fold_box_dialog();
+// Makes a tray or box that prints upright without supports, with dividers, a lid, a handle or wall screws, and adds it.
+void show_box_maker_dialog();
+void show_stamp_maker_dialog();
+void show_bag_maker_dialog();
+// Makes a two-colour card of the real night sky over a place at a moment, and adds it with a stand.
+void show_star_map_dialog();
+// Makes a picture frame from mitred sides that pin together, with a back, clips, a stand and a mat, and adds it.
+void show_picture_frame_dialog();
+// Makes a thin lace carnival mask that prints flat, with loops for elastic or ribbon, and adds it.
+void show_mask_maker_dialog();
+// Makes a lampshade from a shape and a surface pattern, with a mount for the lamp holder it fits, and adds it.
+void show_lampshade_dialog();
+// Makes a flat, curved, round or lamp lithophane from a picture, and adds it.
+void show_lithophane_dialog();
 // Adds smaller copies of the selected hollow object that each fit inside the one before, like nesting dolls.
 void show_nesting_doll_dialog();
 bool can_make_nesting_doll();
@@ -73,6 +87,10 @@ void show_open_chooser_dialog();
 void show_print_journal();
 // Starts watching for a print to end, if one was under way when the app last closed.
 void start_print_journal();
+// Asks once a month, after a few days of use, whether you enjoy Elslicer, and offers the Ko-fi page.
+void start_donation_prompt();
+// Opens the Ko-fi page.
+void open_donation_page();
 // The user just asked for a pause from this app, so the print journal needn't alert them to it.
 void journal_expect_pause();
 // A print was just sent to the printer with these settings.

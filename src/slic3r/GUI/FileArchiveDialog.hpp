@@ -116,6 +116,10 @@ class FileArchiveDialog : public DPIDialog
 public:
     FileArchiveDialog(wxWindow* parent_window, mz_zip_archive* archive, std::vector<std::pair<boost::filesystem::path, size_t>>& selected_paths_w_size);
 
+    // Fills the selected paths with the ticked models, without showing the dialog.
+    void collect_selected();
+    size_t model_count() const { return m_model_count; }
+
 protected:
     void on_dpi_changed(const wxRect& suggested_rect) override;
 
@@ -128,6 +132,7 @@ protected:
     // chosen files are written into this vector and returned to caller via reference.
     // path in archive and decompressed size. The size can be used to distinguish between files with same path.
     std::vector<std::pair<boost::filesystem::path,size_t>>& m_selected_paths_w_size;
+    size_t m_model_count { 0 };
     ArchiveViewCtrl* m_avc;
     std::vector<Button*> m_button_list;
 };

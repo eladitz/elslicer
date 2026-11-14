@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Bag Maker</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .models { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .models button { text-align: left; padding: 8px 10px; font-size: 13px; }
+  .models button small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .models button.on, .patterns button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .patterns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .patterns button { padding: 4px; font-size: 11px; display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  .patterns canvas { width: 100%; aspect-ratio: 1.3; border-radius: 4px; background: #e9e5dc; }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Bag Maker</h1>
+  <p class="sub">A soft bag to print in one piece in TPU, standing up, handles and all, with a pattern raised on its sides.</p>
+
+  <h3>Style</h3>
+  <div class="models" id="models"></div>
+
+  <h3>Size</h3>
+  <div id="sizeSliders"></div>
+
+  <h3>Pattern</h3>
+  <div class="patterns" id="patterns"></div>
+  <div class="seg" style="margin-top:8px">
+    <button data-backing="solid" title="A wall behind the pattern">Solid backing</button>
+    <button data-backing="thin" title="The wall between the pattern's lines is one line thin, so light shows through">Thin windows</button>
+  </div>
+  <div id="patternSliders"></div>
+
+  <h3>Handles and trims</h3>
+  <div class="seg">
+    <button data-handles="sides" title="A loop handle on the front and one on the back">Two loops</button>
+    <button data-handles="none">No handles</button>
+  </div>
+  <div id="handleSliders"></div>
+  <label class="check"><input type="checkbox" id="flap"> Flap with a round clasp, raised on the front</label>
+  <label class="check"><input type="checkbox" id="ears"> Cat ears</label>
+  <label class="check"><input type="checkbox" id="face"> Cat face, raised on the front</label>
+
+  <h3>Detail</h3>
+  <div id="detailSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// x is the length, y the depth, z up, as printed: the bed is z = 0.
+// Each style is a profile: how wide (a) and deep (b) the bag is at each height t from 0 at the foot to 1 at the top,
+// as fractions of its length and depth, and how square its corners are seen from above (n: 2 round, 4 boxy).
+const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+const STYLES = {
+  tote:    {name: 'Tote', hint: 'Soft and roomy', length: 180, depth: 70, height: 150, handles: 'sides', span: 42, rise: 120, flap: false, ears: false, face: false, pattern: 'floral', n: 3,
+            profile: t => [0.88 + 0.12 * sstep(0, 0.14, t) - 0.04 * t, (0.8 + 0.2 * Math.sin(Math.PI * Math.min(1, t * 1.15))) * (1 - 0.42 * sstep(0.5, 1, t))]},
+  handbag: {name: 'Handbag', hint: 'Quilted, with a flap', length: 170, depth: 66, height: 120, handles: 'sides', span: 52, rise: 110, flap: true, ears: false, face: false, pattern: 'diamond', n: 4,
+            profile: t => [(0.92 + 0.08 * sstep(0, 0.1, t)) * (1 - 0.24 * t), 1 - 0.38 * sstep(0.35, 1, t)]},
+  round:   {name: 'Round purse', hint: 'Round, like a cookie', length: 150, depth: 55, height: 0, handles: 'sides', span: 48, rise: 120, flap: false, ears: false, face: false, pattern: 'scallop', n: 2.6,
+            // A circle seen from the front, cut flat top and bottom where its side passes 45°.
+            profile: t => { const f = -0.78 + 1.56 * t; return [Math.cos(f), 0.72 + 0.28 * Math.cos(f * 1.9)]; }},
+  shell:   {name: 'Shell bag', hint: 'Domed top', length: 170, depth: 64, height: 105, handles: 'sides', span: 50, rise: 120, flap: false, ears: false, face: false, pattern: 'waves', n: 3.4,
+            profile: t => [Math.sqrt(Math.max(0, 1 - (0.76 * t) ** 2)), 1 - 0.32 * sstep(0.45, 1, t)]},
+  kitty:   {name: 'Kitty pouch', hint: 'Cat ears, no handles', length: 150, depth: 58, height: 105, handles: 'none', span: 30, rise: 120, flap: false, ears: true, face: true, pattern: 'plain', n: 2.8,
+            profile: t => [0.92 + 0.08 * sstep(0, 0.1, t), (0.62 + 0.38 * Math.sin(Math.PI * (0.12 + 0.76 * t))) * (1 - 0.25 * sstep(0.6, 1, t))]},
+};
+const PATTERNS = {
+  plain:   'Plain', lattice: 'Lattice', floral: 'Floral lace', diamond: 'Diamond', scallop: 'Scallop', arcade: 'Arcade',
+  capsule: 'Capsule link', honey: 'Honeycomb', waves: 'Waves',
+};
+const p = {style: 'tote', ...STYLES.tote, backing: 'solid', scale: 14, line: 1.6, relief: 1.2, wall: 1.6,
+           thinWall: 0.45, band: 10, handleW: 14, handleT: 4, res: 0.5};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('sizeSliders'), 'length', 'Width mm', 60, 300, 1);
+slider($('sizeSliders'), 'depth', 'Depth mm', 30, 200, 1);
+const heightRow = slider($('sizeSliders'), 'height', 'Height mm', 40, 250, 1);
+slider($('patternSliders'), 'scale', 'Pattern size mm', 6, 40, 0.5);
+slider($('patternSliders'), 'line', 'Line mm', 0.8, 4, 0.1);
+slider($('patternSliders'), 'relief', 'Raised mm', 0.4, 3, 0.1);
+slider($('patternSliders'), 'wall', 'Wall mm', 0.8, 3, 0.1);
+slider($('patternSliders'), 'band', 'Top band mm', 3, 30, 1);
+slider($('handleSliders'), 'span', 'Handle span %', 15, 80, 1);
+slider($('handleSliders'), 'rise', 'Handle height %', 60, 200, 1);
+slider($('handleSliders'), 'handleW', 'Handle width mm', 6, 30, 1);
+slider($('handleSliders'), 'handleT', 'Handle thick mm', 2, 8, 0.5);
+slider($('detailSliders'), 'res', 'Detail mm', 0.3, 1.2, 0.05);
+
+for (const [key, m] of Object.entries(STYLES)) {
+  const b = document.createElement('button');
+  b.dataset.style = key;
+  b.innerHTML = `${m.name}<small>${m.hint}</small>`;
+  b.onclick = () => { Object.assign(p, m, {style: key}); syncAll(); update(); };
+  $('models').appendChild(b);
+}
+for (const b of document.querySelectorAll('[data-backing]')) b.onclick = () => { p.backing = b.dataset.backing; update(); };
+for (const b of document.querySelectorAll('[data-handles]')) b.onclick = () => { p.handles = b.dataset.handles; update(); };
+$('flap').onchange = () => { p.flap = $('flap').checked; update(); };
+$('ears').onchange = () => { p.ears = $('ears').checked; update(); };
+$('face').onchange = () => { p.face = $('face').checked; update(); };
+function syncAll() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('flap').checked = p.flap; $('ears').checked = p.ears; $('face').checked = p.face; }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Patterns: how far a point (u along the wall, v up it, in units of the pattern size) is from the nearest line of
+// the pattern, in the same units. Lines are drawn where that is under half the line width.
+const fr = x => x - Math.floor(x);
+const seg = (u, v, ax, ay, bx, by) => { const dx = bx - ax, dy = by - ay, t = Math.max(0, Math.min(1, ((u - ax) * dx + (v - ay) * dy) / (dx * dx + dy * dy)));
+  return Math.hypot(u - ax - t * dx, v - ay - t * dy); };
+const ring = (u, v, cx, cy, r) => Math.abs(Math.hypot(u - cx, v - cy) - r);
+const DIST = {
+  plain:   () => 9,
+  lattice: (u, v) => Math.min(Math.abs(fr(u) - 0.5), Math.abs(fr(v) - 0.5)),
+  floral:  (u, v) => { const x = fr(u) - 0.5, y = fr(v) - 0.5, grid = Math.min(Math.abs(x), Math.abs(y));
+    // A small four-petal flower where the lines cross, and a dot in each square.
+    const a = Math.atan2(y, x), r = Math.hypot(x, y), petal = Math.abs(r - 0.17 * (0.65 + 0.35 * Math.abs(Math.cos(2 * a))));
+    const dot = Math.hypot(Math.abs(x) - 0.5, Math.abs(y) - 0.5) - 0.05;
+    return Math.min(grid, petal, Math.max(0, dot)); },
+  diamond: (u, v) => { const a = (u + v) / Math.SQRT2 * Math.SQRT2 / 1.2, b = (u - v) / 1.2; return Math.min(Math.abs(fr(a) - 0.5), Math.abs(fr(b) - 0.5)) * 0.85; },
+  scallop: (u, v) => { let d = 9; for (let k = -1; k <= 1; ++k) { const row = Math.floor(v * 2) + k, off = row % 2 ? 0.5 : 0, cy = row / 2;
+      const cx = Math.floor(u - off + 0.5) + off; for (const c of [cx - 1, cx, cx + 1]) if (v >= cy) d = Math.min(d, ring(u, v, c, cy, 0.5)); } return d; },
+  arcade:  (u, v) => { const row = Math.floor(v), y = v - row, x = fr(u) - 0.5;
+    const arch = y > 0.5 ? Math.abs(Math.hypot(x, y - 0.5) - 0.42) : Math.abs(Math.abs(x) - 0.42);
+    return Math.min(arch, Math.abs(y - 0.02), Math.abs(y - 0.98)); },
+  capsule: (u, v) => { const row = Math.floor(v / 0.6), off = row % 2 ? 0.5 : 0, y = v - row * 0.6 - 0.3, x = fr(u - off) - 0.5;
+    const w = 0.32, r = 0.22, qx = Math.max(Math.abs(x) - (w - r), 0); return Math.abs(Math.hypot(qx, y) - r); },
+  honey:   (u, v) => { const sx = Math.sqrt(3); let best = 9;
+    // Hexagons with flat tops, half a unit from centre to side; the nearest centre is on one of two offset grids.
+    for (const [ox, oy] of [[0, 0], [sx / 2, 0.5]]) { const x = u - ox - sx * Math.round((u - ox) / sx), y = v - oy - Math.round(v - oy);
+      best = Math.min(best, Math.max(Math.abs(y), (sx * Math.abs(x) + Math.abs(y)) / 2)); }
+    return Math.abs(0.5 - best); },
+  waves:   (u, v) => { const y = v * 1.5 + 0.18 * Math.sin(2 * Math.PI * u); return Math.abs(fr(y) - 0.5) / 1.5; },
+};
+// 1 on a line, 0 off it, with a soft edge a tenth of a millimetre wide either side.
+function raisedAt(u, v) {
+  const d = DIST[p.pattern](u / p.scale, v / p.scale) * p.scale, half = p.line / 2;
+  return Math.max(0, Math.min(1, (half + 0.15 - d) / 0.3));
+}
+// Little previews of each pattern, drawn once.
+for (const [key, name] of Object.entries(PATTERNS)) {
+  const b = document.createElement('button'); b.dataset.pattern = key;
+  const c = document.createElement('canvas'); c.width = 78; c.height = 60;
+  // About three repeats across.
+  const g = c.getContext('2d'), img = g.createImageData(78, 60), sc = 1 / 26;
+  for (let y = 0; y < 60; ++y) for (let x = 0; x < 78; ++x) {
+    const d = DIST[key](x * sc, (60 - y) * sc), on = d < 0.045, o = 4 * (y * 78 + x);
+    img.data[o] = img.data[o + 1] = img.data[o + 2] = on ? 60 : 233; img.data[o + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  b.append(c, name);
+  b.onclick = () => { p.pattern = key; update(); };
+  $('patterns').appendChild(b);
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Seen from above the bag is a superellipse, |x/a|^n + |y/b|^n = 1: rounder or boxier with n.
+const sgnPow = (v, e) => Math.sign(v) * Math.pow(Math.abs(v), e);
+function around(a, b, n, th) {
+  const c = Math.cos(th), s = Math.sin(th), x = a * sgnPow(c, 2 / n), y = b * sgnPow(s, 2 / n);
+  const gx = sgnPow(x / a, n - 1) / a, gy = sgnPow(y / b, n - 1) / b, l = Math.hypot(gx, gy) || 1;
+  return {x, y, nx: gx / l, ny: gy / l};
+}
+// How far the side is from the middle line (y = 0) at x, on the outline a by b.
+const sideAt = (a, b, n, x) => b * Math.pow(Math.max(0, 1 - Math.pow(Math.min(1, Math.abs(x) / a), n)), 1 / n);
+
+function build() {
+  const problems = [], st = STYLES[p.style], n = st.n, L = p.length / 2, D = p.depth / 2;
+  const H = p.style === 'round' ? 2 * L * Math.sin(0.78) : p.height;
+  const step = p.res, nz = Math.max(4, Math.round(H / step) + 1), dz = H / (nz - 1);
+  // The profile, row by row, kept from leaning in or out more than 45° so it prints standing up.
+  const A = new Float32Array(nz), B = new Float32Array(nz);
+  for (let j = 0; j < nz; ++j) { const [fa, fb] = st.profile(j / (nz - 1)); A[j] = L * fa; B[j] = D * fb; }
+  for (let j = 1; j < nz; ++j) for (const Q of [A, B]) Q[j] = Math.min(Q[j - 1] + 0.95 * dz, Math.max(Q[j - 1] - 0.95 * dz, Q[j]));
+  let widest = 0;
+  for (let j = 0; j < nz; j += Math.max(1, Math.floor(nz / 20))) {
+    let per = 0, last = around(A[j], B[j], n, 0);
+    for (let k = 1; k <= 360; ++k) { const q = around(A[j], B[j], n, 2 * Math.PI * k / 360); per += Math.hypot(q.x - last.x, q.y - last.y); last = q; }
+    widest = Math.max(widest, per);
+  }
+  const nu = Math.max(64, Math.round(widest / step));
+  if (nu * nz > 3e6) return {problem: 'That is too fine to make: raise Detail mm, or make it smaller.'};
+  const floor = Math.max(1.2, p.wall), thin = p.backing === 'thin', back = thin ? p.thinWall : p.wall;
+  const top = A[nz - 1], flapDrop = 0.42 * H, clasp = Math.min(8, top * 0.12);
+  const flapEdge = x => H - flapDrop * (1 - 0.45 * (x / top) ** 2);
+  // A cat's face: oval eyes, a little nose, a mouth like a w, and whiskers. Distances in mm from its lines.
+  const fs = Math.min(2 * top, H) * 0.8, fz = H * 0.5, lw = Math.max(p.line, 1.4) / 2;
+  const catFace = (x, z) => {
+    const u = x / fs, v = (z - fz) / fs, ax = Math.abs(u);
+    if (((ax - 0.27) / 0.085) ** 2 + ((v - 0.12) / 0.11) ** 2 < 1) return true;                     // eyes
+    if (v < 0 && v > -0.07 && ax < 0.06 * (1 + v / 0.07)) return true;                              // nose
+    const d = Math.min(ring(ax, v, 0.055, -0.1, 0.055) + (v > -0.1 ? 9 : 0),                       // mouth
+                       ...[-0.04, 0.0, 0.04].map(k => seg(ax, v, 0.2, -0.03 + k * 0.5, 0.48, -0.02 + k * 1.6))); // whiskers
+    return d * fs < lw;
+  };
+  // Raised pattern over the wall, plain bands at the foot and the top, and on the front, a raised flap with a clasp.
+  const R = new Float32Array(nu * nz);
+  for (let j = 0; j < nz; ++j) {
+    const z = j * dz;
+    for (let i = 0; i < nu; ++i) {
+      const th = 2 * Math.PI * i / nu, q = around(A[j], B[j], n, th);
+      let r = z < floor + 2 || z > H - p.band ? 1 : raisedAt(widest * i / nu, z - floor);
+      if (p.flap && q.ny > 0.3) {
+        if (Math.hypot(q.x, z - (flapEdge(0) + clasp * 0.6)) < clasp) r = 2;
+        else if (z > flapEdge(q.x)) r = 1;
+      }
+      if (p.face && q.ny > 0.3 && z > floor + 3 && z < H - p.band - 2 && catFace(q.x, z)) r = 1;
+      R[j * nu + i] = r;
+    }
+  }
+  // From the top down, nothing may stick out more than the row above it plus the step up: the underside of every
+  // raised line slopes at 45°, so it prints without support.
+  for (let j = nz - 2; j >= 0; --j)
+    for (let i = 0; i < nu; ++i) { const k = j * nu + i, above = R[k + nu] * p.relief - dz; if (R[k] * p.relief < above) R[k] = above / p.relief; }
+  const wall = Lamp.sheet(nu, nz, true, (i, j, front) => {
+    const q = around(A[j], B[j], n, 2 * Math.PI * i / nu), h = R[j * nu + i] * p.relief;
+    const d = front ? h : -back - (thin ? h * 0.5 : 0);
+    return [q.x + d * q.nx, q.y + d * q.ny, j * dz];
+  });
+  // The floor: strips across from the front half of the outline to the back, reaching under the wall.
+  const fn = 181, base = Lamp.sheet(fn, 2, false, (i, j, front) => {
+    const q = around(A[0] - 0.2, B[0] - 0.2, n, Math.PI * i / (fn - 1));
+    return [q.x, j ? q.y : -q.y, front ? floor : 0];
+  });
+  const sheets = [wall, base], handles = [], trims = [];
+  const topB = B[nz - 1], ys = x => sideAt(top, topB, n, x) - back / 2;
+
+  // Loop handles on the front and back, standing in the plane of the wall. The outside edge is an oval, cut by 45°
+  // lines near the top so nothing overhangs more than that; the band narrows to its feet, which stand on the rim.
+  const arch = (sd, hw, Ha) => {
+    const w = p.handleW, wf = Math.max(back + 1, w * 0.55), N = 64, out = [];
+    const ft = Math.atan(Ha / hw), Y0 = hw * Math.cos(ft) + Ha * Math.sin(ft);
+    for (let k = 0; k < N; ++k) { const f = Math.PI * (1 - k / (N - 1)), x = hw * Math.cos(f); out.push([x, Math.min(Ha * Math.sin(f), Y0 - Math.abs(x))]); }
+    const len = [0];
+    for (let k = 1; k < N; ++k) len.push(len[k - 1] + Math.hypot(out[k][0] - out[k - 1][0], out[k][1] - out[k - 1][1]));
+    const inner = out.map((q, k) => {
+      const A0 = out[Math.max(0, k - 1)], B0 = out[Math.min(N - 1, k + 1)], tx = B0[0] - A0[0], ty = B0[1] - A0[1], l = Math.hypot(tx, ty);
+      const s2 = Math.min(len[k], len[N - 1] - len[k]), wk = wf + (w - wf) * sstep(0, 1.4 * (w - wf) + 2, s2);
+      return [q[0] + ty / l * wk, q[1] - tx / l * wk];
+    });
+    const y0 = ys(hw * 0.85), sink = Math.min(p.band - 1, 5);
+    return Lamp.sheet(N, 2, false, (i, j, front) => {
+      const [x, v] = (j ? inner : out)[i], foot = i === 0 || i === N - 1 ? sink : 0;
+      return [x, sd * y0 + (front ? 1 : -1) * p.handleT / 2, H + v - foot];
+    });
+  };
+  if (p.handles === 'sides') {
+    const hw = Math.min(p.span / 100 * 2 * top, 2 * top - p.handleW) / 2;
+    if (hw * 2 < 50) problems.push('The handles are narrow for a hand: widen their span.');
+    for (const sd of [1, -1]) handles.push(arch(sd, hw, hw * p.rise / 100));
+  }
+  // Cat ears: rounded triangles standing up from the rim, front and back, near the corners.
+  if (p.ears) {
+    const eb = Math.min(0.42 * top, 45), eh = eb * 0.85, cols = 33, sink = Math.min(p.band - 1, 4), th = back + p.relief;
+    for (const sx of [1, -1]) for (const sd of [1, -1]) {
+      const ex = sx * (top - eb * 0.75);
+      trims.push(Lamp.sheet(cols, 2, false, (i, j, front) => {
+        const u = 2 * i / (cols - 1) - 1, x = ex + u * eb / 2, tip = Math.sqrt(u * u + 0.02);
+        const v = j ? Math.max(0.6, eh * (1 - tip) / (1 - Math.sqrt(0.02))) : -sink;
+        return [x, sd * ys(x) + (front ? 1 : -1) * th / 2, H + v];
+      }));
+    }
+  }
+  const [lo, hi] = Lamp.bounds([...sheets, ...handles, ...trims]);
+  return {sheets, handles, trims, problems, size: [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]], triangles: 4 * nu * nz,
+          inside: [2 * (Math.max(...A) - back), 2 * (Math.max(...B) - back), H - floor]};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+const viewer = new Lamp.Viewer($('canvas'));
+let built = null, timer = null;
+const f1 = v => (Math.round(v * 10) / 10).toString();
+function update() {
+  for (const b of document.querySelectorAll('[data-style]')) b.classList.toggle('on', b.dataset.style === p.style);
+  for (const b of document.querySelectorAll('[data-pattern]')) b.classList.toggle('on', b.dataset.pattern === p.pattern);
+  for (const b of document.querySelectorAll('[data-backing]')) b.classList.toggle('on', b.dataset.backing === p.backing);
+  for (const b of document.querySelectorAll('[data-handles]')) b.classList.toggle('on', b.dataset.handles === p.handles);
+  heightRow.classList.toggle('hidden', p.style === 'round');
+  $('handleSliders').classList.toggle('hidden', p.handles === 'none');
+  clearTimeout(timer);
+  timer = setTimeout(render, 120);
+}
+function render() {
+  built = build();
+  const problems = built.problem ? [built.problem] : [...built.problems];
+  if (!built.problem) {
+    if (Math.max(built.size[0], built.size[1]) > Math.max(...printer.bed) || Math.min(built.size[0], built.size[1]) > Math.min(...printer.bed))
+      problems.push(`It is ${f1(built.size[0])} × ${f1(built.size[1])} mm, more than your plate.`);
+    if (built.size[2] > printer.height) problems.push(`It is ${f1(built.size[2])} mm tall, more than your printer reaches.`);
+  }
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('add').disabled = !!built.problem;
+  if (built.problem) return;
+  viewer.show([{sheets: [...built.sheets, ...built.trims], colour: [0.93, 0.86, 0.82]}, {sheets: built.handles, colour: [0.86, 0.55, 0.5]}], false, false);
+  const s = built.size, i = built.inside;
+  $('facts').textContent = `${f1(s[0])} × ${f1(s[1])} × ${f1(s[2])} mm, inside about ${f1(i[0])} × ${f1(i[1])} × ${f1(i[2])} mm, ` +
+    `${(built.triangles / 1e6).toFixed(1)} million triangles. Prints standing up in one piece with no supports. TPU (95A) makes it soft and ` +
+    'bendy; print slowly, about 25 mm/s. In PLA or PETG it is a stiff basket.';
+}
+
+window.fromApp = message => { if (message.type === 'printer') { printer = message; update(); } };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || built.problem) return;
+  const name = STYLES[p.style].name;
+  post(Lamp.addMessage(name, [{name: 'Bag', sheets: [...built.sheets, ...built.trims]}, {name: 'Handles', sheets: built.handles}]));
+};
+syncAll();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

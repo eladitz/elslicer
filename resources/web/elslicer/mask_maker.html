@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mask Maker</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  .colours { display: flex; gap: 14px; align-items: center; font-size: 13px; color: var(--muted); }
+  .colours input { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  #canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #101114; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Mask Maker</h1>
+  <p class="sub">A thin lace carnival mask that prints flat, with loops at the sides for elastic or ribbon.</p>
+
+  <h3>Shape</h3>
+  <div class="grid" id="shapes"></div>
+  <div id="shapeSliders" style="margin-top:6px"></div>
+
+  <h3>Eyes</h3>
+  <div id="eyeSliders"></div>
+
+  <h3>Lace</h3>
+  <div class="grid">
+    <button data-net="lace">Lace<small>flowers on tulle</small></button>
+    <button data-net="filigree">Filigree<small>vines and curls</small></button>
+    <button data-net="diamond">Diamond<small>net</small></button>
+    <button data-net="honey">Honeycomb</button>
+    <button data-net="scales">Scales</button>
+    <button data-net="dots">Eyelets<small>holes</small></button>
+    <button data-net="solid">Solid<small>no holes</small></button>
+  </div>
+  <div id="laceSliders" style="margin-top:6px"></div>
+  <div id="seedRow" class="seg"><button id="reseed" title="Grow the filigree again from a different start">New pattern</button></div>
+
+  <h3>Ornament</h3>
+  <div class="seg">
+    <button data-edge="smooth">Smooth edge</button>
+    <button data-edge="scallop">Scalloped</button>
+    <button data-edge="beads">Beaded</button>
+    <button data-edge="picot">Picot</button>
+  </div>
+  <label class="check" id="scrollsRow"><input type="checkbox" id="scrolls" checked> Scrolls along the edge</label>
+  <label class="check"><input type="checkbox" id="centre" checked> Ornament between the eyes</label>
+  <label class="check"><input type="checkbox" id="eyeBeads" checked> Beads round the eyes</label>
+  <div id="ornSliders"></div>
+
+  <h3>Loops</h3>
+  <div class="seg">
+    <button data-loop="ring" title="A round ring for elastic cord">Ring</button>
+    <button data-loop="slot" title="A long slot a flat ribbon threads through">Ribbon slot</button>
+  </div>
+  <div id="loopSliders"></div>
+
+  <h3>Printing</h3>
+  <div id="printSliders"></div>
+  <div class="colours"><span>Preview colour</span><input type="color" id="colour" value="#f4f1ea"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// Right half of each outline, mm, from the top centre clockwise to the nose bridge; the eyes are centred on y = 0.
+// Drawn for a mask 180 mm wide and scaled to the width chosen. A third value of 1 makes a sharp point.
+// curls: [tip x, y, centre dx, dy, turn] are tendrils curling off the outline, antennae: [from, control, to] end in a curl.
+// Petal tops come from petals: [[valley x, y], ...] with a rounded petal between each pair.
+const SHAPES = {
+  classic:   {name: 'Classic', hint: 'curled wing tips', pts: [[0,22,1],[5,27],[13,26],[24,20],[37,18],[51,21],[65,28],[77,38],[86,49],[93,57,1],[91,45],[87,31],[88,15],[86,0],[80,-12],[70,-22],[58,-27],[46,-26],[34,-21],[22,-17],[12,-15],[5,-12],[0,-9,1]],
+               curls: [[93,57,-2,6,1]]},
+  butterfly: {name: 'Butterfly', hint: 'wings and antennae', pts: [[0,7,1],[8,14],[20,30],[32,46],[46,58],[62,64],[78,60],[89,48],[93,34],[90,21],[84,13],[77,8,1],[84,1],[89,-13],[86,-27],[75,-39],[61,-45],[48,-43],[37,-34],[27,-27],[16,-24],[7,-22],[0,-26,1]],
+               antennae: [[[1,8],[1,28],[9,40]]], body: true},
+  cat:       {name: 'Cat', hint: 'soft ears', pts: [[0,19],[9,20],[19,24],[27,32],[33,44],[37,52,1],[43,42],[52,32],[64,27],[78,26],[90,31],[96,36,1],[93,25],[88,12],[86,0],[80,-11],[68,-20],[53,-24],[38,-22],[24,-17],[12,-13],[0,-10,1]],
+               curls: [[96,36,-1,5,1]]},
+  petals:    {name: 'Petals', hint: 'a crown of petals', petals: [[0,22],[18,24],[38,28],[58,34],[77,40]], pts: [[96,40],[93,24],[90,8],[86,-6],[78,-17],[66,-25],[52,-28],[38,-25],[24,-19],[12,-15],[0,-11,1]]},
+  wings:     {name: 'Wings', hint: 'swept up feathers', pts: [[0,15,1],[6,20],[16,21],[30,24],[46,31],[62,42],[76,54],[88,63],[98,68,1],[96,56],[92,42],[90,27],[89,10],[84,-6],[72,-19],[57,-26],[43,-25],[29,-20],[15,-16],[5,-12],[0,-10,1]],
+               curls: [[98,68,-4,4,1]]},
+  domino:    {name: 'Domino', hint: 'soft and simple', pts: [[0,15,1],[7,21],[20,26],[38,28],[56,27],[72,22],[84,14],[90,3],[87,-9],[76,-19],[60,-25],[44,-24],[30,-19],[17,-15],[7,-12],[0,-10,1]]},
+};
+// The petal crown becomes ordinary outline points: sharp at each valley, round over each petal.
+for (const sh of Object.values(SHAPES)) if (sh.petals) {
+  const top = [];
+  sh.petals.forEach(([x, y], n) => {
+    top.push([x, y, 1]);
+    const next = sh.petals[n + 1] || [sh.pts[0][0], sh.pts[0][1]], mx = (x + next[0]) / 2, w = next[0] - x, h = 0.55 * w;
+    const my = (y + next[1]) / 2;
+    top.push([x + 0.12 * w, my + 0.55 * h], [mx, my + h], [next[0] - 0.12 * w, my + 0.55 * h]);
+  });
+  sh.pts = [...top, ...sh.pts];
+}
+
+const p = {shape: 'classic', net: 'lace', edge: 'picot', loop: 'ring', width: 210, height: 110, eyeGap: 64, eyeW: 42, eyeH: 20, eyeTilt: 4,
+           rimW: 2.2, pitch: 2.2, line: 1.1, scroll: 4.5, ribbon: 6, loopY: 3, thick: 0.9, res: 0.25, seed: 1, tulle: 2.2};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('shapeSliders'), 'width', 'Width mm', 150, 250, 1);
+slider($('shapeSliders'), 'height', 'Height %', 70, 140, 1);
+slider($('eyeSliders'), 'eyeGap', 'Eye centres mm', 54, 72, 0.5);
+slider($('eyeSliders'), 'eyeW', 'Eye width mm', 28, 48, 0.5);
+slider($('eyeSliders'), 'eyeH', 'Eye height mm', 12, 28, 0.5);
+slider($('eyeSliders'), 'eyeTilt', 'Tilt mm', 0, 10, 0.5);
+slider($('laceSliders'), 'pitch', 'Openness mm', 1.5, 6, 0.1);
+slider($('laceSliders'), 'line', 'Thread mm', 0.5, 1.2, 0.05);
+const tulleRow = slider($('laceSliders'), 'tulle', 'Tulle mesh mm', 1.6, 4, 0.1);
+slider($('ornSliders'), 'rimW', 'Edge band mm', 1.2, 4, 0.1);
+slider($('ornSliders'), 'scroll', 'Scroll size mm', 2.5, 8, 0.1);
+slider($('loopSliders'), 'ribbon', 'Hole mm', 3, 16, 0.5);
+slider($('loopSliders'), 'loopY', 'Height mm', -10, 20, 0.5);
+slider($('printSliders'), 'thick', 'Thickness mm', 0.6, 2, 0.05);
+slider($('printSliders'), 'res', 'Detail mm', 0.12, 0.3, 0.01);
+
+for (const [key, s] of Object.entries(SHAPES)) {
+  const b = document.createElement('button');
+  b.dataset.shape = key;
+  b.innerHTML = `${s.name}<small>${s.hint}</small>`;
+  $('shapes').appendChild(b);
+}
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('shape', 'shape'); choose('net', 'net'); choose('edge', 'edge'); choose('loop', 'loop');
+$('reseed').onclick = () => { p.seed++; update(); };
+for (const id of ['scrolls', 'centre', 'eyeBeads', 'colour']) $(id).oninput = update;
+function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Geometry, in mm with y up.
+const pathOf = (pts, closed = true) => { const q = new Path2D(); pts.forEach(([x, y], n) => n ? q.lineTo(x, y) : q.moveTo(x, y)); if (closed) q.closePath(); return q; };
+const hit = document.createElement('canvas').getContext('2d');
+
+// The whole outline: the right half, then its mirror, through a closed Catmull-Rom spline that stops at sharp points.
+function outlinePoints() {
+  const sx = p.width / 180, sy = p.height / 100;
+  const half = SHAPES[p.shape].pts.map(([x, y, s]) => [x * sx, y * sy, s]);
+  const all = [...half, ...half.slice(1, -1).reverse().map(([x, y, s]) => [-x, y, s])];
+  const n = all.length, out = [];
+  const tan = i => { const [a, b, c] = [all[(i - 1 + n) % n], all[i], all[(i + 1) % n]]; return b[2] ? [0, 0] : [(c[0] - a[0]) / 2, (c[1] - a[1]) / 2]; };
+  for (let i = 0; i < n; ++i) {
+    const a = all[i], b = all[(i + 1) % n], ma = tan(i), mb = tan((i + 1) % n), steps = 24;
+    for (let s = 0; s < steps; ++s) {
+      const t = s / steps, t2 = t * t, t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+      out.push([h00 * a[0] + h10 * ma[0] + h01 * b[0] + h11 * mb[0], h00 * a[1] + h10 * ma[1] + h01 * b[1] + h11 * mb[1]]);
+    }
+  }
+  return out;
+}
+// An almond eye: inner corner a little low, outer corner raised by the tilt. side is +1 (right) or -1.
+function eyePoints(side) {
+  const cx = side * p.eyeGap / 2, w = p.eyeW / 2, inner = [cx - side * w, -1.5], outer = [cx + side * w, -1.5 + p.eyeTilt], out = [];
+  const lid = (ctrlY, from, to) => { for (let s = 0; s < 40; ++s) { const t = s / 40, u = 1 - t;
+    out.push([u * u * from[0] + 2 * u * t * cx + t * t * to[0], u * u * from[1] + 2 * u * t * ctrlY + t * t * to[1]]); } };
+  lid(p.eyeH + p.eyeTilt / 2 - 1.5, inner, outer);
+  lid(-p.eyeH * 0.9 + p.eyeTilt / 2 - 1.5, outer, inner);
+  return out;
+}
+// Points along a polyline every `step` mm, with the inward normal there (the outline runs clockwise).
+function along(pts, step, offset = 0) {
+  const out = [];
+  let carry = 0;
+  for (let n = 0; n < pts.length; ++n) {
+    const a = pts[n], b = pts[(n + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy);
+    if (L < 1e-9) continue;
+    const nx = dy / L, ny = -dx / L;
+    for (let d = carry; d < L; d += step) {
+      const t = d / L;
+      out.push({x: a[0] + dx * t + nx * offset, y: a[1] + dy * t + ny * offset, nx, ny});
+    }
+    carry = ((carry - L) % step + step) % step;
+  }
+  return out;
+}
+function spiral(g, cx, cy, a0, dir, r0, w) {
+  g.beginPath();
+  for (let s = 0; s <= 60; ++s) {
+    const t = s / 60, a = a0 + dir * t * 2.3 * Math.PI, r = r0 * (1 - 0.75 * t);
+    s ? g.lineTo(cx + r * Math.cos(a), cy + r * Math.sin(a)) : g.moveTo(cx + r * Math.cos(a), cy + r * Math.sin(a));
+  }
+  g.lineWidth = w; g.lineCap = 'round'; g.stroke();
+  const a = a0 + dir * 2.3 * Math.PI, r = r0 * 0.25;
+  g.beginPath(); g.arc(cx + r * Math.cos(a), cy + r * Math.sin(a), w * 0.9, 0, 2 * Math.PI); g.fill();
+}
+// Where the outline crosses height y furthest out on the right.
+function sideAt(pts, y) {
+  let best = 0;
+  for (let n = 0; n < pts.length; ++n) {
+    const a = pts[n], b = pts[(n + 1) % pts.length];
+    if ((a[1] - y) * (b[1] - y) <= 0 && a[1] !== b[1]) best = Math.max(best, a[0] + (b[0] - a[0]) * (y - a[1]) / (b[1] - a[1]));
+  }
+  return best;
+}
+
+// Two layers: the band (edge, eye rims, scrolls, loops) prints at full thickness, the lace between at lace thickness.
+function draw(k, ox, oy, W, H) {
+  const outline = outlinePoints(), outlinePath = pathOf(outline);
+  const right = eyePoints(1), eyes = [right, right.map(([x, y]) => [-x, y]).reverse()], eyePaths = eyes.map(e => pathOf(e));
+  const make = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d');
+    g.setTransform(k, 0, 0, -k, ox, oy); g.fillStyle = g.strokeStyle = '#fff'; g.lineJoin = 'round'; return [c, g]; };
+  const [laceC, lace] = make(), [bandC, band] = make();
+  const [, , , , minY, maxY] = [0, 0, 0, 0, ...extentY(outline)];
+  const minX = -p.width / 2 - 10, maxX = p.width / 2 + 10;
+
+  // The lace, clipped to the outline.
+  lace.save(); lace.clip(outlinePath);
+  lace.lineWidth = p.line;
+  const P = p.pitch;
+  if (p.net === 'solid' || p.net === 'dots') {
+    lace.fill(outlinePath);
+    if (p.net === 'dots') {
+      lace.globalCompositeOperation = 'destination-out';
+      const r = (P - p.line) / 2;
+      for (let row = 0, y = minY; y < maxY; y += P * 0.866, ++row)
+        for (let x = minX + (row % 2) * P / 2; x < maxX; x += P) { lace.beginPath(); lace.arc(x, y, r, 0, 2 * Math.PI); lace.fill(); }
+      lace.globalCompositeOperation = 'source-over';
+    }
+  } else if (p.net === 'diamond') {
+    const t = Math.tan(56 * Math.PI / 180), span = (maxY - minY) / t;
+    lace.beginPath();
+    for (let x = minX - span; x < maxX + span; x += P / Math.sin(56 * Math.PI / 180)) {
+      lace.moveTo(x, minY); lace.lineTo(x + span, maxY); lace.moveTo(x, maxY); lace.lineTo(x + span, minY);
+    }
+    lace.stroke();
+  } else if (p.net === 'lace') {
+    // Tulle: the fine hexagonal net lace is worked on, in a thinner thread.
+    const r = p.tulle / Math.sqrt(3), dx = Math.sqrt(3) * r, dy = 1.5 * r;
+    lace.lineWidth = Math.max(0.5, p.line * 0.55);
+    lace.beginPath();
+    for (let row = 0, y = minY - r; y < maxY + r; y += dy, ++row)
+      for (let x = minX + (row % 2) * dx / 2; x < maxX + dx; x += dx)
+        for (let s = 0; s <= 6; ++s) { const a = Math.PI / 6 + s * Math.PI / 3; s ? lace.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)) : lace.moveTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+    lace.stroke();
+  } else if (p.net === 'honey') {
+    const r = P / Math.sqrt(3) * 1.2, dx = Math.sqrt(3) * r, dy = 1.5 * r;
+    lace.beginPath();
+    for (let row = 0, y = minY - r; y < maxY + r; y += dy, ++row)
+      for (let x = minX + (row % 2) * dx / 2; x < maxX + dx; x += dx)
+        for (let s = 0; s <= 6; ++s) { const a = Math.PI / 6 + s * Math.PI / 3; s ? lace.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)) : lace.moveTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+    lace.stroke();
+  } else if (p.net === 'scales') {
+    const r = P * 0.75;
+    lace.beginPath();
+    for (let row = 0, y = maxY + r; y > minY - r; y -= r, ++row)
+      for (let x = minX + (row % 2) * r; x < maxX + 2 * r; x += 2 * r) { lace.moveTo(x + r, y); lace.arc(x, y, r, 0, -Math.PI, true); }
+    lace.stroke();
+  }
+  lace.restore();
+
+  // The band: the edge all round, with scallops or beads.
+  band.lineWidth = p.rimW;
+  band.stroke(outlinePath);
+  if (p.edge === 'scallop') {
+    const r = p.rimW * 0.9 + 0.7;
+    for (const q of along(outline, 2.4 * r, -0.2)) { band.beginPath(); band.arc(q.x, q.y, r, 0, 2 * Math.PI); band.fill(); }
+  } else if (p.edge === 'picot') {
+    // Picots: the little loops lace makers work along an edge.
+    const r = 1.2 + p.line * 0.3;
+    band.save(); band.lineWidth = Math.max(0.7, p.line * 0.75);
+    for (const q of along(outline, 2.6 * r, -(p.rimW / 2 + r * 0.75))) { band.beginPath(); band.arc(q.x, q.y, r, 0, 2 * Math.PI); band.stroke(); }
+    band.restore();
+  } else if (p.edge === 'beads') {
+    const r = Math.max(0.8, p.line * 1.3);
+    for (const q of along(outline, 2.7 * r, p.rimW / 2 + r * 0.6)) { band.beginPath(); band.arc(q.x, q.y, r, 0, 2 * Math.PI); band.fill(); }
+  }
+
+  // Tendrils off the wing tips, and a butterfly's antennae, each ending in a curl.
+  {
+    const sh = SHAPES[p.shape], sx = p.width / 180, sy = p.height / 100, w = Math.max(1, p.rimW * 0.7);
+    band.save(); band.lineWidth = w; band.lineCap = 'round';
+    for (const [x, y, dx, dy, turn] of sh.curls || []) for (const f of [1, -1]) {
+      const tx = f * x * sx, ty = y * sy, cx = tx + f * dx, cy = ty + dy, r = Math.hypot(dx, dy);
+      spiral(band, cx, cy, Math.atan2(ty - cy, tx - cx), -f * turn, r, w);
+    }
+    if (sh.body) {   // a slim body down the middle and a round head
+      band.beginPath(); band.ellipse(0, -9 * sy, 2.8, 14 * sy, 0, 0, 2 * Math.PI); band.fill();
+      band.beginPath(); band.arc(0, 8 * sy, 3, 0, 2 * Math.PI); band.fill();
+    }
+    for (const [[x0, y0], [x1, y1], [x2, y2]] of sh.antennae || []) for (const f of [1, -1]) {
+      const a = [f * x0 * sx, y0 * sy], c = [f * x1 * sx, y1 * sy], b = [f * x2 * sx, y2 * sy];
+      band.beginPath(); band.moveTo(...a); band.quadraticCurveTo(...c, ...b); band.stroke();
+      const t = Math.atan2(b[1] - c[1], b[0] - c[0]), r = 3, n = t - f * Math.PI / 2;
+      spiral(band, b[0] + r * Math.cos(n), b[1] + r * Math.sin(n), n + Math.PI, -f, r, w);
+    }
+    band.restore();
+  }
+
+  // Scrolls curling in from the edge, on the right half then mirrored, kept clear of the eyes and the edge itself.
+  if (p.net === 'filigree' || p.net === 'lace') filigree(band, outline, outlinePath, eyes, eyePaths, p.net === 'lace');
+  else if ($('scrolls').checked) {
+    const r0 = p.scroll, w = Math.max(0.8, Math.min(1.4, p.rimW * 0.55)), placed = [];
+    hit.setTransform(1, 0, 0, 1, 0, 0);
+    for (const q of along(outline, 2.5 * r0 + 1.5, p.rimW / 2 + r0 - 0.2)) {
+      if (q.x < r0 + 2) continue;
+      hit.lineWidth = 2 * (r0 + p.rimW / 2) - 1;
+      if (!hit.isPointInPath(outlinePath, q.x, q.y) || hit.isPointInStroke(outlinePath, q.x, q.y)) continue;
+      hit.lineWidth = 2 * (r0 + p.rimW / 2 + 1);
+      if (eyePaths.some(e => hit.isPointInPath(e, q.x, q.y) || hit.isPointInStroke(e, q.x, q.y))) continue;
+      if (placed.some(o => Math.hypot(o.x - q.x, o.y - q.y) < 2.2 * r0)) continue;
+      placed.push(q);
+    }
+    placed.forEach((q, n) => {
+      const a0 = Math.atan2(-q.ny, -q.nx), dir = n % 2 ? 1 : -1;
+      spiral(band, q.x, q.y, a0, dir, r0, w);
+      spiral(band, -q.x, q.y, Math.PI - a0, -dir, r0, w);
+    });
+  }
+
+  // A drop and two curls between the eyes, over the nose.
+  if ($('centre').checked) {
+    const gap = p.eyeGap - p.eyeW, s = Math.max(0.6, Math.min(1.6, gap / 24)), w = Math.max(0.8, Math.min(1.4, p.rimW * 0.55));
+    band.save(); band.clip(outlinePath);
+    band.beginPath(); band.moveTo(0, 15 * s); band.quadraticCurveTo(5 * s, 5 * s, 0, -1 * s); band.quadraticCurveTo(-5 * s, 5 * s, 0, 15 * s); band.fill();
+    band.beginPath(); band.moveTo(0, 15 * s); band.lineTo(0, 22 * s); band.lineWidth = w; band.stroke();
+    spiral(band, 4.5 * s, 9 * s, Math.PI, 1, 3 * s, w);
+    spiral(band, -4.5 * s, 9 * s, 0, -1, 3 * s, w);
+    band.beginPath(); band.arc(0, -5 * s, 1.6 * s, 0, 2 * Math.PI); band.fill();
+    band.restore();
+  }
+
+  // Open the eyes through everything, then ring them.
+  for (const g of [lace, band]) { g.globalCompositeOperation = 'destination-out'; for (const e of eyePaths) g.fill(e); g.globalCompositeOperation = 'source-over'; }
+  band.lineWidth = p.rimW;
+  for (const e of eyePaths) band.stroke(e);
+  if ($('eyeBeads').checked) {
+    const r = Math.max(0.8, p.line * 1.3);
+    for (const e of eyes) for (const q of along(e, 2.7 * r, p.rimW / 2 + r * 0.6)) { band.beginPath(); band.arc(q.x, q.y, r, 0, 2 * Math.PI); band.fill(); }
+  }
+
+  // The loops out past each side: a round ring for elastic cord, or a frame with a slot a flat ribbon threads through.
+  const xe = sideAt(outline, p.loopY), bar = 2.4, holes = [];
+  let x1;
+  if (p.loop === 'ring') {
+    const r = p.ribbon / 2, cx = xe + r + 1.2;
+    x1 = cx + r + bar;
+    for (const side of [1, -1]) {
+      band.beginPath(); band.arc(side * cx, p.loopY, r + bar, 0, 2 * Math.PI); band.fill();
+      band.beginPath(); band.roundRect(side > 0 ? xe - 3 : -cx, p.loopY - (r + bar) * 0.7, cx - xe + 3, 1.4 * (r + bar), 1); band.fill();
+      holes.push(g => { g.beginPath(); g.arc(side * cx, p.loopY, r, 0, 2 * Math.PI); g.fill(); });
+    }
+  } else {
+    const gap = 3.5, L = p.ribbon + 1, x0 = xe - 4;
+    x1 = xe + 1.5 + gap + bar;
+    for (const side of [1, -1]) {
+      const [a, b] = side > 0 ? [x0, x1] : [-x1, -x0], s0 = side > 0 ? xe + 1.5 : -(xe + 1.5 + gap);
+      band.beginPath(); band.roundRect(a, p.loopY - L / 2 - bar, b - a, L + 2 * bar, bar); band.fill();
+      holes.push(g => { g.beginPath(); g.roundRect(s0, p.loopY - L / 2, gap, L, gap / 2); g.fill(); });
+    }
+  }
+  for (const g of [lace, band]) { g.globalCompositeOperation = 'destination-out'; for (const h of holes) h(g); g.globalCompositeOperation = 'source-over'; }
+
+  // The eyes must sit inside the mask with some lace round them.
+  hit.setTransform(1, 0, 0, 1, 0, 0); hit.lineWidth = 2 * (p.rimW + 1);
+  const eyesOut = eyes.some(e => e.some(([x, y]) => !hit.isPointInPath(outlinePath, x, y) || hit.isPointInStroke(outlinePath, x, y)));
+  const innerGap = p.eyeGap - p.eyeW;
+  return {laceC, bandC, eyesOut, innerGap, span: 2 * x1};
+}
+// A small seeded random generator, so the same settings grow the same lace.
+function random(seed) {
+  let a = (seed * 2654435761) >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ t >>> 15, t | 1); t ^= t + Math.imul(t ^ t >>> 7, t | 61); return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+}
+// Vines that grow in from the edge and the eye rims and off each other, curling tighter until they end in a
+// curl, with leaves and berries along them. Every vine starts on something already drawn, so the lace is one
+// piece, and keeps the openness away from everything else. Grown on the right half, then mirrored.
+function filigree(g, outline, outlinePath, eyes, eyePaths, lace) {
+  const rnd = random(p.seed), w = p.line, gap = p.pitch, m = (1.2 * w + gap) / 2, step = 0.4, cell = 0.5;
+  const [lo, hi] = extentY(outline), GW = Math.ceil((p.width / 2 + 4) / cell), GH = Math.ceil((hi - lo + 4) / cell);
+  const own = new Int32Array(GW * GH).fill(-1), when = new Int32Array(GW * GH);
+  let clock = 0;
+  const idx = (x, y) => { const i = Math.floor(x / cell), j = Math.floor((y - lo + 2) / cell); return i < 0 || j < 0 || i >= GW || j >= GH ? -1 : j * GW + i; };
+  const disc = (x, y, r, f) => { for (let dy = -r; dy <= r; dy += cell) for (let dx = -r; dx <= r; dx += cell) if (dx * dx + dy * dy <= r * r) { const n = idx(x + dx, y + dy); if (n >= 0 && f(n)) return true; } return false; };
+  const mark = (x, y, r, id) => disc(x, y, r, n => { if (own[n] < 0) { own[n] = id; when[n] = clock; } return false; });
+  hit.setTransform(1, 0, 0, 1, 0, 0);
+  const inside = (x, y) => x > gap / 2 && hit.isPointInPath(outlinePath, x, y) && !eyePaths.some(e => hit.isPointInPath(e, x, y));
+    
+  for (const q of along(outline, 0.5)) mark(q.x, q.y, p.rimW / 2 + gap / 2, 0);
+  for (const e of eyes) for (const q of along(e, 0.5)) mark(q.x, q.y, p.rimW / 2 + gap / 2, 0);
+  if ($('centre').checked) { const s = Math.max(0.6, Math.min(1.6, (p.eyeGap - p.eyeW) / 24));
+    for (let y = -7 * s; y < 23 * s; y += cell) for (let x = 0; x < 8 * s; x += cell) mark(x, y, gap / 2, 0); }
+
+  const strokes = new Path2D(), mains = new Path2D(), fills = new Path2D();
+  const seeds = [];
+  // Bridges first, so the eyes are tied to the edge whatever grows: a spine up the middle, and from each eye one
+  // stem out to the side and one in to the spine. Vines may sprout from them like from the edge.
+  const crossX = x => { let top = -Infinity, bot = Infinity;
+    for (let n = 0; n < outline.length; ++n) { const a = outline[n], b = outline[(n + 1) % outline.length];
+      if ((a[0] - x) * (b[0] - x) <= 0 && a[0] !== b[0]) { const y = a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); top = Math.max(top, y); bot = Math.min(bot, y); } }
+    return [bot, top]; };
+  const [spineLo, spineHi] = crossX(0), inner = [p.eyeGap / 2 - p.eyeW / 2, -1.5], outerC = [p.eyeGap / 2 + p.eyeW / 2, -1.5 + p.eyeTilt];
+  const edgeX = sideAt(outline, outerC[1] + 3);
+  const curve = (a, c, b) => { const out = []; for (let t = 0; t <= 1.0001; t += 0.02) { const u = 1 - t; out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); } return out; };
+  const bridges = [[[0, spineLo], [0, spineHi]],
+                   curve(outerC, [(outerC[0] + edgeX) / 2, outerC[1] + 6], [edgeX, outerC[1] + 3]),
+                   curve(inner, [inner[0] / 2, inner[1] + 4], [0, inner[1] + 6])];
+  for (const b of lace ? [] : bridges) {
+    mains.moveTo(b[0][0], b[0][1]);
+    const fine = [];
+    for (let n = 1; n < b.length; ++n) { const [x0, y0] = b[n - 1], [x1, y1] = b[n], L = Math.hypot(x1 - x0, y1 - y0);
+      for (let d = 0; d < L; d += 0.5) fine.push([x0 + (x1 - x0) * d / L, y0 + (y1 - y0) * d / L]); mains.lineTo(x1, y1); }
+    for (const [x, y] of fine) mark(x, y, m, 0);
+    for (let n = 6; n + 1 < fine.length; n += 10) { const [x, y] = fine[n], [x2, y2] = fine[n + 1], t = Math.atan2(y2 - y, x2 - x);
+      for (const side of [1, -1]) seeds.push({x, y, a: t + side * Math.PI / 2, from: 0}); }
+  }
+  if (!lace) for (const q of along(outline, 14 + 2 * gap)) if (q.x > gap) seeds.push({x: q.x + q.nx * p.rimW / 2, y: q.y + q.ny * p.rimW / 2, a: Math.atan2(q.ny, q.nx), from: 0});
+  if (!lace) for (const q of along(eyes[0], 12 + 2 * gap)) seeds.push({x: q.x - q.nx * p.rimW / 2, y: q.y - q.ny * p.rimW / 2, a: Math.atan2(-q.ny, -q.nx), from: 0});
+  for (let n = seeds.length - 1; n > 0; --n) { const k = Math.floor(rnd() * (n + 1)); [seeds[n], seeds[k]] = [seeds[k], seeds[n]]; }
+  // Lace: flowers first, biggest first, wherever they fit with room round them; the vines then wind between and
+  // out of them, and the tulle under everything holds it together.
+  const flowers = new Path2D(), cuts = new Path2D();
+  let fid = 100000;
+  if (lace) {
+    for (const R of [7, 5.5, 4.5, 3.5, 2.6]) for (let tries = 0; tries < 200; ++tries) {
+      const fx = R + 1 + rnd() * (p.width / 2), fy = lo + rnd() * (hi - lo);
+      if (!inside(fx, fy) || disc(fx, fy, R + 0.7 * gap, n => own[n] >= 0)) continue;
+      let ok = true;
+      for (let a = 0; a < 2 * Math.PI && ok; a += Math.PI / 8) ok = inside(fx + (R + gap) * Math.cos(a), fy + (R + gap) * Math.sin(a));
+      if (!ok) continue;
+      const me = fid++;
+      flower(fx, fy, R, me);
+      mark(fx, fy, R + gap / 2 + w / 2, me);
+      for (let a = rnd(); a < 2 * Math.PI; a += 2 * Math.PI / 3) seeds.push({x: fx + R * Math.cos(a), y: fy + R * Math.sin(a), a, from: me});
+    }
+  }
+  // A flower: rounded petals round a ring, a vein down each petal, and the tulle showing in its heart.
+  function flower(x, y, R, me) {
+    const n = R > 5 ? 7 + Math.floor(rnd() * 2) : 5 + Math.floor(rnd() * 2), turn = rnd() * 2 * Math.PI, r0 = R * 0.32, d = Math.PI / n * 0.82;
+    const at = (r, a) => [x + r * Math.cos(a), y + r * Math.sin(a)];
+    for (let i = 0; i < n; ++i) {
+      const a = turn + 2 * Math.PI * i / n;
+      flowers.moveTo(...at(r0 * 0.9, a - d * 0.7));
+      flowers.bezierCurveTo(...at(R * 0.95, a - d * 1.25), ...at(R * 1.08, a - d * 0.35), ...at(R, a));
+      flowers.bezierCurveTo(...at(R * 1.08, a + d * 0.35), ...at(R * 0.95, a + d * 1.25), ...at(r0 * 0.9, a + d * 0.7));
+      flowers.closePath();
+      if (R > 4) { cuts.moveTo(...at(r0 * 1.5, a)); cuts.lineTo(...at(R * 0.72, a)); }
+    }
+    flowers.moveTo(x + r0 + w * 0.6, y); flowers.arc(x, y, r0 + w * 0.6, 0, 2 * Math.PI);
+    cuts.moveTo(x + r0 * 0.75, y); cuts.arc(x, y, r0 * 0.75, 0, 2 * Math.PI);
+  }
+  // Once the first vines have grown, new ones sprout from random points on what is there, until the space is full.
+  const anchors = [...seeds];
+  let id = 1, budget = 60000, misses = 0;
+  while (budget > 0 && misses < 300) {
+    let sd = seeds.shift();
+    const refill = !sd;
+    if (!sd && lace) break;
+    if (!sd) {
+      // Find an empty patch, and grow into it from the nearest point of the lace.
+      let void_ = null;
+      for (let tries = 0; tries < 300 && !void_; ++tries) {
+        const vx = rnd() * p.width / 2, vy = lo + rnd() * (hi - lo);
+        if (inside(vx, vy) && !disc(vx, vy, m + 0.5, n => own[n] >= 0)) void_ = [vx, vy];
+      }
+      if (!void_) break;
+      let q = anchors[0], best = Infinity;
+      for (const c of anchors) { const d = (c.x - void_[0]) ** 2 + (c.y - void_[1]) ** 2; if (d < best) { best = d; q = c; } }
+      sd = {...q, a: Math.atan2(void_[1] - q.y, void_[0] - q.x)};
+    }
+    const me = id++;
+    let {x, y} = sd, a = sd.a + (sd.from ? (rnd() - 0.5) * 0.6 : (rnd() < 0.5 ? -1 : 1) * (0.5 + 0.5 * rnd())), k = (rnd() < 0.5 ? -1 : 1) * (0.015 + 0.03 * rnd());
+    const growth = 1.007 + 0.008 * rnd(), grace = Math.ceil((p.rimW + gap + w) / step) + 2, pts = [[x, y]];
+    let nextBranch = 4 + 5 * rnd(), length = 0, curled = false;
+    const later = [], branches = [], ignore = new Set([sd.from]), recent = Math.ceil((2 * m + w) / step) + 3;
+    for (let t = 0; t < 600 && budget-- > 0; ++t) {
+      ++clock;
+      if (1 / Math.abs(k) > 0.9 * w) k *= growth; else { curled = true; break; }
+      if (t >= grace) ignore.delete(sd.from);
+      // Look ahead by the clearance (the vine's own last stretch does not count). Something in the way makes the
+      // vine curl in tighter, the way a tendril does, and it stops only when even its tightest curl will not fit.
+      let na, nx, ny, free = false;
+      for (let tries = 0; tries < 6 && !free; ++tries) {
+        na = a + k * step; nx = x + step * Math.cos(na); ny = y + step * Math.sin(na);
+        free = !blockedAhead(nx + m * Math.cos(na), ny + m * Math.sin(na));
+        if (!free) { if (1 / Math.abs(k) <= 0.9 * w) break; k *= 1.6; }
+      }
+      if (!free) break;
+      a = na;
+      x = nx; y = ny; length += step; pts.push([x, y]);
+      mark(x, y, m, me);
+      if (length > nextBranch) {
+        nextBranch = length + 6 + 6 * rnd();
+        const side = -Math.sign(k), ba = a + side * (0.7 + 0.6 * rnd());
+        if (rnd() < 0.4) { const l = leaf(x, y, ba, me); if (l) later.push(l); } else branches.push({x, y, a: ba, from: me});
+      }
+    }
+    function blockedAhead(ax, ay) {
+      if (!inside(ax, ay)) return true;
+      // Cells the vine itself marked in its last stretch are allowed; older ones (a curl closing on itself) are not.
+      return disc(ax, ay, m, n => own[n] >= 0 && !ignore.has(own[n]) && !(own[n] === me && when[n] > clock - recent));
+    }
+    if (length < 3) ++misses; else misses = 0;
+    // Too short to keep: take back the room it marked, with its leaves, so nothing is left floating.
+    if (length < (refill ? 7 : sd.from ? 4 : 2)) { for (let n = 0; n < own.length; ++n) if (own[n] === me) own[n] = -1; continue; }
+    for (const l of later) l();
+    seeds.push(...branches);
+    for (let n = 4; n < pts.length; n += 4) anchors.push({x: pts[n][0], y: pts[n][1], a: Math.atan2(pts[n][1] - pts[n - 1][1], pts[n][0] - pts[n - 1][0]), from: me});
+    const path = sd.from ? strokes : mains;
+    path.moveTo(pts[0][0], pts[0][1]);
+    for (const q of pts) path.lineTo(q[0], q[1]);
+    const r = curled ? w * 0.95 : w * 0.8;
+    fills.moveTo(x + r, y); fills.arc(x, y, r, 0, 2 * Math.PI);
+  }
+  // A leaf off a vine: a pointed oval, filled when small and outlined with a vein when big enough to show it.
+  function leaf(x, y, a, parent) {
+    const L = 4 + 4.5 * rnd(), Wd = L * (0.35 + 0.15 * rnd()), c = Math.cos(a), s = Math.sin(a);
+    const at = (u, v) => [x + c * u - s * v, y + s * u + c * v], skip = new Set([parent]);
+    for (let u = w; u <= L; u += 0.8) for (const v of [-Wd / 2, 0, Wd / 2]) {
+      const [px, py] = at(u, v * Math.sin(Math.PI * u / L));
+      if (!inside(px, py) || disc(px, py, gap / 2 + w / 2, n => own[n] >= 0 && !skip.has(own[n]))) return;
+    }
+    const me = parent, outlinePts = [];
+    for (let s2 = 0; s2 <= 20; ++s2) { const u = L * s2 / 20; outlinePts.push(at(u, Wd / 2 * Math.sin(Math.PI * u / L))); }
+    for (let s2 = 20; s2 >= 0; --s2) { const u = L * s2 / 20; outlinePts.push(at(u, -Wd / 2 * Math.sin(Math.PI * u / L))); }
+    for (const [px, py] of outlinePts) mark(px, py, m, me);
+    for (let u = 0; u < L; u += cell) { const [px, py] = at(u, 0); mark(px, py, Wd / 2 + gap / 2, me); }
+    return () => {
+      const solid = lace || L < 5 || Wd < 2 * w + 1.2, path = solid ? fills : strokes;
+      outlinePts.forEach(([px, py], n) => n ? path.lineTo(px, py) : path.moveTo(px, py));
+      path.closePath();
+      if (!solid) { const [ex, ey] = at(L * 0.75, 0); strokes.moveTo(x, y); strokes.lineTo(ex, ey); }
+      else if (lace && L > 4.5) { const [ax, ay] = at(L * 0.2, 0), [ex, ey] = at(L * 0.75, 0); cuts.moveTo(ax, ay); cuts.lineTo(ex, ey); }
+    };
+  }
+  g.save();
+  g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round';
+  for (const flip of [1, -1]) {
+    g.save(); g.scale(flip, 1); g.lineWidth = w; g.stroke(strokes); g.lineWidth = 1.4 * w; g.stroke(mains); g.fill(fills); g.fill(flowers);
+    // The veins and flower hearts are cut through the solid parts only, so the tulle under them still shows.
+    g.globalCompositeOperation = 'destination-out'; g.lineWidth = 0.55; g.stroke(cuts); g.fill(cuts);
+    g.globalCompositeOperation = 'source-over'; g.restore();
+  }
+  g.restore();
+}
+function extentY(pts) { let lo = Infinity, hi = -Infinity; for (const [, y] of pts) { lo = Math.min(lo, y); hi = Math.max(hi, y); } return [lo, hi]; }
+
+function build() {
+  const outline = outlinePoints(), [lo, hi] = extentY(outline);
+  const xe = sideAt(outline, p.loopY);
+  const k = 1 / p.res, margin = 12;
+  const minX = -(xe + 10) - margin, maxX = xe + 10 + margin, minY = Math.min(lo, p.loopY - p.ribbon) - margin, maxY = Math.max(hi, p.loopY + p.ribbon) + margin;
+  const W = Math.ceil((maxX - minX) * k) + 2, H = Math.ceil((maxY - minY) * k) + 2, ox = -minX * k + 1, oy = maxY * k + 1;
+  const d = draw(k, ox, oy, W, H);
+  const la = d.laceC.getContext('2d').getImageData(0, 0, W, H).data, ba = d.bandC.getContext('2d').getImageData(0, 0, W, H).data;
+  const hgt = new Float32Array(W * H);
+  let i0 = W, i1 = 0, j0 = H, j1 = 0;
+  for (let j = 0; j < H; ++j) for (let i = 0; i < W; ++i) {
+    const n = j * W + i, v = p.thick * Math.max(ba[4 * n + 3], la[4 * n + 3]) / 255;
+    hgt[n] = v < 0.01 ? 0 : v;
+    if (v >= 0.01) { i0 = Math.min(i0, i); i1 = Math.max(i1, i); j0 = Math.min(j0, j); j1 = Math.max(j1, j); }
+  }
+  // Only the inked area, with a ring of empty points round it so every edge drops to the bed.
+  i0 = Math.max(0, i0 - 1); j0 = Math.max(0, j0 - 1); i1 = Math.min(W - 1, i1 + 1); j1 = Math.min(H - 1, j1 + 1);
+  const nu = i1 - i0 + 1, nv = j1 - j0 + 1;
+  const sheet = Lamp.sheet(nu, nv, false, (i, j, front) => {
+    const I = i + i0, J = j + j0;
+    return [(I + 0.5 - ox) / k, (oy - J - 0.5) / k, front ? hgt[J * W + I] : 0];
+  });
+  let area = 0;
+  for (let n = 0; n < hgt.length; ++n) area += hgt[n] > p.thick / 2;
+  return {sheet, d, W, H, ox, oy, k, size: [nu * p.res, nv * p.res, p.thick], area: area * p.res * p.res, triangles: 4 * nu * nv};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+let built = null, timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+function update() {
+  on('shape', p.shape); on('net', p.net); on('edge', p.edge); on('loop', p.loop);
+  $('scrollsRow').classList.toggle('hidden', p.net === 'filigree' || p.net === 'lace'); $('seedRow').classList.toggle('hidden', p.net !== 'filigree' && p.net !== 'lace');
+  tulleRow.classList.toggle('hidden', p.net !== 'lace');
+  clearTimeout(timer);
+  timer = setTimeout(render, 120);
+}
+function render() {
+  built = build();
+  const problems = [];
+  if (built.size[0] > Math.max(...printer.bed) + 0.01) problems.push(`It is ${built.size[0].toFixed(0)} mm across with its loops, wider than your plate; make it narrower.`);
+  if (built.d.eyesOut) problems.push('The eyes reach the edge of the mask; make the mask taller or the eyes smaller.');
+  if (built.d.innerGap < 14) problems.push('The eyes are very close together; there is little left over the nose.');
+  if (p.thick < 0.8) problems.push('Under 0.8 mm is three layers at 0.2 mm or fewer, and thin threads tear easily.');
+  if (p.net === 'lace' && p.line < 1.1) problems.push(`The tulle is worked in a ${Math.max(0.5, p.line * 0.55).toFixed(2)} mm thread; under 0.6 mm needs a 0.2 or 0.25 mm nozzle.`);
+  if (p.line < 0.65 && p.net !== 'solid' && p.net !== 'dots') problems.push('Threads under 0.65 mm need a 0.2 or 0.25 mm nozzle; a 0.4 mm nozzle may skip them.');
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+
+  const c = $('canvas'), dpr = window.devicePixelRatio || 1;
+  c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr;
+  const g = c.getContext('2d'), {W, H} = built, pad = 30 * dpr;
+  const s = Math.min((c.width - 2 * pad) / W, (c.height - 2 * pad) / H), dx = (c.width - W * s) / 2, dy = (c.height - H * s) / 2;
+  g.clearRect(0, 0, c.width, c.height);
+  const tinted = (src, colour) => { const t = document.createElement('canvas'); t.width = W; t.height = H; const tg = t.getContext('2d');
+    tg.drawImage(src, 0, 0); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = colour; tg.fillRect(0, 0, W, H); return t; };
+  const col = $('colour').value, dim = '#' + [1, 3, 5].map(n => Math.round(parseInt(col.substr(n, 2), 16) * 0.72).toString(16).padStart(2, '0')).join('');
+  g.imageSmoothingQuality = 'high';
+  g.shadowColor = 'rgba(0,0,0,.7)'; g.shadowBlur = 10 * dpr; g.shadowOffsetY = 3 * dpr;
+  g.drawImage(tinted(built.d.laceC, dim), dx, dy, W * s, H * s);
+  g.drawImage(tinted(built.d.bandC, col), dx, dy, W * s, H * s);
+  const grams = built.area * p.thick * 1.24 / 1000;
+  $('facts').textContent = `${built.size[0].toFixed(0)} × ${built.size[1].toFixed(0)} mm, ${built.size[2].toFixed(1)} mm thick, about ${grams.toFixed(0)} g of PLA. ` +
+    `It prints flat with the smooth side down, which goes against your face. Thread elastic or ribbon up to ${p.ribbon} mm wide through the side loops.`;
+}
+
+window.fromApp = message => { if (message.type === 'printer') { printer = message; update(); } };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => { if (built) post(Lamp.addMessage(`${SHAPES[p.shape].name} mask`, [{name: 'Mask', sheets: [built.sheet]}])); };
+window.onresize = () => { clearTimeout(timer); timer = setTimeout(render, 120); };
+sync();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

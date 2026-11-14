@@ -330,11 +330,12 @@ GLVolume::GLVolume(float r, float g, float b, float a)
 std::vector<GradientDirection::Slot> GLVolume::gradient_slots;
 int                                  GLVolume::gradient_preview_object = -1;
 Vec3d                                GLVolume::gradient_preview_direction = Vec3d::UnitZ();
+GradientDirection::Span              GLVolume::gradient_preview_span;
 
 namespace {
 
 // Steps of colour a gradient mix is shown in.
-constexpr int GRADIENT_STEPS = 32;
+constexpr int GRADIENT_STEPS = 64;
 
 // The gradient mix a volume prints with, if any.
 const GradientDirection::Slot *gradient_slot_of(const ModelVolume &volume)
@@ -769,11 +770,13 @@ void GLVolume::simple_render(GLShaderProgram* shader, ModelObjectPtrs& model_obj
         if (slot != nullptr && slot->first <= extruder_colors.size() && slot->second <= extruder_colors.size()) {
             const Vec3d        direction = this->object_idx() == gradient_preview_object ? gradient_preview_direction :
                                                                                            GradientDirection::direction_or_up(*model_object);
+            const GradientDirection::Span span = this->object_idx() == gradient_preview_object ? gradient_preview_span :
+                                                                                                 GradientDirection::span(*model_object);
             const ColorRGBA    first = extruder_colors[slot->first - 1], second = extruder_colors[slot->second - 1];
             const int          instance_idx = std::clamp(this->instance_idx(), 0, int(model_object->instances.size()) - 1);
             const Transform3d  instance = model_object->instances[instance_idx]->get_matrix();
             const Transform3d  to_bed   = instance * model_volume->get_matrix();
-            std::vector<double> key = {direction.x(), direction.y(), direction.z(), slot->start, slot->end, double(slot->curve.points.size()),
+            std::vector<double> key = {direction.x(), direction.y(), direction.z(), span.from, span.to, slot->start, slot->end, double(slot->curve.points.size()),
                                        double(model_volume->mesh().its.indices.size()), double(model_object->volumes.size())};
             for (const float c : {first.r(), first.g(), first.b(), second.r(), second.g(), second.b()})
                 key.push_back(c);
@@ -812,7 +815,7 @@ void GLVolume::simple_render(GLShaderProgram* shader, ModelObjectPtrs& model_obj
                     for (int step = 0; step < GRADIENT_STEPS; ++step) {
                         if (steps[step].indices.empty())
                             continue;
-                        const float share = float(GradientDirection::first_share(*slot, (step + 0.5) / GRADIENT_STEPS));
+                        const float share = float(GradientDirection::share_along(*slot, span, (step + 0.5) / GRADIENT_STEPS));
                         ColorRGBA   mixed(first.r() * share + second.r() * (1.f - share), first.g() * share + second.g() * (1.f - share),
                                           first.b() * share + second.b() * (1.f - share), 1.f);
                         gradient_models[step].init_from(steps[step]);

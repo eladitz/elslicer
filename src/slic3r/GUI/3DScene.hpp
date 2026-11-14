@@ -265,6 +265,7 @@ public:
     // The object whose gradient dial is open, and the direction it is set to, shown before it is let go.
     static int   gradient_preview_object;
     static Vec3d gradient_preview_direction;
+    static GradientDirection::Span gradient_preview_span;
 
     // Ranges of triangle and quad indices to be rendered.
     std::pair<size_t, size_t>   tverts_range;

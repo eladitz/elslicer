@@ -1245,6 +1245,36 @@ std::optional<AimedGradient> aimed_gradient(const ModelObject &object, int objec
     return std::nullopt;
 }
 
+// Where an object's arrow lies: a point on its line, and how far along the direction the object reaches from
+// there, from its parts' hulls as placed on the bed. Empty when there is nothing to span.
+struct ArrowLine
+{
+    Vec3d  base;
+    double low{0.}, high{0.};
+    Vec3d  at(const Vec3d &d, double share) const { return base + (low + share * (high - low)) * d; }
+};
+
+std::optional<ArrowLine> arrow_line(const ModelObject &object, const Vec3d &d)
+{
+    if (object.instances.empty())
+        return std::nullopt;
+    const Transform3d instance = object.instances.front()->get_matrix();
+    double            low = std::numeric_limits<double>::max(), high = std::numeric_limits<double>::lowest();
+    for (const ModelVolume *volume : object.volumes)
+        if (volume->is_model_part()) {
+            const Transform3d place = instance * volume->get_matrix();
+            for (const stl_vertex &vertex : volume->get_convex_hull().its.vertices) {
+                const double along = d.dot(place * vertex.cast<double>());
+                low                = std::min(low, along);
+                high               = std::max(high, along);
+            }
+        }
+    if (high - low < EPSILON)
+        return std::nullopt;
+    const Vec3d centre = object.instance_bounding_box(0).center();
+    return ArrowLine{centre - d * d.dot(centre), low, high};
+}
+
 } // namespace
 
 void GLCanvas3D::_render_gradient_direction()
@@ -1271,8 +1301,10 @@ void GLCanvas3D::_render_gradient_direction()
             continue;
         if (idx == selected)
             chosen = gradient;
-        else
-            _render_gradient_arrow({idx, gradient->direction, gradient->from_colour, gradient->to_colour});
+        else {
+            const GradientDirection::Span span = gradient->bands ? GradientDirection::Span{} : GradientDirection::span(*m_model->objects[idx]);
+            _render_gradient_arrow({idx, gradient->direction, gradient->from_colour, gradient->to_colour, span.from, span.to});
+        }
     }
     if (!chosen) {
         m_gradient_dial_object            = -1;
@@ -1286,20 +1318,62 @@ void GLCanvas3D::_render_gradient_direction()
         m_gradient_around       = std::abs(d.z()) > 0.9999 ? 0. : Geometry::rad2deg(std::atan2(d.y(), d.x()));
         if (m_gradient_around < 0.)
             m_gradient_around += 360.;
+        const GradientDirection::Span span = chosen->bands ? GradientDirection::Span{} : GradientDirection::span(*m_model->objects[selected]);
+        m_gradient_from = span.from;
+        m_gradient_to   = span.to;
     }
     const auto direction = [this]() {
         const double a = Geometry::deg2rad(m_gradient_around), t = Geometry::deg2rad(m_gradient_tilt);
         return Vec3d(std::cos(t) * std::cos(a), std::cos(t) * std::sin(a), std::sin(t));
     };
-    _render_gradient_arrow({selected, direction(), chosen->from_colour, chosen->to_colour});
+    _render_gradient_arrow({selected, direction(), chosen->from_colour, chosen->to_colour, m_gradient_from, m_gradient_to});
 
     ImGuiWrapper &imgui = *wxGetApp().imgui();
+    bool          done = false, spanning = false;
+    // The arrow's two dots drag along it, to start and end the gradient part way along the object. Each is
+    // an invisible window over its dot, so the mouse goes to it and not to the scene.
+    if (const std::optional<ArrowLine> line = chosen->bands ? std::nullopt : arrow_line(*m_model->objects[selected], direction())) {
+        const Camera &camera = wxGetApp().plater()->get_camera();
+        const Vec3d   d      = direction();
+        const auto    at     = [&](double share) { return Vec2d(CameraUtils::project(camera, line->at(d, share)).cast<double>()); };
+        const Vec2d   start = at(0.), along = at(1.) - start;
+        const float   r     = 14.f * get_scale();
+        for (int end = 0; end < 2; ++end) {
+            double     &share = end == 0 ? m_gradient_from : m_gradient_to;
+            const Vec2d dot   = at(share);
+            ImGui::SetNextWindowPos(ImVec2(float(dot.x()) - r, float(dot.y()) - r));
+            ImGui::SetNextWindowSize(ImVec2(2.f * r, 2.f * r));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.f, 0.f));
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.f);
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowMinSize, ImVec2(1.f, 1.f));
+            ImGui::Begin(end == 0 ? "##gradient_start" : "##gradient_end", nullptr,
+                         ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoBackground | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+            ImGui::InvisibleButton("##dot", ImVec2(2.f * r, 2.f * r));
+            if (ImGui::IsItemActive() && along.squaredNorm() > 1.) {
+                const ImVec2 mouse = ImGui::GetIO().MousePos;
+                const double to    = std::clamp((Vec2d(mouse.x, mouse.y) - start).dot(along) / along.squaredNorm(), 0., 1.);
+                share = end == 0 ? std::clamp(to, 0., m_gradient_to - GradientDirection::MIN_SPAN) :
+                                   std::clamp(to, m_gradient_from + GradientDirection::MIN_SPAN, 1.);
+                spanning = true;
+            }
+            done |= ImGui::IsItemDeactivated();
+            if (ImGui::IsItemHovered() || ImGui::IsItemActive()) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                ImGui::SetTooltip("%s", end == 0 ? _u8L("Drag to where the gradient starts").c_str() : _u8L("Drag to where the gradient ends").c_str());
+            }
+            ImGui::End();
+            ImGui::PopStyleVar(3);
+        }
+        if (spanning)
+            imgui.set_requires_extra_frame();
+    }
+
     imgui.set_next_window_pos(10.f * get_scale(), m_main_toolbar.get_height() + 10.f * get_scale(), ImGuiCond_Always, 0.f, 0.f);
     imgui.begin(_L("Gradient direction"), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse);
     if (ImGui::IsWindowAppearing())
         imgui.set_requires_extra_frame();
     float around = float(m_gradient_around), tilt = float(m_gradient_tilt);
-    bool  done   = false;
     ImGui::PushItemWidth(imgui.scaled(10.f));
     // TRN Gradient direction: the angle around the bed, from the left-to-right direction.
     if (ImGui::SliderFloat(_u8L("Around").c_str(), &around, 0.f, 360.f, "%.0f°"))
@@ -1311,18 +1385,39 @@ void GLCanvas3D::_render_gradient_direction()
         m_gradient_tilt = tilt;
     done |= ImGui::IsItemDeactivatedAfterEdit();
     turning |= ImGui::IsItemActive();
+    if (!chosen->bands) {
+        float from = float(m_gradient_from * 100.), to = float(m_gradient_to * 100.);
+        // TRN Gradient direction: how far along the object, in percent, the gradient starts.
+        if (ImGui::SliderFloat(_u8L("Starts at").c_str(), &from, 0.f, 100.f, "%.0f%%"))
+            m_gradient_from = std::clamp(from / 100., 0., m_gradient_to - GradientDirection::MIN_SPAN);
+        done |= ImGui::IsItemDeactivatedAfterEdit();
+        turning |= ImGui::IsItemActive();
+        // TRN Gradient direction: how far along the object, in percent, the gradient ends.
+        if (ImGui::SliderFloat(_u8L("Ends at").c_str(), &to, 0.f, 100.f, "%.0f%%"))
+            m_gradient_to = std::clamp(to / 100., m_gradient_from + GradientDirection::MIN_SPAN, 1.);
+        done |= ImGui::IsItemDeactivatedAfterEdit();
+        turning |= ImGui::IsItemActive();
+    }
+    turning |= spanning;
     ImGui::PopItemWidth();
     // While a dial is turned the object shows its direction, painted or not. It is drawn before this, so a
     // change needs one more frame.
     const int  preview = turning && !chosen->bands ? selected : -1;
-    if (GLVolume::gradient_preview_object != preview || (preview >= 0 && !GLVolume::gradient_preview_direction.isApprox(direction()))) {
+    const GradientDirection::Span span{m_gradient_from, m_gradient_to};
+    if (GLVolume::gradient_preview_object != preview ||
+        (preview >= 0 && (!GLVolume::gradient_preview_direction.isApprox(direction()) || !(GLVolume::gradient_preview_span == span)))) {
         GLVolume::gradient_preview_object    = preview;
         GLVolume::gradient_preview_direction = direction();
+        GLVolume::gradient_preview_span      = span;
         imgui.set_requires_extra_frame();
     }
     if (imgui.button(_L("Reverse"))) {
         m_gradient_around = std::fmod(m_gradient_around + 180., 360.);
         m_gradient_tilt   = -m_gradient_tilt;
+        // The same part of the object, now from the other end.
+        const double from = m_gradient_from;
+        m_gradient_from   = 1. - m_gradient_to;
+        m_gradient_to     = 1. - from;
         done              = true;
     }
     ImGui::SameLine();
@@ -1330,13 +1425,28 @@ void GLCanvas3D::_render_gradient_direction()
         m_gradient_tilt = 90.;
         done            = true;
     }
-    imgui.text(chosen->bands ? _u8L("The bands are painted again when you let go.") : _u8L("The object is sliced again when you let go."));
+    if (!chosen->bands && !span.whole()) {
+        ImGui::SameLine();
+        // TRN Gradient direction: run the gradient over the whole object again.
+        if (imgui.button(_L("Whole object"))) {
+            m_gradient_from = 0.;
+            m_gradient_to   = 1.;
+            done            = true;
+        }
+    }
+    if (chosen->bands)
+        imgui.text(_u8L("The bands are painted again when you let go."));
+    else {
+        imgui.text(_u8L("Drag the dots on the arrow to start or end the gradient part way."));
+        imgui.text(_u8L("The object is sliced again when you let go."));
+    }
     imgui.end();
     if (done) {
         const Vec3d aim   = direction();
         const bool  bands = chosen->bands;
+        const GradientDirection::Span part{m_gradient_from, m_gradient_to};
         // After this frame; changing the object rebuilds the scene being drawn.
-        wxGetApp().CallAfter([selected, aim, bands]() {
+        wxGetApp().CallAfter([selected, aim, bands, part]() {
             if (bands) {
                 repaint_gradient(selected, aim);
                 return;
@@ -1355,6 +1465,10 @@ void GLCanvas3D::_render_gradient_direction()
                     painted = true;
                 }
             object->config.set_key_value(GradientDirection::KEY, new ConfigOptionFloats({aim.x(), aim.y(), aim.z()}));
+            if (part.whole())
+                object->config.erase(GradientDirection::SPAN_KEY);
+            else
+                object->config.set_key_value(GradientDirection::SPAN_KEY, new ConfigOptionFloats({part.from, part.to}));
             if (painted)
                 wxGetApp().obj_list()->update_info_items(selected);
             plater->changed_object(selected);
@@ -1367,27 +1481,32 @@ void GLCanvas3D::_render_gradient_arrow(const GradientArrow &arrow) const
 {
     if (arrow.object_idx < 0 || m_model == nullptr || arrow.object_idx >= int(m_model->objects.size()) || m_canvas_type != ECanvasType::CanvasView3D)
         return;
-    const ModelObject  *object = m_model->objects[arrow.object_idx];
-    const BoundingBoxf3 box    = object->instance_bounding_box(0);
-    const Vec3d         size   = box.size();
-    const Vec3d        &d      = arrow.direction;
-    // A little more than the object's length along the arrow, so the arrow spans it.
-    const double  half   = 0.6 * (std::abs(d.x()) * size.x() + std::abs(d.y()) * size.y() + std::abs(d.z()) * size.z());
+    const Vec3d                   &d    = arrow.direction;
+    const std::optional<ArrowLine> line = arrow_line(*m_model->objects[arrow.object_idx], d);
+    if (!line)
+        return;
     const Camera &camera = wxGetApp().plater()->get_camera();
-    const Point   from   = CameraUtils::project(camera, box.center() - half * d);
-    const Point   to     = CameraUtils::project(camera, box.center() + half * d);
+    const auto    at     = [&](double share) {
+        const Point p = CameraUtils::project(camera, line->at(d, share));
+        return ImVec2(float(p.x()), float(p.y()));
+    };
     const auto    colour = [](const std::string &hex) {
         unsigned long rgb = 0xe8e8ea;
         if (hex.size() == 7 && hex[0] == '#')
             rgb = std::strtoul(hex.c_str() + 1, nullptr, 16);
         return IM_COL32((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff, 255);
     };
-    const ImVec2 a(float(from.x()), float(from.y())), b(float(to.x()), float(to.y()));
+    const ImVec2 a = at(arrow.from), b = at(arrow.to);
     const float  length = std::hypot(b.x - a.x, b.y - a.y);
     if (length < 1.f)
         return;
     ImDrawList  *draw    = ImGui::GetForegroundDrawList();
     const ImU32  outline = IM_COL32(20, 20, 24, 255), white = IM_COL32(235, 235, 238, 255);
+    // The rest of the object, in the gradient's end colours, thin.
+    for (const auto &[from, to] : {std::pair(at(0.), a), std::pair(b, at(1.))}) {
+        draw->AddLine(from, to, outline, 4.f);
+        draw->AddLine(from, to, IM_COL32(235, 235, 238, 150), 2.f);
+    }
     const ImVec2 along((b.x - a.x) / length, (b.y - a.y) / length), across(-along.y, along.x);
     const float  head = std::min(26.f, 0.3f * length), wing = 0.55f * head;
     const ImVec2 base(b.x - along.x * head, b.y - along.y * head);

@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stamp Maker</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  textarea, input[type=text], select { width: 100%; }
+  textarea { resize: vertical; min-height: 54px; }
+  .field { margin: 6px 0; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  #picture { display: flex; gap: 10px; align-items: center; }
+  #thumb { width: 48px; height: 48px; object-fit: contain; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  #canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #ink { max-height: 150px; max-width: 100%; align-self: center; border: 1px solid var(--line); border-radius: 6px; background: #f4f1ea; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Stamp Maker</h1>
+  <p class="sub">A rubber-style stamp: raised letters and pictures, mirrored so they print the right way round.</p>
+
+  <h3>Shape</h3>
+  <div class="grid" id="shapes">
+    <button data-shape="rect">Rectangle</button>
+    <button data-shape="rounded">Rounded</button>
+    <button data-shape="circle">Circle</button>
+    <button data-shape="ellipse">Ellipse</button>
+  </div>
+  <h3>Size</h3>
+  <div class="grid" id="presets"></div>
+  <div id="sizeSliders" style="margin-top:6px"></div>
+
+  <h3>Words</h3>
+  <div class="field"><label for="text">In the middle (one line per line)</label><textarea id="text">APPROVED</textarea></div>
+  <div id="ringFields">
+    <div class="field"><label for="ringTop">Round the top edge</label><input type="text" id="ringTop" value=""></div>
+    <div class="field"><label for="ringBottom">Round the bottom edge</label><input type="text" id="ringBottom" value=""></div>
+  </div>
+  <div class="field"><label for="font">Font</label><select id="font"></select></div>
+  <div class="seg">
+    <button id="bold" title="Thicker letters print and stamp more cleanly">Bold</button>
+    <button id="italic">Italic</button>
+  </div>
+  <div id="textSliders"></div>
+
+  <h3>Picture or logo</h3>
+  <div id="picture"><img id="thumb" alt=""><div style="flex:1"><button id="pick">Choose picture…</button> <button id="unpick" class="hidden">Remove</button>
+    <div class="muted" id="pictureName" style="font-size:12px;margin-top:4px">None: a dark logo on a light background works best</div></div></div>
+  <div id="picBox" class="hidden">
+    <div class="seg">
+      <button data-layout="left">Left of words</button>
+      <button data-layout="above">Above words</button>
+      <button data-layout="only">Picture only</button>
+    </div>
+    <div id="picSliders"></div>
+    <label class="check"><input type="checkbox" id="picInvert"> Swap dark and light</label>
+  </div>
+
+  <h3>Border</h3>
+  <div class="seg">
+    <button data-border="none">None</button>
+    <button data-border="single">Single</button>
+    <button data-border="double">Double</button>
+  </div>
+  <div id="borderSliders"></div>
+
+  <h3>Relief</h3>
+  <div class="seg">
+    <button data-relief="raised" title="The ink is on the letters">Raised</button>
+    <button data-relief="recessed" title="The ink is round the letters, which show blank">Recessed</button>
+  </div>
+  <div id="reliefSliders"></div>
+
+  <h3>Handle</h3>
+  <div class="seg">
+    <button data-handle="knob" title="Face and handle in one piece, printed face up with no supports">With handle</button>
+    <button data-handle="separate" title="Face and handle as two pieces that press together on a key, each printed the easy way up">Separate handle</button>
+    <button data-handle="none" title="Just the face, to glue on a block of wood">Face only</button>
+  </div>
+  <div id="handleSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <canvas id="ink" title="What it stamps"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2}, picture = null;
+
+const PRESETS = [
+  {name: 'S square', w: 15, h: 15, shape: 'rect'}, {name: 'M square', w: 25, h: 25, shape: 'rect'},
+  {name: 'S rect', w: 47, h: 18, shape: 'rect'}, {name: 'M rect', w: 50, h: 20, shape: 'rect'},
+  {name: 'L rect', w: 58, h: 22, shape: 'rect'}, {name: 'Round 30', w: 30, h: 30, shape: 'circle'},
+  {name: 'Round 40', w: 40, h: 40, shape: 'circle'}, {name: 'Oval', w: 50, h: 32, shape: 'ellipse'},
+];
+const FONTS = ['Helvetica Neue', 'Arial Black', 'Futura', 'Avenir Next', 'Impact', 'Gill Sans', 'Georgia', 'Times New Roman',
+               'Didot', 'American Typewriter', 'Courier New', 'Rockwell', 'Copperplate', 'Marker Felt', 'Chalkboard SE',
+               'Bradley Hand', 'Snell Roundhand', 'Brush Script MT', 'Papyrus', 'Menlo'];
+const p = {shape: 'rect', width: 47, height: 18, corner: 3, font: 'Helvetica Neue', bold: true, italic: false, textScale: 100,
+           ringSize: 4, spacing: 0, layout: 'left', picSize: 100, threshold: 50, border: 'single', stroke: 0.8, margin: 1,
+           relief: 'raised', depth: 1.2, base: 2.5, handle: 'knob', neck: 22, fit: 0.12, res: 0.1};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('sizeSliders'), 'width', 'Width mm', 10, 120, 0.5);
+slider($('sizeSliders'), 'height', 'Height mm', 10, 120, 0.5);
+const cornerRow = slider($('sizeSliders'), 'corner', 'Corner mm', 0.5, 15, 0.5);
+slider($('textSliders'), 'textScale', 'Word size %', 30, 100, 1);
+slider($('textSliders'), 'spacing', 'Letter gap mm', -0.5, 3, 0.1);
+const ringRow = slider($('textSliders'), 'ringSize', 'Edge words mm', 2, 10, 0.1);
+slider($('picSliders'), 'picSize', 'Picture size %', 20, 100, 1);
+slider($('picSliders'), 'threshold', 'Dark below %', 5, 95, 1);
+const strokeRows = [slider($('borderSliders'), 'stroke', 'Line mm', 0.4, 3, 0.1)];
+slider($('borderSliders'), 'margin', 'Edge gap mm', 0, 4, 0.1);
+slider($('reliefSliders'), 'depth', 'Depth mm', 0.4, 3, 0.1);
+slider($('reliefSliders'), 'base', 'Face plate mm', 1.2, 6, 0.1);
+slider($('reliefSliders'), 'res', 'Detail mm', 0.05, 0.25, 0.01);
+slider($('handleSliders'), 'neck', 'Handle mm', 5, 60, 1);
+const fitRow = slider($('handleSliders'), 'fit', 'Key fit mm', 0, 0.4, 0.01);
+for (const f of FONTS) $('font').add(new Option(f, f));
+$('font').onchange = () => { p.font = $('font').value; update(); };
+for (const k of ['text', 'ringTop', 'ringBottom']) $(k).oninput = update;
+for (const pr of PRESETS) {
+  const b = document.createElement('button');
+  b.innerHTML = `${pr.name}<small>${pr.w} × ${pr.h}</small>`;
+  b.onclick = () => { p.width = pr.w; p.height = pr.h; if (pr.shape !== 'rect' || p.shape === 'circle' || p.shape === 'ellipse') p.shape = pr.shape; sync(); update(); };
+  $('presets').appendChild(b);
+}
+for (const b of document.querySelectorAll('[data-shape]')) b.onclick = () => {
+  p.shape = b.dataset.shape;
+  if (p.shape === 'circle') p.height = p.width = Math.max(p.width, p.height);
+  sync(); update();
+};
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('layout', 'layout'); choose('border', 'border'); choose('relief', 'relief'); choose('handle', 'handle');
+$('bold').onclick = () => { p.bold = !p.bold; update(); };
+$('italic').onclick = () => { p.italic = !p.italic; update(); };
+$('picInvert').onchange = update;
+function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('font').value = p.font; }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The outline, as how far its edge is from the middle at angle a (it is the same seen from the middle every way).
+const A = () => p.width / 2, B = () => (p.shape === 'circle' ? p.width : p.height) / 2;
+function edge(a) {
+  const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a)), a2 = A(), b2 = B();
+  if (p.shape === 'circle' || p.shape === 'ellipse') return a2 * b2 / Math.hypot(b2 * c, a2 * s);
+  let r = Math.min(c > 1e-9 ? a2 / c : Infinity, s > 1e-9 ? b2 / s : Infinity);
+  if (p.shape === 'rounded') {
+    // Past the corner's centre, the edge is on its circle.
+    const k = Math.min(p.corner, a2, b2), cx = a2 - k, cy = b2 - k, x = r * c, y = r * s;
+    if (x > cx && y > cy) {
+      const bq = cx * c + cy * s, cq = cx * cx + cy * cy - k * k;
+      r = bq + Math.sqrt(Math.max(0, bq * bq - cq));
+    }
+  }
+  return r;
+}
+// The outline drawn on a 2D canvas, inset by d mm, at k pixels per mm, centred at (cx, cy).
+function outlinePath(g, d, k, cx, cy) {
+  const a2 = (A() - d) * k, b2 = (B() - d) * k;
+  g.beginPath();
+  if (a2 <= 0 || b2 <= 0) return;
+  if (p.shape === 'circle' || p.shape === 'ellipse') g.ellipse(cx, cy, a2, b2, 0, 0, 2 * Math.PI);
+  else g.roundRect(cx - a2, cy - b2, 2 * a2, 2 * b2, p.shape === 'rounded' ? Math.max(0, p.corner - d) * k : 0);
+}
+
+// What the stamp prints, black ink on white, as seen on the paper, at k pixels per mm.
+let picInk = null;
+function makePicInk() {
+  if (!picture) { picInk = null; return; }
+  const c = document.createElement('canvas'), s = Math.min(1, 800 / Math.max(picture.width, picture.height));
+  c.width = Math.max(1, Math.round(picture.width * s)); c.height = Math.max(1, Math.round(picture.height * s));
+  const g = c.getContext('2d', {willReadFrequently: true});
+  g.drawImage(picture, 0, 0, c.width, c.height);
+  const img = g.getImageData(0, 0, c.width, c.height), d = img.data, cut = p.threshold / 100 * 255, inv = $('picInvert').checked;
+  for (let k = 0; k < d.length; k += 4) {
+    const dark = (0.299 * d[k] + 0.587 * d[k + 1] + 0.114 * d[k + 2]) < cut;
+    d[k] = d[k + 1] = d[k + 2] = 0; d[k + 3] = dark !== inv ? 255 : 0;
+  }
+  g.putImageData(img, 0, 0);
+  picInk = c;
+}
+const fontOf = size => `${p.italic ? 'italic ' : ''}${p.bold ? 'bold ' : ''}${size}px "${p.font}", sans-serif`;
+// Lines of words fitted into a box w by h (pixels), centred at (cx, cy).
+function drawLines(g, lines, cx, cy, w, h, k) {
+  lines = lines.filter(l => l.trim());
+  if (!lines.length || w <= 0 || h <= 0) return;
+  const gap = p.spacing * k;
+  const measure = (line, size) => { g.font = fontOf(size); return g.measureText(line).width + gap * Math.max(0, [...line].length - 1); };
+  let size = Math.min(h / (lines.length * 1.12), 400);
+  const widest = Math.max(...lines.map(l => measure(l, size)));
+  if (widest > w) size *= w / widest;
+  size *= p.textScale / 100;
+  g.font = fontOf(size); g.textBaseline = 'middle'; g.textAlign = 'left';
+  lines.forEach((line, n) => {
+    const y = cy + (n - (lines.length - 1) / 2) * size * 1.12;
+    let x = cx - measure(line, size) / 2;
+    g.font = fontOf(size);
+    for (const ch of line) { g.fillText(ch, x, y); x += g.measureText(ch).width + gap; }
+  });
+}
+// Words round the edge of a round stamp: along the top reading clockwise, along the bottom reading left to right.
+function drawRing(g, text, top, rx, ry, cx, cy, size) {
+  if (!text.trim()) return;
+  g.font = fontOf(size); g.textBaseline = 'middle'; g.textAlign = 'center';
+  const chars = [...text], gap = p.spacing * size / p.ringSize;
+  const widths = chars.map(ch => g.measureText(ch).width + gap), total = widths.reduce((a, b) => a + b, 0) - gap;
+  const r = (rx + ry) / 2, span = Math.min(total / r, Math.PI * 0.95);
+  const squeeze = span < total / r ? span / (total / r) : 1;
+  let at = -span / 2;
+  chars.forEach((ch, n) => {
+    const a = at + widths[n] * squeeze / 2 / r, f = top ? -Math.PI / 2 + a : Math.PI / 2 - a;
+    g.save();
+    g.translate(cx + rx * Math.cos(f), cy + ry * Math.sin(f));
+    g.rotate(top ? f + Math.PI / 2 : f - Math.PI / 2);
+    g.fillText(ch, 0, 0);
+    g.restore();
+    at += widths[n] * squeeze / r;
+  });
+}
+function drawInk(g, k, W, H) {
+  const cx = W / 2, cy = H / 2;
+  g.fillStyle = '#fff'; g.fillRect(0, 0, W, H);
+  g.fillStyle = '#000'; g.strokeStyle = '#000';
+  // The face itself clips everything, so nothing hangs over its edge.
+  g.save();
+  outlinePath(g, 0, k, cx, cy); g.clip();
+  let inset = p.margin;
+  if (p.border !== 'none') {
+    g.lineWidth = p.stroke * k;
+    outlinePath(g, inset + p.stroke / 2, k, cx, cy); g.stroke();
+    inset += p.stroke;
+    if (p.border === 'double') { inset += p.stroke * 1.2; outlinePath(g, inset + p.stroke / 2 * 0.6, k, cx, cy); g.lineWidth = p.stroke * 0.6 * k; g.stroke(); inset += p.stroke * 0.6; }
+  }
+  inset += 0.8;
+  const round = p.shape === 'circle' || p.shape === 'ellipse';
+  let ax = A() - inset, by = B() - inset;
+  if (round && ($('ringTop').value.trim() || $('ringBottom').value.trim())) {
+    const rs = p.ringSize;
+    drawRing(g, $('ringTop').value, true, (ax - rs / 2) * k, (by - rs / 2) * k, cx, cy, rs * k);
+    drawRing(g, $('ringBottom').value, false, (ax - rs / 2) * k, (by - rs / 2) * k, cx, cy, rs * k);
+    ax -= rs + 0.8; by -= rs + 0.8;
+    // A thin ring between the edge words and the middle.
+    g.lineWidth = Math.max(0.5, p.stroke * 0.7) * k;
+    g.beginPath(); g.ellipse(cx, cy, ax * k, by * k, 0, 0, 2 * Math.PI); g.stroke();
+    ax -= 1.2; by -= 1.2;
+  }
+  // Inside a round outline, the words go in the biggest box that fits.
+  if (round) { ax *= 0.8; by *= 0.62; }
+  let box = {x: cx - ax * k, y: cy - by * k, w: 2 * ax * k, h: 2 * by * k};
+  const lines = $('text').value.split('\n');
+  if (picInk) {
+    const pw = picInk.width, ph = picInk.height, part = p.picSize / 100;
+    let pb = box;
+    if (p.layout === 'left') { pb = {...box, w: box.h * Math.min(1.4, pw / ph)}; box = {...box, x: box.x + pb.w + k, w: box.w - pb.w - k}; }
+    else if (p.layout === 'above') { pb = {...box, h: box.h * 0.55}; box = {...box, y: box.y + pb.h + 0.5 * k, h: box.h - pb.h - 0.5 * k}; }
+    const s = Math.min(pb.w / pw, pb.h / ph) * part;
+    g.drawImage(picInk, pb.x + (pb.w - pw * s) / 2, pb.y + (pb.h - ph * s) / 2, pw * s, ph * s);
+    if (p.layout === 'only') { g.restore(); return; }
+  }
+  drawLines(g, lines, box.x + box.w / 2, box.y + box.h / 2, box.w, box.h, k);
+  g.restore();
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The face: a plate whose top rises where there is ink (or sinks, recessed). Its grid runs out from the middle in
+// rings the shape of the outline, so the side is the outline exactly; the picture is mirrored, as a stamp must be.
+const HANDLE = {knob: 14, knobH: 9, neck: 8, chamfer: 3, vent: 0.6, keyDepth: 3, pad: 2};
+// Separate handle: a flat rectangular key on the handle's pad presses into a matching pocket in the back of the
+// face. Being longer one way, it only goes on square to the face. The pocket is open at the bed, so the face still
+// prints face up, and the key stands up from the pad, chamfered at its tip so it starts in easily.
+function keySize() {
+  const pw = Math.max(6, Math.min(18, 2 * A() - 6)), ph = Math.max(4, Math.min(pw * 0.6, 2 * B() - 6));
+  return [pw, ph];
+}
+function build() {
+  const res = p.res, a2 = A(), b2 = B(), nu = 2 * Math.round(a2 / res) + 1, nv = 2 * Math.round(b2 / res) + 1;
+  if (nu * nv > 3e6) return {problem: 'That is too fine to make: raise Detail mm, or make it smaller.'};
+  // Ink at 1/res pixels per mm, with a pixel to spare round it.
+  const k = 1 / res, W = Math.ceil(2 * a2 * k) + 2, H = Math.ceil(2 * b2 * k) + 2;
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  const g = c.getContext('2d', {willReadFrequently: true});
+  drawInk(g, k, W, H);
+  const data = g.getImageData(0, 0, W, H).data;
+  const ink = (x, y) => {   // x, y in mm on the paper, y up; bilinear
+    const fx = Math.min(W - 1.001, Math.max(0, W / 2 + x * k - 0.5)), fy = Math.min(H - 1.001, Math.max(0, H / 2 - y * k - 0.5));
+    const i = Math.floor(fx), j = Math.floor(fy), u = fx - i, v = fy - j, at = (ii, jj) => 1 - data[4 * (jj * W + ii)] / 255;
+    return (1 - v) * ((1 - u) * at(i, j) + u * at(i + 1, j)) + v * ((1 - u) * at(i, j + 1) + u * at(i + 1, j + 1));
+  };
+  const separate = p.handle === 'separate', z0 = p.handle === 'knob' ? handleTop() : 0;
+  const top = z0 + (separate ? Math.max(p.base, HANDLE.keyDepth + 1.5) : p.base);
+  const [pw, ph] = keySize(), kx = pw / 2 + p.fit, ky = ph / 2 + p.fit;
+  const map = (i, j) => {
+    const u = 2 * i / (nu - 1) - 1, v = 2 * j / (nv - 1) - 1, s = Math.max(Math.abs(u), Math.abs(v));
+    if (s === 0) return [0, 0];
+    const a = Math.atan2(v * b2, u * a2), r = s * edge(a);
+    return [r * Math.cos(a), r * Math.sin(a)];
+  };
+  const face = Lamp.sheet(nu, nv, false, (i, j, front) => {
+    const [x, y] = map(i, j);
+    if (!front) return [x, y, separate && Math.abs(x) < kx && Math.abs(y) < ky ? HANDLE.keyDepth : z0];
+    const t = ink(-x, y);
+    return [x, y, p.relief === 'raised' ? top + p.depth * t : top + p.depth * (1 - t)];
+  });
+  const handle = p.handle === 'knob' ? handleSheets(edge, handleTop(), Math.min(1, p.base / 2)) : separate ? separateHandle() : [];
+  return {face, handle, separate, ink: c, size: [2 * a2, 2 * b2, top + p.depth], triangles: 4 * nu * nv};
+}
+// A round knob on the bed, a neck, then a flare out to the outline at 45°, so nothing overhangs as it prints face up.
+const flareH = () => { let most = 0; for (let k = 0; k < 360; ++k) most = Math.max(most, edge(2 * Math.PI * k / 360)); return Math.max(1, most - HANDLE.neck); };
+const handleTop = () => HANDLE.knobH + (HANDLE.knob - HANDLE.neck) + p.neck + flareH();
+// outline(a) is how far out the flare ends at angle a, at z4; the last row goes on up by extra.
+function handleSheets(outline, z4, extra) {
+  const R = HANDLE.knob, n = HANDLE.neck, z1 = HANDLE.knobH, z2 = z1 + (R - n), z3 = z2 + p.neck;
+  // Rows: [z, how far from circle to outline (0 to 1), radius as a circle]
+  const rows = [[0, 0, R - HANDLE.chamfer], [HANDLE.chamfer, 0, R], [z1, 0, R], [z2, 0, n], [z3, 0, n]];
+  for (let k = 1; k <= 12; ++k) rows.push([z3 + (z4 - z3) * k / 12, k / 12, n]);
+  rows.push([z4 + extra, 1, n]);
+  const segs = 180;
+  return [Lamp.sheet(segs, rows.length, true, (i, j, front) => {
+    const a = 2 * Math.PI * i / segs, [z, s, rc] = rows[j];
+    // The flare grows the same distance every way, so its slope is never past 45°.
+    const r = front ? Math.min(rc + (outline(a) - rc) * s, rc + (z - z3 > 0 ? z - z3 : 0)) : HANDLE.vent;
+    return [r * Math.cos(a), r * Math.sin(a), z];
+  })];
+}
+// The separate handle: the same knob and neck, flaring to a round pad, with the key on top.
+function separateHandle() {
+  const [pw, ph] = keySize(), n = HANDLE.neck;
+  const rp = Math.max(Math.hypot(pw, ph) / 2 + 2, Math.min(22, Math.max(n + 2, Math.min(A(), B()))));
+  const z4 = HANDLE.knobH + (HANDLE.knob - n) + p.neck + Math.max(1, rp - n), top = z4 + HANDLE.pad;
+  const kh = HANDLE.keyDepth - 0.3, ch = 0.6;
+  const chamfered = Lamp.sheet(2, 2, false, (i, j, front) => {
+    const d = front ? ch : 0;
+    return [(i ? 1 : -1) * (pw / 2 - d), (j ? 1 : -1) * (ph / 2 - d), front ? top + kh : top + kh - ch];
+  });
+  return [...handleSheets(() => rp, z4, HANDLE.pad), Lamp.box(-pw / 2, pw / 2, -ph / 2, ph / 2, top - 0.3, top + kh - ch + 0.01), chamfered];
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+const viewer = new Lamp.Viewer($('canvas'));
+let timer = null, built = null;
+function update() {
+  const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+  on('shape', p.shape); on('layout', p.layout); on('border', p.border); on('relief', p.relief); on('handle', p.handle);
+  $('bold').classList.toggle('on', p.bold); $('italic').classList.toggle('on', p.italic);
+  const round = p.shape === 'circle' || p.shape === 'ellipse';
+  $('ringFields').classList.toggle('hidden', !round); ringRow.classList.toggle('hidden', !round);
+  cornerRow.classList.toggle('hidden', p.shape !== 'rounded');
+  document.querySelectorAll('#sizeSliders .slider')[1].classList.toggle('hidden', p.shape === 'circle');
+  $('picBox').classList.toggle('hidden', !picture); $('unpick').classList.toggle('hidden', !picture);
+  for (const r of strokeRows) r.classList.toggle('hidden', p.border === 'none');
+  $('handleSliders').classList.toggle('hidden', p.handle === 'none');
+  fitRow.classList.toggle('hidden', p.handle !== 'separate');
+  clearTimeout(timer);
+  timer = setTimeout(render, 150);
+}
+function render() {
+  makePicInk();
+  built = build();
+  const problems = [];
+  if (built.problem) problems.push(built.problem);
+  else {
+    if (Math.max(built.size[0], built.size[1]) > Math.max(...printer.bed)) problems.push('It is bigger than your plate.');
+    if (built.size[2] > printer.height) problems.push('It is taller than your printer reaches.');
+  }
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('add').disabled = !!built.problem;
+  if (built.problem) return;
+  // What it stamps, the right way round, small under the 3D view.
+  const ink = $('ink'), s = Math.min(1, 520 / built.ink.width, 150 / built.ink.height);
+  ink.width = Math.round(built.ink.width * s); ink.height = Math.round(built.ink.height * s);
+  const g = ink.getContext('2d');
+  g.fillStyle = '#f4f1ea'; g.fillRect(0, 0, ink.width, ink.height);
+  g.save(); outlinePath(g, 0, s / p.res, ink.width / 2, ink.height / 2); g.clip();
+  g.globalCompositeOperation = 'multiply'; g.drawImage(built.ink, 0, 0, ink.width, ink.height);
+  g.globalCompositeOperation = 'source-over'; g.restore();
+  // A separate handle shows beside the face, as both print.
+  let handleShown = built.handle;
+  if (built.separate) { const [f0, f1] = Lamp.bounds([built.face]), [h0] = Lamp.bounds(built.handle); handleShown = Lamp.moved(built.handle, f1[0] - h0[0] + 12); }
+  viewer.show([{sheets: [built.face], colour: [0.78, 0.25, 0.2]}, {sheets: handleShown, colour: [0.6, 0.6, 0.64]}], false, false);
+  const z = built.size;
+  $('facts').textContent = `${z[0].toFixed(1)} × ${z[1].toFixed(1)} mm face, ${z[2].toFixed(0)} mm tall, ${(built.triangles / 1e6).toFixed(1)} million triangles. ` +
+    ({knob: 'Prints standing on its knob, face up, with no supports. ',
+      separate: 'The face prints face up and the handle on its knob, both with no supports. Press the key on the handle into the pocket in the back of the face; if it is too tight, raise Key fit; if loose, lower it or add a drop of glue. ',
+      none: 'Prints face up; glue it to a block. '})[p.handle] +
+    'Use a 0.2 mm nozzle or fine layers for small letters, and keep lines at least 0.5 mm wide. TPU makes a softer stamp that inks more evenly.';
+}
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'image') {
+    if (message.error) { $('pictureName').textContent = message.error; return; }
+    const img = new Image();
+    img.onload = () => { picture = img; $('thumb').src = message.data; $('pictureName').textContent = message.name; update(); };
+    img.src = message.data;
+  }
+};
+$('pick').onclick = () => post({cmd: 'pick_image'});
+$('unpick').onclick = () => { picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'None'; update(); };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || built.problem) return;
+  if (built.separate) post(Lamp.addMessage('Stamp face', [{name: 'Face', sheets: [built.face]}], [{name: 'Stamp handle', parts: [{name: 'Handle', sheets: built.handle}]}]));
+  else post(Lamp.addMessage('Stamp', [{name: 'Face', sheets: [built.face]}, {name: 'Handle', sheets: built.handle}]));
+};
+sync();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

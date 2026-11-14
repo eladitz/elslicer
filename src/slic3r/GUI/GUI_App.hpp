@@ -143,6 +143,7 @@ enum FileType
     FT_SL1,
 
     FT_DRC,
+    FT_MODEL_ZIP, // Elslicer: Import's filter, the model files plus zips holding them
 
     FT_SIZE,
 };

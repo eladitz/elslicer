@@ -1620,6 +1620,8 @@ private:
         int         object_idx{-1};
         Vec3d       direction{Vec3d::UnitX()};
         std::string from_colour, to_colour;
+        // Where the gradient starts and ends along the object, as shares of its length.
+        double      from{0.}, to{1.};
     };
     void _render_gradient_arrow(const GradientArrow &arrow) const;
     // The arrows of painted gradients, and dials to turn the selected one, when shown from the view menu.
@@ -1629,6 +1631,7 @@ private:
     // The dials' object and settings in degrees: around the bed from +X, and tilt up from the bed.
     int    m_gradient_dial_object{-1};
     double m_gradient_around{0.}, m_gradient_tilt{0.};
+    double m_gradient_from{0.}, m_gradient_to{1.};
 
     void _update_volumes_hover_state();
 

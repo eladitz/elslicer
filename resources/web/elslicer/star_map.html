@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Star Map</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  input[type=text], select { width: 100%; }
+  .field { margin: 6px 0; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .two input { width: 100%; }
+  input[type=date], input[type=time] { font: inherit; color: var(--text); background: #16171a; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color-scheme: dark; }
+  .colours { display: flex; gap: 14px; align-items: center; font-size: 13px; color: var(--muted); }
+  .colours input { width: 34px; height: 26px; padding: 0; border: 1px solid var(--line); border-radius: 4px; background: none; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  #canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #101114; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Star Map</h1>
+  <p class="sub">The real sky over a place at a moment you choose, as a two-colour keepsake card.</p>
+
+  <h3>The moment</h3>
+  <div class="field"><label for="city">Place</label><select id="city"></select></div>
+  <div id="customPlace" class="hidden">
+    <div class="field"><label for="placeName">Name to print</label><input type="text" id="placeName" value="Our place"></div>
+    <div class="two">
+      <div class="field"><label for="lat">Latitude (north +)</label><input type="number" id="lat" step="0.01" value="49.61"></div>
+      <div class="field"><label for="lon">Longitude (east +)</label><input type="number" id="lon" step="0.01" value="6.13"></div>
+    </div>
+    <div class="field"><label for="zone">Time zone</label><select id="zone"></select></div>
+  </div>
+  <div class="two">
+    <div class="field"><label for="date">Date</label><input type="date" id="date"></div>
+    <div class="field"><label for="time">Local time</label><input type="time" id="time" value="21:00"></div>
+  </div>
+
+  <h3>Layout</h3>
+  <div class="grid" id="layouts">
+    <button data-layout="classic">Classic<small>circle and words</small></button>
+    <button data-layout="full">Full sky<small>edge to edge</small></button>
+    <button data-layout="coaster">Round<small>coaster</small></button>
+  </div>
+  <div id="sizeSliders" style="margin-top:6px"></div>
+
+  <h3>Words</h3>
+  <div class="field"><label for="title">Names</label><input type="text" id="title" value="Dana &amp; Alex"></div>
+  <div class="field"><label for="subtitle">Under the names</label><input type="text" id="subtitle" value="OUR FIRST DATE"></div>
+  <div class="field"><label for="details">Place and date line (empty: made for you)</label><input type="text" id="details" value="" placeholder=""></div>
+  <div class="two">
+    <div class="field"><label for="titleFont">Names font</label><select id="titleFont"></select></div>
+    <div class="field"><label for="bodyFont">Other words</label><select id="bodyFont"></select></div>
+  </div>
+  <div id="textSliders"></div>
+
+  <h3>Sky</h3>
+  <div class="seg">
+    <button data-sky="dark" title="The sky is a filled circle in the second colour; the stars are holes in it, so they show in the card colour">Dark sky</button>
+    <button data-sky="stars" title="Only the stars and lines are in the second colour, on the plain card">Stars only</button>
+  </div>
+  <label class="check"><input type="checkbox" id="figures" checked> Constellation lines</label>
+  <label class="check"><input type="checkbox" id="grid"> Altitude rings and N E S W</label>
+  <label class="check"><input type="checkbox" id="sparkle" checked> Bright stars as four-point sparkles</label>
+  <div id="skySliders"></div>
+
+  <h3>Frame</h3>
+  <div class="seg">
+    <button data-frame="none">None</button>
+    <button data-frame="single">Single</button>
+    <button data-frame="double">Double</button>
+  </div>
+
+  <h3>Printing</h3>
+  <div id="printSliders"></div>
+  <label class="check"><input type="checkbox" id="stand" checked> A desk stand with a slot it stands in</label>
+  <div class="colours"><span>Preview colours</span>
+    <label>Card <input type="color" id="cardColour" value="#f2efe8"></label>
+    <label>Design <input type="color" id="inkColour" value="#2b2d33"></label>
+  </div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script src="sky_data.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// name | latitude | longitude | time zone
+const CITIES = `Amsterdam|52.37|4.90|Europe/Amsterdam
+Athens|37.98|23.73|Europe/Athens
+Auckland|-36.85|174.76|Pacific/Auckland
+Bangkok|13.76|100.50|Asia/Bangkok
+Barcelona|41.39|2.17|Europe/Madrid
+Beijing|39.90|116.40|Asia/Shanghai
+Berlin|52.52|13.40|Europe/Berlin
+Bogotá|4.71|-74.07|America/Bogota
+Boston|42.36|-71.06|America/New_York
+Brussels|50.85|4.35|Europe/Brussels
+Budapest|47.50|19.04|Europe/Budapest
+Buenos Aires|-34.60|-58.38|America/Argentina/Buenos_Aires
+Cairo|30.04|31.24|Africa/Cairo
+Cape Town|-33.92|18.42|Africa/Johannesburg
+Chicago|41.88|-87.63|America/Chicago
+Copenhagen|55.68|12.57|Europe/Copenhagen
+Dallas|32.78|-96.80|America/Chicago
+Delhi|28.61|77.21|Asia/Kolkata
+Denver|39.74|-104.99|America/Denver
+Dubai|25.20|55.27|Asia/Dubai
+Dublin|53.35|-6.26|Europe/Dublin
+Edinburgh|55.95|-3.19|Europe/London
+Eilat|29.56|34.95|Asia/Jerusalem
+Frankfurt|50.11|8.68|Europe/Berlin
+Geneva|46.20|6.14|Europe/Zurich
+Haifa|32.79|34.99|Asia/Jerusalem
+Hamburg|53.55|9.99|Europe/Berlin
+Helsinki|60.17|24.94|Europe/Helsinki
+Hong Kong|22.32|114.17|Asia/Hong_Kong
+Honolulu|21.31|-157.86|Pacific/Honolulu
+Istanbul|41.01|28.98|Europe/Istanbul
+Jerusalem|31.77|35.21|Asia/Jerusalem
+Johannesburg|-26.20|28.05|Africa/Johannesburg
+Kyiv|50.45|30.52|Europe/Kyiv
+Lisbon|38.72|-9.14|Europe/Lisbon
+London|51.51|-0.13|Europe/London
+Los Angeles|34.05|-118.24|America/Los_Angeles
+Luxembourg|49.61|6.13|Europe/Luxembourg
+Lyon|45.76|4.84|Europe/Paris
+Madrid|40.42|-3.70|Europe/Madrid
+Manchester|53.48|-2.24|Europe/London
+Melbourne|-37.81|144.96|Australia/Melbourne
+Mexico City|19.43|-99.13|America/Mexico_City
+Miami|25.76|-80.19|America/New_York
+Milan|45.46|9.19|Europe/Rome
+Montreal|45.50|-73.57|America/Toronto
+Moscow|55.76|37.62|Europe/Moscow
+Mumbai|19.08|72.88|Asia/Kolkata
+Munich|48.14|11.58|Europe/Berlin
+Nairobi|-1.29|36.82|Africa/Nairobi
+New York|40.71|-74.01|America/New_York
+Nice|43.70|7.27|Europe/Paris
+Oslo|59.91|10.75|Europe/Oslo
+Paris|48.86|2.35|Europe/Paris
+Prague|50.08|14.44|Europe/Prague
+Reykjavík|64.15|-21.94|Atlantic/Reykjavik
+Rio de Janeiro|-22.91|-43.17|America/Sao_Paulo
+Rome|41.90|12.50|Europe/Rome
+San Francisco|37.77|-122.42|America/Los_Angeles
+Santiago|-33.45|-70.67|America/Santiago
+São Paulo|-23.55|-46.63|America/Sao_Paulo
+Seattle|47.61|-122.33|America/Los_Angeles
+Seoul|37.57|126.98|Asia/Seoul
+Singapore|1.35|103.82|Asia/Singapore
+Stockholm|59.33|18.07|Europe/Stockholm
+Sydney|-33.87|151.21|Australia/Sydney
+Taipei|25.03|121.57|Asia/Taipei
+Tel Aviv|32.09|34.78|Asia/Jerusalem
+Tokyo|35.68|139.69|Asia/Tokyo
+Toronto|43.65|-79.38|America/Toronto
+Vancouver|49.28|-123.12|America/Vancouver
+Vienna|48.21|16.37|Europe/Vienna
+Warsaw|52.23|21.01|Europe/Warsaw
+Washington|38.91|-77.04|America/New_York
+Zürich|47.38|8.54|Europe/Zurich`.split('\n').map(l => { const [name, lat, lon, zone] = l.split('|'); return {name, lat: +lat, lon: +lon, zone}; });
+
+const TITLE_FONTS = ['Snell Roundhand', 'Savoye LET', 'Zapfino', 'Bradley Hand', 'Brush Script MT', 'Didot', 'Bodoni 72',
+                     'Georgia', 'Baskerville', 'Futura', 'Avenir Next', 'Helvetica Neue', 'Copperplate', 'Marker Felt'];
+const BODY_FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Gill Sans', 'Optima', 'Copperplate', 'Didot', 'Georgia',
+                    'Baskerville', 'American Typewriter', 'Menlo'];
+const p = {layout: 'classic', width: 100, height: 140, diameter: 100, corner: 4, titleSize: 10, smallSize: 4,
+           sky: 'dark', limit: 5.3, starSize: 100, lineWidth: 0.5, frame: 'single',
+           base: 2, raise: 0.6, res: 0.2, titleFont: 'Snell Roundhand', bodyFont: 'Avenir Next'};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+const cardRows = [slider($('sizeSliders'), 'width', 'Width mm', 60, 240, 1), slider($('sizeSliders'), 'height', 'Height mm', 60, 240, 1),
+                  slider($('sizeSliders'), 'corner', 'Corner mm', 1, 20, 0.5)];
+const roundRow = slider($('sizeSliders'), 'diameter', 'Across mm', 60, 240, 1);
+slider($('textSliders'), 'titleSize', 'Names mm', 5, 24, 0.5);
+slider($('textSliders'), 'smallSize', 'Small words mm', 2.5, 10, 0.1);
+slider($('skySliders'), 'limit', 'Faintest star', 3.5, 6, 0.1);
+slider($('skySliders'), 'starSize', 'Star size %', 50, 200, 5);
+slider($('skySliders'), 'lineWidth', 'Line mm', 0.4, 1.2, 0.05);
+slider($('printSliders'), 'base', 'Card mm', 1.2, 5, 0.1);
+slider($('printSliders'), 'raise', 'Design mm', 0.2, 1.6, 0.05);
+slider($('printSliders'), 'res', 'Detail mm', 0.1, 0.3, 0.01);
+
+for (const c of CITIES) $('city').add(new Option(c.name, c.name));
+$('city').add(new Option('Somewhere else…', 'custom'));
+$('city').value = 'Luxembourg';
+let zones = ['UTC'];
+try { zones = Intl.supportedValuesOf('timeZone'); } catch (e) { zones = [...new Set(CITIES.map(c => c.zone))].sort(); }
+for (const z of zones) $('zone').add(new Option(z.replace(/_/g, ' '), z));
+try { $('zone').value = Intl.DateTimeFormat().resolvedOptions().timeZone; } catch (e) {}
+const today = new Date();
+$('date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+for (const f of TITLE_FONTS) $('titleFont').add(new Option(f, f));
+for (const f of BODY_FONTS) $('bodyFont').add(new Option(f, f));
+$('titleFont').onchange = () => { p.titleFont = $('titleFont').value; update(); };
+$('bodyFont').onchange = () => { p.bodyFont = $('bodyFont').value; update(); };
+for (const id of ['city', 'zone', 'date', 'time']) $(id).onchange = update;
+for (const id of ['placeName', 'lat', 'lon', 'title', 'subtitle', 'details']) $(id).oninput = update;
+for (const id of ['figures', 'grid', 'sparkle', 'stand', 'cardColour', 'inkColour']) $(id).oninput = update;
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('layout', 'layout'); choose('sky', 'sky'); choose('frame', 'frame');
+function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('titleFont').value = p.titleFont; $('bodyFont').value = p.bodyFont; }
+
+// ---------------------------------------------------------------------------------------------------------------
+// The sky. Positions are J2000; precession since then moves stars by well under a millimetre on a card.
+const D2R = Math.PI / 180;
+function place() {
+  if ($('city').value !== 'custom') return CITIES.find(c => c.name === $('city').value);
+  return {name: $('placeName').value.trim(), lat: +$('lat').value || 0, lon: +$('lon').value || 0, zone: $('zone').value};
+}
+// The moment in UTC, from the wall-clock time in the place's zone (so summer time is right on that date).
+function moment(zone) {
+  const [y, mo, d] = ($('date').value || '2000-01-01').split('-').map(Number), [h, mi] = ($('time').value || '00:00').split(':').map(Number);
+  const wall = Date.UTC(y, mo - 1, d, h, mi);
+  const offset = t => {
+    try {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: zone, hourCycle: 'h23', year: 'numeric', month: 'numeric',
+        day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric'}).formatToParts(new Date(t)).map(q => [q.type, q.value]));
+      return Date.UTC(+parts.year, parts.month - 1, +parts.day, +parts.hour % 24, +parts.minute, +parts.second) - t;
+    } catch (e) { return 0; }
+  };
+  let t = wall - offset(wall);
+  t = wall - offset(t);
+  return t;
+}
+// Every star and constellation line as seen from the place: x right, y down, in units of the horizon's radius,
+// stereographic so the figures keep their shapes. North is up and east is on the left, as when looking up.
+function skyView(pl, t) {
+  const d = t / 86400000 + 2440587.5 - 2451545.0;
+  const lst = (280.46061837 + 360.98564736629 * d + pl.lon) % 360;
+  const sl = Math.sin(pl.lat * D2R), cl = Math.cos(pl.lat * D2R);
+  const project = (ra, dec) => {
+    const H = (lst - ra) * D2R, dd = dec * D2R;
+    const sa = sl * Math.sin(dd) + cl * Math.cos(dd) * Math.cos(H), alt = Math.asin(Math.max(-1, Math.min(1, sa)));
+    const az = Math.atan2(-Math.cos(dd) * Math.sin(H), Math.sin(dd) * cl - Math.cos(dd) * sl * Math.cos(H));
+    const r = Math.tan((Math.PI / 2 - alt) / 2);
+    return [-r * Math.sin(az), -r * Math.cos(az), alt];
+  };
+  const stars = [];
+  for (let k = 0; k < SKY.stars.length; k += 3) {
+    if (SKY.stars[k + 2] > p.limit) break;
+    const q = project(SKY.stars[k], SKY.stars[k + 1]);
+    if (q[2] > 0) stars.push([q[0], q[1], SKY.stars[k + 2]]);
+  }
+  const lines = SKY.lines.map(l => { const out = []; for (let k = 0; k < l.length; k += 2) out.push(project(l[k], l[k + 1])); return out; });
+  return {stars, lines, lst};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The design, drawn in black on a clear canvas at k pixels per mm. Black is the raised second colour.
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+function detailLine(pl) {
+  if ($('details').value.trim()) return $('details').value.trim();
+  const [y, mo, d] = ($('date').value || '2000-01-01').split('-').map(Number);
+  return [pl.name, `${d} ${MONTHS[mo - 1]} ${y}`, $('time').value].filter(Boolean).join('  ·  ').toUpperCase();
+}
+const size = () => p.layout === 'coaster' ? [p.diameter, p.diameter] : [p.width, p.height];
+function outline(g, k, inset) {
+  const [w, h] = size();
+  g.beginPath();
+  if (p.layout === 'coaster') g.arc(w / 2 * k, h / 2 * k, (w / 2 - inset) * k, 0, 2 * Math.PI);
+  else g.roundRect(inset * k, inset * k, (w - 2 * inset) * k, (h - 2 * inset) * k, Math.max(0.5, p.corner - inset) * k);
+}
+function fitText(g, text, font, sizeMm, maxW, k) {
+  let s = sizeMm * k;
+  g.font = `${font.weight || ''} ${s}px "${font.family}"`;
+  const w = g.measureText(text).width;
+  if (w > maxW * k) { s *= maxW * k / w; g.font = `${font.weight || ''} ${s}px "${font.family}"`; }
+  return s / k;
+}
+// Letters round an arc, centred on angle a (0 is down), reading left to right either on the top or the bottom.
+function arcText(g, text, cx, cy, r, sizePx, bottom, spacing) {
+  g.save();
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  const widths = [...text].map(c => g.measureText(c).width + spacing), total = widths.reduce((a, b) => a + b, 0);
+  let a = (bottom ? Math.PI / 2 : -Math.PI / 2) + (bottom ? 1 : -1) * total / 2 / r;
+  [...text].forEach((c, n) => {
+    const step = widths[n] / r, mid = a + (bottom ? -1 : 1) * step / 2;
+    g.save();
+    g.translate(cx + r * Math.cos(mid), cy + r * Math.sin(mid));
+    g.rotate(mid + (bottom ? -Math.PI / 2 : Math.PI / 2));
+    g.fillText(c, 0, 0);
+    g.restore();
+    a += (bottom ? -1 : 1) * step;
+  });
+  g.restore();
+}
+
+function drawDesign(g, k, sky, pl) {
+  const [w, h] = size(), lw = p.lineWidth, frameGap = p.frame === 'none' ? 0 : p.frame === 'single' ? 3 : 4.5;
+  g.fillStyle = g.strokeStyle = '#000';
+  g.lineCap = g.lineJoin = 'round';
+  // The frame: lines a little in from the edge.
+  if (p.frame !== 'none') {
+    g.lineWidth = lw * 1.4 * k; outline(g, k, 2); g.stroke();
+    if (p.frame === 'double') { g.lineWidth = lw * k; outline(g, k, 3.6); g.stroke(); }
+  }
+  // Where the sky goes, and where the words go.
+  let cx, cy, R, clip;
+  const m = frameGap + Math.max(4, 0.06 * Math.min(w, h));
+  const title = $('title').value.trim(), sub = $('subtitle').value.trim(), det = detailLine(pl);
+  const titleFont = {family: p.titleFont}, body = {family: p.bodyFont, weight: 600};
+  if (p.layout === 'coaster') {
+    const ring = Math.max(p.titleSize, 1.6 * p.smallSize) + 3;
+    cx = w / 2; cy = h / 2; R = w / 2 - frameGap - ring - 1;
+    clip = gg => { gg.beginPath(); gg.arc(cx * k, cy * k, R * k, 0, 2 * Math.PI); };
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    const mid = R + ring / 2 + 0.5;
+    if (title) { g.font = `${p.titleSize * k * 0.9}px "${p.titleFont}"`; arcText(g, title, cx * k, cy * k, mid * k, p.titleSize * k, true, 0); }
+    const top = [sub, det].filter(Boolean).join('  ·  ');
+    if (top) { g.font = `600 ${p.smallSize * k}px "${p.bodyFont}"`; arcText(g, top, cx * k, cy * k, mid * k, p.smallSize * k, false, 0.15 * p.smallSize * k); }
+  } else {
+    const textH = (title ? p.titleSize * 1.5 : 0) + (sub ? p.smallSize * 1.8 : 0) + (det ? p.smallSize * 1.8 : 0) + 4;
+    g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+    if (p.layout === 'classic') {
+      R = Math.min((w - 2 * m) / 2, (h - 2 * m - textH) / 2);
+      cx = w / 2; cy = m + R + Math.max(0, (h - 2 * m - textH - 2 * R) / 3);
+      clip = gg => { gg.beginPath(); gg.arc(cx * k, cy * k, R * k, 0, 2 * Math.PI); };
+    } else {
+      const x0 = frameGap + 2.5, y0 = frameGap + 2.5, x1 = w - x0, y1 = h - frameGap - 2.5 - textH;
+      cx = (x0 + x1) / 2; cy = (y0 + y1) / 2; R = Math.hypot(x1 - x0, y1 - y0) / 2;
+      clip = gg => { gg.beginPath(); gg.roundRect(x0 * k, y0 * k, (x1 - x0) * k, (y1 - y0) * k, Math.max(0.5, p.corner - x0) * k); };
+    }
+    let y = (p.layout === 'classic' ? cy + R : h - frameGap - 2.5 - textH) + 3;
+    const maxW = w - 2 * m;
+    if (title) { const s = fitText(g, title, titleFont, p.titleSize, maxW, k); y += s * 1.15; g.fillText(title, w / 2 * k, y * k); y += s * 0.35; }
+    if (sub) { const s = fitText(g, sub.split('').join(' '), body, p.smallSize, maxW, k); y += s * 1.6; g.fillText(sub.split('').join(' '), w / 2 * k, y * k); }
+    if (det) { const s = fitText(g, det, body, p.smallSize * 0.85, maxW, k); y += s * 1.8; g.fillText(det, w / 2 * k, y * k); }
+  }
+  // The sky: a filled circle with the stars cut out, or the stars alone.
+  g.save();
+  clip(g); g.clip();
+  const dark = p.sky === 'dark';
+  if (dark) { clip(g); g.fill(); g.globalCompositeOperation = 'destination-out'; }
+  else if (p.layout !== 'full') { g.lineWidth = lw * k; g.stroke(); }
+  const X = q => (cx + q[0] * R) * k, Y = q => (cy + q[1] * R) * k;
+  if ($('grid').checked) {
+    g.lineWidth = lw * 0.8 * k; g.setLineDash([lw * 3 * k, lw * 3 * k]);
+    for (const alt of [30, 60]) { g.beginPath(); g.arc(cx * k, cy * k, R * Math.tan((90 - alt) / 2 * D2R) * k, 0, 2 * Math.PI); g.stroke(); }
+    g.setLineDash([]);
+  }
+  if ($('figures').checked) {
+    g.lineWidth = lw * k;
+    for (const l of sky.lines) {
+      g.beginPath();
+      l.forEach((q, n) => n ? g.lineTo(X(q), Y(q)) : g.moveTo(X(q), Y(q)));
+      g.stroke();
+    }
+  }
+  const scale = p.starSize / 100;
+  for (const [x, y2, mag] of sky.stars) {
+    const r = Math.max(0.28, Math.min(1.7, 0.3 + 0.24 * (p.limit - mag))) * scale, px = (cx + x * R) * k, py = (cy + y2 * R) * k;
+    if ($('sparkle').checked && mag < 1.6) {
+      const a = r * 2.6 * k, b = r * 0.55 * k;
+      g.beginPath();
+      for (let n = 0; n < 8; ++n) { const ang = n * Math.PI / 4 - Math.PI / 2, rr = n % 2 ? b : a; g.lineTo(px + rr * Math.cos(ang), py + rr * Math.sin(ang)); }
+      g.closePath(); g.fill();
+    }
+    g.beginPath(); g.arc(px, py, r * k, 0, 2 * Math.PI); g.fill();
+  }
+  g.restore();
+  if ($('grid').checked) {
+    // The compass points, just outside a round sky, or just inside the edge of a full one.
+        g.font = `600 ${p.smallSize * 0.8 * k}px "${p.bodyFont}"`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    // Round skies: outside the circle on a card, inside it on a coaster (the words go round outside). Full: inside the edge.
+    const fs = p.smallSize * 0.8, ins = p.layout !== 'classic';
+    const hx = p.layout === 'full' ? (w / 2 - frameGap - 2.5) : R, hy = p.layout === 'full' ? (cy - frameGap - 2.5) : R;
+    const off = ins ? -fs * 0.9 : fs * 0.9;
+    g.globalCompositeOperation = dark && ins ? 'destination-out' : 'source-over';
+    [['N', 0, -1], ['S', 0, 1], ['E', -1, 0], ['W', 1, 0]].forEach(([c, dx, dy]) =>
+      g.fillText(c, (cx + dx * (hx + off)) * k, (cy + dy * (hy + off)) * k));
+    g.globalCompositeOperation = 'source-over';
+  }
+  return {cx, cy, R};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The card, with the design standing on it: the card is one part, the design another, so each takes a filament.
+function cardSheet(z0, z1) {
+  const [w, h] = size(), segs = 720, a2 = w / 2, b2 = h / 2;
+  const edge = a => {
+    if (p.layout === 'coaster') return a2;
+    const c = Math.abs(Math.cos(a)), s = Math.abs(Math.sin(a));
+    let r = Math.min(c > 1e-9 ? a2 / c : Infinity, s > 1e-9 ? b2 / s : Infinity);
+    const kk = Math.min(p.corner, a2, b2), qx = a2 - kk, qy = b2 - kk;
+    if (r * c > qx && r * s > qy) { const bq = qx * c + qy * s, cq = qx * qx + qy * qy - kk * kk; r = bq + Math.sqrt(Math.max(0, bq * bq - cq)); }
+    return r;
+  };
+  return Lamp.sheet(segs, 2, true, (i, j, front) => {
+    const a = 2 * Math.PI * i / segs, r = j ? edge(a) : 0.01;
+    return [a2 + r * Math.cos(a), b2 - r * Math.sin(a), front ? z1 : z0];
+  });
+}
+function build() {
+  const pl = place(), [w, h] = size();
+  if (!pl || !isFinite(pl.lat) || Math.abs(pl.lat) > 90) return {problem: 'Latitude must be between −90 and 90.'};
+  const t = moment(pl.zone), sky = skyView(pl, t);
+  const k = 1 / p.res, nu = Math.round(w * k) + 2, nv = Math.round(h * k) + 2;
+  const cv = document.createElement('canvas');
+  cv.width = nu; cv.height = nv;
+  const g = cv.getContext('2d');
+  g.translate(1, 1);
+  g.save(); outline(g, k, 0.3); g.clip();
+  const layout = drawDesign(g, k, sky, pl);
+  g.restore();
+  const alpha = g.getImageData(0, 0, nu, nv).data;
+  // One point per pixel: the front rises by the design's height where it is inked, and lies on the card elsewhere.
+  // The canvas's y runs down; the model's runs up.
+  const z0 = p.base, z1 = p.base + p.raise;
+  const design = Lamp.sheet(nu, nv, false, (i, j, front) => {
+    const a = alpha[4 * (j * nu + i) + 3] / 255;
+    return [(i - 1 + 0.5) * p.res, h - (j - 1 + 0.5) * p.res, front ? z0 + p.raise * a : z0];
+  });
+  const card = cardSheet(0, z0);
+  const stand = [];
+  if ($('stand').checked) {
+    // A block with a slot the card stands in, a little wider than the card is thick.
+    const L = Math.min(w * 0.7, 120), slot = p.base + p.raise + 0.35, back = 6, front = 3.5, depth = slot + back + front + 6;
+    stand.push(Lamp.box(0, L, 0, depth, 0, 4), Lamp.box(0, L, 3, 3 + front, 4, 12), Lamp.box(0, L, 3 + front + slot, 3 + front + slot + back, 4, 14));
+  }
+  let ink = 0;
+  for (let n = 3; n < alpha.length; n += 4) ink += alpha[n] > 127;
+  return {card, design, stand, sky, layout, t, image: cv, size: [w, h, z1], inkArea: ink * p.res * p.res,
+          triangles: 4 * nu * nv + 4 * 720 + stand.length * 12};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+let built = null, timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+function update() {
+  on('layout', p.layout); on('sky', p.sky); on('frame', p.frame);
+  $('customPlace').classList.toggle('hidden', $('city').value !== 'custom');
+  for (const r of cardRows) r.classList.toggle('hidden', p.layout === 'coaster');
+  roundRow.classList.toggle('hidden', p.layout !== 'coaster');
+  const pl = place();
+  $('details').placeholder = pl ? detailLine(pl) : '';
+  clearTimeout(timer);
+  timer = setTimeout(render, 120);
+}
+function render() {
+  built = build();
+  const problems = [];
+  if (built.problem) problems.push(built.problem);
+  else {
+    if (Math.max(built.size[0], built.size[1]) > Math.max(...printer.bed)) problems.push('It is bigger than your plate.');
+    if (p.titleSize < 7 && /Snell|Savoye|Zapfino|Brush|Bradley/.test(p.titleFont)) problems.push('Script letters this small have hairlines too thin to print; make the names 7 mm or more.');
+    if (p.smallSize < 3.2) problems.push('Small words under 3.2 mm need a 0.2 mm nozzle to print clearly.');
+    if (p.sky === 'dark' && p.starSize < 80 && p.limit > 5.5) problems.push('The faintest stars are holes under half a millimetre; a 0.4 mm nozzle may close them. Raise Star size or lower Faintest star.');
+  }
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('add').disabled = !!built.problem;
+  if (built.problem) return;
+  // Preview: the card in its colour with the design over it, as it will look.
+  const c = $('canvas'), dpr = window.devicePixelRatio || 1;
+  c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr;
+  const g = c.getContext('2d'), [w, h] = size(), pad = 30 * dpr;
+  const s = Math.min((c.width - 2 * pad) / w, (c.height - 2 * pad) / h), ox = (c.width - w * s) / 2, oy = (c.height - h * s) / 2;
+  g.clearRect(0, 0, c.width, c.height);
+  g.save(); g.translate(ox, oy);
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 24 * dpr; g.shadowOffsetY = 6 * dpr;
+  g.fillStyle = $('cardColour').value; outline(g, s, 0); g.fill();
+  g.shadowColor = 'transparent';
+  const tint = document.createElement('canvas');
+  tint.width = built.image.width; tint.height = built.image.height;
+  const tg = tint.getContext('2d');
+  tg.drawImage(built.image, 0, 0); tg.globalCompositeOperation = 'source-in'; tg.fillStyle = $('inkColour').value; tg.fillRect(0, 0, tint.width, tint.height);
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(tint, -s * p.res, -s * p.res, tint.width * s * p.res, tint.height * s * p.res);
+  g.restore();
+  const pl = place(), when = new Date(built.t);
+  $('facts').textContent = `${w} × ${h} mm, ${built.size[2].toFixed(1)} mm thick; the sky over ${pl.name || 'the place'} at ` +
+    `${when.toISOString().slice(11, 16)} UTC, ${built.sky.stars.length} stars above the horizon. ` +
+    `It prints face up as two parts of one object: Card, then Design from ${p.base} mm. Give Design your second filament in the object list, ` +
+    `or with one nozzle add a filament change at ${p.base} mm in the layer slider. ` + ($('stand').checked ? 'The stand is a separate object.' : '');
+}
+
+window.fromApp = message => { if (message.type === 'printer') { printer = message; update(); } };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || built.problem) return;
+  const more = built.stand.length ? [{name: 'Star map stand', parts: [{name: 'Stand', sheets: built.stand}]}] : [];
+  post(Lamp.addMessage('Star map', [{name: 'Card', sheets: [built.card]}, {name: 'Design', sheets: [built.design]}], more));
+};
+window.onresize = () => { clearTimeout(timer); timer = setTimeout(render, 120); };
+sync();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

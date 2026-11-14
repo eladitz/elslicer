@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lithophane</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 330px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .chips button { padding: 6px 4px; font-size: 13px; }
+  .chips button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  select { width: 100%; }
+  #picture { display: flex; gap: 10px; align-items: center; }
+  #thumb { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .viewbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; justify-content: flex-end; }
+  canvas#canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { flex: 1; padding: 6px; }
+  .seg button.on { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Lithophane</h1>
+  <p class="sub">A picture pressed into thin plastic: thicker where it is dark, so it shows when light shines through.</p>
+  <div id="picture"><img id="thumb" alt=""><div><button id="pick" class="primary">Choose picture…</button><div class="muted" id="pictureName" style="font-size:12px;margin-top:4px">No picture yet</div></div></div>
+
+  <h3>Shape</h3>
+  <div class="chips" id="shapes">
+    <button data-shape="flat">Flat</button>
+    <button data-shape="curved">Curved</button>
+    <button data-shape="cylinder">Cylinder</button>
+    <button data-shape="lamp">Lamp</button>
+    <button data-shape="globe" title="A ball, like a moon lamp: use a moon or world map picture">Globe</button>
+    <button data-shape="fan" title="A folding fan: the picture spread over blades that turn on a pin">Folding fan</button>
+    <button data-shape="hand" title="A flat hand fan on a handle, in a round or cute outline">Hand fan</button>
+  </div>
+  <div id="fanBox">
+    <div class="seg" style="margin:8px 0 4px">
+      <button data-fan="classic" title="Straight blades under a round top">Classic</button>
+      <button data-fan="scallop" title="Each blade ends in a round lobe">Scalloped</button>
+      <button data-fan="pointed" title="Each blade ends in a point">Pointed</button>
+      <button data-fan="shell" title="Higher in the middle, like a shell, with small lobes">Shell</button>
+    </div>
+    <div id="fanSliders"></div>
+  </div>
+  <div id="handBox">
+    <div class="chips" style="grid-template-columns:repeat(4,1fr);margin:8px 0 4px" id="handShapes"></div>
+    <div id="handSliders"></div>
+  </div>
+  <div id="sizeSliders"></div>
+  <label class="check" id="keepRow"><input type="checkbox" id="keep" checked> Height follows the picture</label>
+  <p class="muted hidden" id="globeHint" style="font-size:12px;margin:6px 0">Use a map of the whole surface, twice as wide as it is tall, like the moon or world maps NASA publishes. It sits over a small light through the opening.</p>
+
+  <div id="placeBox">
+    <h3>Picture</h3>
+    <div class="seg">
+      <button data-fit="fill" title="Cover the whole area, cropping what doesn't fit">Fill</button>
+      <button data-fit="fit" title="Show the whole picture, leaving the rest empty">Fit whole</button>
+      <button data-fit="stretch" title="Stretch the picture to the area's shape">Stretch</button>
+    </div>
+    <div id="placeSliders" style="margin-top:6px"></div>
+    <div class="seg" style="margin-top:6px">
+      <button id="turn" title="Turn the picture a quarter turn">Turn ↻</button>
+      <button id="mirror" title="Flip the picture left to right">Mirror</button>
+      <button id="recentre" title="Back to the middle, at its own size">Centre</button>
+    </div>
+    <div class="seg" id="padRow" style="margin-top:6px">
+      <button data-pad="light" title="Empty space is thin and glows">Empty: light</button>
+      <button data-pad="dark" title="Empty space is thick and stays dark">Empty: dark</button>
+    </div>
+    <canvas id="place" style="width:100%;margin-top:8px;border:1px solid var(--line);border-radius:6px;image-rendering:auto"></canvas>
+  </div>
+
+  <div id="standBox">
+    <h3>Stand</h3>
+    <div class="seg">
+      <button data-stand="none">None</button>
+      <button data-stand="built" title="Printed in one piece with the lithophane">Built in</button>
+      <button data-stand="separate" title="A second piece it slots into">Separate</button>
+    </div>
+    <p class="muted" id="standHint" style="font-size:12px;margin:6px 0"></p>
+  </div>
+
+  <div id="lampBox">
+    <h3>Lamp holder</h3>
+    <select id="fixture"></select>
+    <p class="muted" id="fixtureHint" style="font-size:12px;margin:6px 0"></p>
+    <div id="mountSliders"></div>
+    <div class="seg" style="margin-top:6px">
+      <button data-at="top">Holder at the top</button>
+      <button data-at="bottom">Holder at the bottom</button>
+    </div>
+  </div>
+
+  <h3>Thickness</h3>
+  <div id="thickSliders"></div>
+  <label class="check"><input type="checkbox" id="invert"> Negative (light where the picture is dark)</label>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary" disabled>Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <div class="viewbar"><label class="check" style="padding:0"><input type="checkbox" id="glow" checked> Light behind</label></div>
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256}, image = null;
+
+const p = {fit: 'fill', zoom: 1, panX: 0, panY: 0, rot: 0, mirror: false, pad: 'light', stand: 'none',
+           opening: 45, shape: 'flat', width: 120, height: 90, arc: 120, diameter: 90, repeat: 1, fixture: 'socket', at: 'bottom',
+           hole: 42, thick: 3, thin: 0.8, thickest: 3.0, border: 3, res: 0.3,
+           fan: 'classic', blades: 12, spread: 150, radius: 150, sticks: 35, hand: 'cloud', fanSize: 130, handle: 80};
+const sliders = {};
+function slider(parent, key, label, min, max, step, id) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.dataset.key = key;
+  if (id) row.id = id;
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); changed(key); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); changed(key); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+}
+slider($('sizeSliders'), 'width', 'Width mm', 30, 300, 1, 'rowWidth');
+slider($('sizeSliders'), 'diameter', 'Diameter mm', 30, 250, 1, 'rowDiameter');
+slider($('sizeSliders'), 'height', 'Height mm', 20, 300, 1);
+slider($('sizeSliders'), 'arc', 'Curve °', 30, 270, 5, 'rowArc');
+slider($('sizeSliders'), 'repeat', 'Picture repeats', 1, 4, 1, 'rowRepeat');
+slider($('sizeSliders'), 'opening', 'Opening mm', 15, 120, 1, 'rowOpening');
+slider($('fanSliders'), 'radius', 'Fan length mm', 60, 250, 1);
+slider($('fanSliders'), 'spread', 'Opens to °', 90, 200, 5);
+slider($('fanSliders'), 'blades', 'Blades', 5, 24, 1);
+slider($('fanSliders'), 'sticks', 'Sticks %', 15, 60, 1);
+slider($('handSliders'), 'fanSize', 'Fan across mm', 60, 250, 1);
+slider($('handSliders'), 'handle', 'Handle mm', 0, 200, 1);
+slider($('placeSliders'), 'zoom', 'Zoom', 0.3, 4, 0.01);
+slider($('placeSliders'), 'panX', 'Move ← →', -1, 1, 0.01);
+slider($('placeSliders'), 'panY', 'Move ↓ ↑', -1, 1, 0.01);
+slider($('mountSliders'), 'hole', 'Hole mm', 5, 80, 0.5);
+slider($('mountSliders'), 'thick', 'Mount mm', 2, 6, 0.5);
+slider($('thickSliders'), 'thin', 'Thinnest mm', 0.4, 2, 0.05);
+slider($('thickSliders'), 'thickest', 'Thickest mm', 1.5, 6, 0.1);
+slider($('thickSliders'), 'border', 'Frame mm', 0, 10, 0.5);
+slider($('thickSliders'), 'res', 'Detail mm', 0.15, 0.8, 0.05);
+for (const [key, f] of Object.entries(Lamp.FIXTURES)) if (key !== 'none') $('fixture').add(new Option(f.name, key));
+$('fixture').onchange = () => { p.fixture = $('fixture').value; p.hole = Lamp.FIXTURES[p.fixture].hole; sync(); update(); };
+for (const b of document.querySelectorAll('[data-shape]')) b.onclick = () => {
+  p.shape = b.dataset.shape;
+  p.res = p.shape === 'flat' || p.shape === 'curved' ? 0.3 : 0.4;
+  if (p.shape === 'globe') { p.diameter = Math.min(p.diameter, 150); p.border = 2; }
+  // Fan blades stack on the pin, so each is as thick as its thickest point: keep them thin.
+  if (p.shape === 'hand') { p.res = 0.35; p.border = Math.min(Math.max(p.border, 2), 3); }
+  if (p.shape === 'fan') { p.res = 0.35; p.thin = Math.min(p.thin, 0.6); p.thickest = Math.min(p.thickest, 2.4); p.border = Math.min(p.border, 2.5); }
+  // Round, a picture goes about a third of the way round, so a square one makes a lamp of a sensible height.
+  if ((p.shape === 'cylinder' || p.shape === 'lamp') && p.repeat === 1) p.repeat = 3;
+  sync(); fitHeight(); update();
+};
+for (const b of document.querySelectorAll('[data-fan]')) b.onclick = () => { p.fan = b.dataset.fan; update(); };
+for (const b of document.querySelectorAll('[data-at]')) b.onclick = () => { p.at = b.dataset.at; update(); };
+$('keep').onchange = () => { fitHeight(); update(); };
+for (const b of document.querySelectorAll('[data-fit]')) b.onclick = () => { p.fit = b.dataset.fit; update(); };
+for (const b of document.querySelectorAll('[data-pad]')) b.onclick = () => { p.pad = b.dataset.pad; update(); };
+for (const b of document.querySelectorAll('[data-stand]')) b.onclick = () => { p.stand = b.dataset.stand; update(); };
+$('turn').onclick = () => { p.rot = (p.rot + 90) % 360; fitHeight(); update(); };
+$('mirror').onclick = () => { p.mirror = !p.mirror; update(); };
+$('recentre').onclick = () => { sliders.zoom(1); sliders.panX(0); sliders.panY(0); update(); };
+$('invert').onchange = update;
+$('glow').onchange = () => render();
+function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('fixture').value = p.fixture; }
+function changed(key) {
+  if (key === 'height') $('keep').checked = false;
+  else if (!['zoom', 'panX', 'panY'].includes(key)) fitHeight();
+  update();
+}
+
+// How wide the picture is printed: the sheet's width, or once round the cylinder for each repeat.
+const across = () => (p.shape === 'cylinder' || p.shape === 'lamp') ? Math.PI * p.diameter / p.repeat : p.width;
+function fitHeight() {
+  if (!$('keep').checked || !image || p.shape === 'globe' || p.shape === 'fan' || p.shape === 'hand') return;
+  const turned = p.rot % 180 !== 0, w = turned ? image.height : image.width, h = turned ? image.width : image.height;
+  // The picture fills the area inside the frame: all round on a sheet, top and bottom on a cylinder.
+  const side = p.shape === 'flat' || p.shape === 'curved' ? 2 * p.border : 0;
+  sliders.height(Math.round((across() - side) * h / w + 2 * p.border));
+}
+
+// Brightness of the picture over a grid of cols by rows, row 0 at the top, placed as asked inside the grid less an
+// inset of [ix, iy] points at each side (the frame). whole stretches it over everything, for a globe's map.
+let lastLight = null;
+function brightness(cols, rows, inset = [0, 0], whole = false) {
+  const c = document.createElement('canvas');
+  c.width = cols; c.height = rows;
+  const g = c.getContext('2d', {willReadFrequently: true});
+  const aw = Math.max(1, cols - 2 * inset[0]), ah = Math.max(1, rows - 2 * inset[1]);
+  if (image) {
+    g.fillStyle = p.pad === 'dark' ? '#000' : '#fff';
+    g.fillRect(0, 0, cols, rows);
+    const turned = p.rot % 180 !== 0, iw = turned ? image.height : image.width, ih = turned ? image.width : image.height;
+    let sx = aw / iw, sy = ah / ih;
+    const fit = whole ? 'stretch' : p.fit;
+    if (fit === 'fill') sx = sy = Math.max(sx, sy);
+    else if (fit === 'fit') sx = sy = Math.min(sx, sy);
+    sx *= p.zoom; sy *= p.zoom;
+    // Moving slides it as far as it overhangs the area, or as far as there is room.
+    const ox = p.panX * Math.abs(iw * sx - aw) / 2, oy = -p.panY * Math.abs(ih * sy - ah) / 2;
+    g.save();
+    g.beginPath(); g.rect(inset[0], inset[1], aw, ah); g.clip();
+    g.translate(cols / 2 + ox, rows / 2 + oy);
+    if (p.mirror) g.scale(-1, 1);
+    g.rotate(p.rot * Math.PI / 180);
+    g.scale(turned ? sy : sx, turned ? sx : sy);
+    g.imageSmoothingQuality = 'high';
+    g.drawImage(image, -image.width / 2, -image.height / 2);
+    g.restore();
+  } else {
+    // Until a picture is chosen: soft rings, to show how the shape looks.
+    const grad = g.createRadialGradient(cols / 2, rows / 2, 0, cols / 2, rows / 2, Math.max(cols, rows) / 1.6);
+    for (let k = 0; k <= 8; ++k) grad.addColorStop(k / 8, k % 2 ? '#202020' : '#e8e8e8');
+    g.fillStyle = grad; g.fillRect(0, 0, cols, rows);
+  }
+  const data = g.getImageData(0, 0, cols, rows).data, out = new Float32Array(cols * rows), neg = $('invert').checked;
+  for (let k = 0; k < cols * rows; ++k) {
+    const l = (0.299 * data[4 * k] + 0.587 * data[4 * k + 1] + 0.114 * data[4 * k + 2]) / 255;
+    out[k] = neg ? 1 - l : l;
+  }
+  lastLight = {cols, rows, out, inset};
+  return out;
+}
+
+// The placed picture as it will glow, with the frame, small beside the controls.
+function drawPlacement() {
+  const c = $('place');
+  if (!lastLight) return;
+  const {cols, rows, out, inset} = lastLight, scale = Math.min(1, 600 / cols);
+  const w = Math.max(1, Math.round(cols * scale)), h = Math.max(1, Math.round(rows * scale));
+  c.width = w; c.height = h;
+  const g = c.getContext('2d'), img = g.createImageData(w, h);
+  for (let y = 0; y < h; ++y)
+    for (let x = 0; x < w; ++x) {
+      const sx = Math.min(cols - 1, Math.floor(x / scale)), sy = Math.min(rows - 1, Math.floor(y / scale));
+      const framed = sx < inset[0] || sx >= cols - inset[0] || sy < inset[1] || sy >= rows - inset[1];
+      const l = framed ? 0 : out[sy * cols + sx], o = 4 * (y * w + x);
+      img.data[o] = 30 + 225 * l; img.data[o + 1] = 22 + 190 * l; img.data[o + 2] = 12 + 120 * l; img.data[o + 3] = 255;
+    }
+  g.putImageData(img, 0, 0);
+}
+
+function build() {
+  const H = p.height, res = p.res, lo = Math.min(p.thin, p.thickest - 0.2), hi = p.thickest, frame = p.border;
+  if (p.shape === 'globe') return buildGlobe(res, lo, hi, frame);
+  if (p.shape === 'fan') return buildFan(res, lo, hi, frame);
+  if (p.shape === 'hand') return buildHand(res, lo, hi, frame);
+  const isRound = p.shape === 'cylinder' || p.shape === 'lamp';
+  const nv = Math.max(2, Math.round(H / res) + 1);
+  let nu, per, wrap = false;
+  if (isRound) { nu = Math.max(24, Math.round(Math.PI * p.diameter / res)); nu -= nu % p.repeat; per = nu / p.repeat; wrap = true; }
+  else { nu = Math.max(2, Math.round(p.width / res) + 1); per = nu; }
+  if (nu * nv > 2.5e6) return {problem: 'That is too fine to make: raise Detail mm, or make it smaller.'};
+  const stepU = isRound ? Math.PI * p.diameter / nu : p.width / (nu - 1), dz = H / (nv - 1), cols = per;
+  const iy = Math.round(frame / dz), ix = isRound ? 0 : Math.round(frame / stepU);
+  const light = brightness(cols, nv, [ix, iy]);
+  // Thickness at grid point (i, j), j counted up from the bottom in use.
+  const t = (i, j) => {
+    const y = j * dz, x = i * stepU;
+    if (y < frame || y > H - frame || (!isRound && (x < frame || x > p.width - frame))) return hi;
+    const l = light[(nv - 1 - j) * cols + (i % per)];
+    return hi - l * (hi - lo);
+  };
+  // A built-in stand lifts the picture onto a foot, sunk 1 mm into it; a separate one has a slot for its frame.
+  const stand = p.shape === 'lamp' ? 'none' : p.stand, slot = hi + 0.4, foot = 5;
+  let sheet, mount = {sheets: []}, standSheets = [];
+  if (p.shape === 'flat' && stand === 'built') {
+    // Printed standing up on its foot, picture side towards -y.
+    sheet = Lamp.sheet(nu, nv, false, (i, j, front) => [i * stepU, front ? -t(i, j) : 0, foot - 1 + j * dz]);
+    standSheets = [Lamp.box(-4, p.width + 4, -hi / 2 - 22, -hi / 2 + 22, 0, foot)];
+  } else if (p.shape === 'flat') {
+    sheet = Lamp.sheet(nu, nv, false, (i, j, front) => [i * stepU, j * dz, front ? t(i, j) : 0]);
+    if (stand === 'separate')
+      standSheets = [Lamp.box(-8, p.width + 8, -22, 22, 0, 4), Lamp.box(-8, p.width + 8, -slot / 2 - 7, -slot / 2, 3.9, 14),
+                     Lamp.box(-8, p.width + 8, slot / 2, slot / 2 + 7, 3.9, 14)];
+  } else if (p.shape === 'curved') {
+    const a = p.arc * Math.PI / 180, r = p.width / a, a0 = -Math.PI / 2 - a / 2, lift = stand === 'built' ? foot - 1 : 0;
+    sheet = Lamp.sheet(nu, nv, false, (i, j, front) => {
+      const f = a0 + a * i / (nu - 1), rr = r + (front ? t(i, j) : 0);
+      return [rr * Math.cos(f), rr * Math.sin(f), lift + j * dz];
+    });
+    const pad = 6 / r;
+    if (stand === 'built') standSheets = [Lamp.arcBlock(r - 12, r + hi + 12, a0 - pad, a0 + a + pad, 0, foot)];
+    if (stand === 'separate')
+      standSheets = [Lamp.arcBlock(r - 12, r + hi + 12, a0 - 2 * pad, a0 + a + 2 * pad, 0, 4),
+                     Lamp.arcBlock(r - 12, r - 0.2, a0 - 2 * pad, a0 + a + 2 * pad, 3.9, 12),
+                     Lamp.arcBlock(r + hi + 0.2, r + hi + 12, a0 - 2 * pad, a0 + a + 2 * pad, 3.9, 12)];
+  } else {
+    const rIn = p.diameter / 2 - hi, top = p.shape === 'lamp' && p.at === 'top', lift = stand === 'built' ? 3 : 0;
+    const place = (f, r, z) => top ? [r * Math.cos(f), -r * Math.sin(f), H - z] : [r * Math.cos(f), r * Math.sin(f), z + lift];
+    sheet = Lamp.sheet(nu, nv, true, (i, j, front) => place(2 * Math.PI * i / nu, rIn + (front ? t(i, j) : 0), j * dz));
+    if (p.shape === 'lamp') mount = Lamp.mount(p.fixture, p.hole, () => rIn, Math.min(0.5, lo / 2), p.thick);
+    // Built in: a flat ring round its foot. Separate: a base with a lip it sits over, and room inside for a tea light.
+    if (stand === 'built') standSheets = [Lamp.ring(() => rIn, () => p.diameter / 2 + 10, 0, 4, 180)];
+    if (stand === 'separate')
+      standSheets = [Lamp.ring(() => 10, () => p.diameter / 2 + 8, 0, 4, 180), Lamp.ring(() => rIn - 3.3, () => rIn - 0.3, 3.9, 12, 180)];
+  }
+  const [lo3, hi3] = Lamp.bounds([sheet, ...(stand === 'built' ? standSheets : [])]);
+  return {sheet, mount, stand, standSheets, size: [hi3[0] - lo3[0], hi3[1] - lo3[1], hi3[2] - lo3[2]], triangles: 4 * nu * nv};
+}
+
+// A ball with the map wrapped round it, open at the bottom over a light. Rows run from the opening's edge up to the
+// top, which closes to a hole too small to print.
+function buildGlobe(res, lo, hi, frame) {
+  const R = p.diameter / 2, rIn = R - hi, open = Math.min(p.opening / 2, rIn * 0.8);
+  const lat0 = -Math.acos(open / rIn), lat1 = Math.acos(0.3 / rIn);
+  const nu = Math.max(48, Math.round(2 * Math.PI * R / res)), nv = Math.max(8, Math.round(R * (lat1 - lat0) / res) + 1);
+  if (nu * nv > 2.5e6) return {problem: 'That is too fine to make: raise Detail mm, or make it smaller.'};
+  // The whole map, pole to pole, at the grid's spacing.
+  const mapRows = Math.max(2, Math.round(nv * Math.PI / (lat1 - lat0))), light = brightness(nu, mapRows, [0, 0], true);
+  const latOf = j => lat0 + (lat1 - lat0) * j / (nv - 1);
+  const t = (i, j) => {
+    if (R * (latOf(j) - lat0) < frame) return hi;
+    const row = Math.min(mapRows - 1, Math.max(0, Math.round((Math.PI / 2 - latOf(j)) / Math.PI * (mapRows - 1))));
+    return hi - light[row * nu + i] * (hi - lo);
+  };
+  // The opening's edge is flat on the plate.
+  const floor = rIn * Math.sin(lat0);
+  const sheet = Lamp.sheet(nu, nv, true, (i, j, front) => {
+    const f = 2 * Math.PI * i / nu, lat = latOf(j), r = rIn + (front ? t(i, j) : 0);
+    const z = j === 0 ? floor : Math.max(floor, r * Math.sin(lat));
+    return [r * Math.cos(lat) * Math.cos(f), r * Math.cos(lat) * Math.sin(f), z - floor];
+  });
+  // Built in: a flat ring round the opening so it can't roll. Separate: a base with a collar that fits up into the
+  // opening, with room inside for a small light.
+  const stand = p.stand, standSheets = stand === 'built' ? [Lamp.ring(() => open, () => open + 14, 0, 2.5, 180)] :
+    stand === 'separate' ? [Lamp.ring(() => Math.max(6, open - 10), () => open + 16, 0, 4, 180), Lamp.ring(() => open - 3.3, () => open - 0.3, 3.9, 12, 180)] : [];
+  return {sheet, mount: {sheets: []}, stand, standSheets, size: [2 * R, 2 * R, R + rIn * Math.sin(lat1) - floor], triangles: 4 * nu * nv};
+}
+
+// A folding fan: blades that turn on a pin at the pivot, each a slice of the picture on a stick. Every blade is as
+// thick as the thickest point, so stacked on the pin they sit one above the next and fold flat. Each blade reaches a
+// little under the next one, plain and thin there, so no gap shows when it is open.
+const FAN = {pin: 2, hole: 2.35, hub: 5, stick: 10, head: 1.2, cap: 1.6, tuck: 2.5};
+function fanTop(style, R, w, u, U) {
+  if (style === 'scallop') return R + 0.3 * R * w * Math.sin(Math.PI * u);
+  if (style === 'pointed') return R + 0.45 * R * w * (1 - Math.abs(2 * u - 1));
+  if (style === 'shell') return R * (0.82 + 0.18 * Math.sin(Math.PI * U)) + 0.15 * R * w * Math.sin(Math.PI * u);
+  return R;
+}
+const mapSheets = (sheets, f) => sheets.map(s => {
+  const pos = new Float32Array(s.pos.length);
+  for (let k = 0; k < pos.length; k += 3) pos.set(f(s.pos[k], s.pos[k + 1], s.pos[k + 2]), k);
+  return {...s, pos};
+});
+function buildFan(res, lo, hi, frame) {
+  const N = Math.round(p.blades), S = p.spread * Math.PI / 180, R = p.radius, r0 = R * p.sticks / 100, w = S / N;
+  const a0 = Math.PI / 2 - S / 2, tuck = FAN.tuck / ((r0 + R) / 2), rib = Math.min(frame, 1.2);
+  const top = a => { const k = Math.min(N - 1, Math.max(0, Math.floor((a - a0) / w)));
+                     return fanTop(p.fan, R, w, Math.min(1, Math.max(0, (a - a0 - k * w) / w)), (a - a0) / S); };
+  // The picture covers the box round the whole fan, in the fan's own plane.
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let k = 0; k <= 720; ++k) {
+    const a = a0 + S * k / 720;
+    for (const r of [r0, top(a)]) { const x = r * Math.cos(a), y = r * Math.sin(a);
+      x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  }
+  const cols = Math.max(2, Math.round((x1 - x0) / res)), rows = Math.max(2, Math.round((y1 - y0) / res));
+  const nv = Math.max(4, Math.round((top(Math.PI / 2) * 1.3 - r0) / res) + 1);
+  const nu = Math.max(4, Math.round(R * 1.2 * (w + tuck) / res) + 1);
+  if (N * nu * nv > 2.5e6 || cols * rows > 2.5e7) return {problem: 'That is too fine to make: raise Detail mm, or make the fan smaller.'};
+  const light = brightness(cols, rows, [0, 0]);
+  const shade = (x, y) => {
+    const c = Math.min(cols - 1, Math.max(0, Math.round((x - x0) / res))), r = Math.min(rows - 1, Math.max(0, Math.round((y1 - y) / res)));
+    return light[r * cols + c];
+  };
+  const blades = [];
+  for (let k = 0; k < N; ++k) {
+    const A = a0 + k * w, reach = w + (k < N - 1 ? tuck : 0);
+    const panel = Lamp.sheet(nu, nv, false, (i, j, front) => {
+      const a = A + reach * i / (nu - 1), T = top(Math.min(a, A + w)), r = r0 + (T - r0) * j / (nv - 1);
+      let t = 0;
+      if (front) {
+        const side = Math.min(Math.abs(a - A), Math.abs(a - A - w)) * r;
+        t = r - r0 < frame || T - r < frame || side < rib ? hi : a > A + w ? lo : hi - shade(r * Math.cos(a), r * Math.sin(a)) * (hi - lo);
+      }
+      return [r * Math.cos(a), r * Math.sin(a), t];
+    });
+    const mid = A + w / 2;
+    // The stick runs from round the pin hole into the blade's bottom frame.
+    const stick = [Lamp.ring(() => FAN.hole, () => FAN.hub, 0, hi, 64), Lamp.spoke(mid, FAN.hub - 1.5, r0 + frame, FAN.stick, 0, hi)];
+    blades.push({sheets: [panel, ...stick], mid});
+  }
+  // The pin stands on its head through every blade; the cap presses on its end. Hollow, so it prints cleanly.
+  const len = N * hi + 0.3 + FAN.cap;
+  const pin = [Lamp.ring(() => 0.8, () => FAN.hub + 0.5, 0, FAN.head, 64), Lamp.ring(() => 0.8, () => FAN.pin, FAN.head - 0.1, FAN.head + len, 64)];
+  const cap = [Lamp.ring(() => FAN.pin, () => FAN.hub + 0.5, 0, FAN.cap, 64)];
+  // Shown standing open, blade 1 at the back, with the pin through them.
+  const stand = (dz) => (x, y, z) => [x, -(z + dz), y + FAN.hub + 1];
+  // Only the panels glow in the preview; sticks, pin and cap are solid.
+  const shown = blades.flatMap((b, k) => mapSheets(b.sheets.slice(0, 1), stand(k * hi)));
+  const pinShown = [...blades.flatMap((b, k) => mapSheets(b.sheets.slice(1), stand(k * hi))),
+                    ...mapSheets(pin, stand(-FAN.head)), ...mapSheets(cap, stand(N * hi + 0.3))];
+  // Printed flat, each blade turned to point up the plate so they pack side by side.
+  const flat = blades.map(b => { const c = Math.cos(Math.PI / 2 - b.mid), s = Math.sin(Math.PI / 2 - b.mid);
+    return mapSheets(b.sheets, (x, y, z) => [x * c - y * s, x * s + y * c, z]); });
+  const [lo3, hi3] = Lamp.bounds(shown), longest = Math.max(...flat.map(f => { const [a, b] = Lamp.bounds(f); return Math.max(b[0] - a[0], b[1] - a[1]); }));
+  return {fan: true, sheet: null, shown, pinShown, flat, pin, cap, mount: {sheets: []}, stand: 'none', standSheets: [],
+          size: [hi3[0] - lo3[0], hi3[1] - lo3[1], hi3[2] - lo3[2]], longest, triangles: 4 * N * nu * nv};
+}
+
+// Hand fan outlines, each a test of whether a point is inside, about 1 across its round part, centred on 0.
+const disc = (x, y, cx, cy, r) => (x - cx) ** 2 + (y - cy) ** 2 < r * r;
+const HAND = {
+  round:  {name: 'Round', inside: (x, y) => disc(x, y, 0, 0, 1)},
+  cloud:  {name: 'Cloud', inside: (x, y) => disc(x, y, 0, 0, 0.8) || [...Array(9)].some((_, k) => { const a = 2 * Math.PI * k / 9 + Math.PI / 2; return disc(x, y, 0.72 * Math.cos(a), 0.72 * Math.sin(a), 0.3); })},
+  flower: {name: 'Flower', inside: (x, y) => disc(x, y, 0, 0, 0.62) || [...Array(6)].some((_, k) => { const a = 2 * Math.PI * k / 6 + Math.PI / 2; return disc(x, y, 0.6 * Math.cos(a), 0.6 * Math.sin(a), 0.4); })},
+  heart:  {name: 'Heart', inside: (x, y) => { const u = x * 1.25, v = y * 1.25 - 0.15; return (u * u + v * v - 1) ** 3 - u * u * v ** 3 < 0; }},
+  star:   {name: 'Star', inside: (x, y) => Math.hypot(x, y) < 0.58 + 0.42 * Math.pow(0.5 + 0.5 * Math.cos(5 * (Math.atan2(y, x) - Math.PI / 2)), 2)},
+  cat:    {name: 'Cat', inside: (x, y) => disc(x, y, 0, -0.08, 0.86) || [-1, 1].some(sd => { const u = sd * x; return y > 0.35 && y < 1.08 && u > 0.18 + (y - 0.35) * 0.55 && u < 0.86 - (y - 0.35) * 0.35; })},
+  bear:   {name: 'Bear', inside: (x, y) => disc(x, y, 0, -0.08, 0.86) || disc(x, y, 0.62, 0.62, 0.3) || disc(x, y, -0.62, 0.62, 0.3)},
+  bunny:  {name: 'Bunny', inside: (x, y) => disc(x, y, 0, -0.15, 0.8) || [-1, 1].some(sd => ((sd * x - 0.3) / 0.2) ** 2 + ((y - 0.75) / 0.48) ** 2 < 1)},
+};
+for (const [key, h] of Object.entries(HAND)) {
+  const b = document.createElement('button'); b.dataset.hand = key; b.textContent = h.name;
+  b.onclick = () => { p.hand = key; update(); };
+  $('handShapes').appendChild(b);
+}
+// How far the outline is from the middle at angle a, in units of the fan's half-width: the furthest point of the
+// shape along that ray, so ears and petals belong to it.
+function handEdge(inside) {
+  const n = 720, table = new Float32Array(n);
+  for (let k = 0; k < n; ++k) {
+    const a = 2 * Math.PI * k / n, c = Math.cos(a), s = Math.sin(a);
+    let far = 0.05;
+    for (let r = 0.02; r < 1.6; r += 0.004) if (inside(r * c, r * s)) far = r;
+    table[k] = far;
+  }
+  return a => { const f = ((a / (2 * Math.PI)) % 1 + 1) % 1 * n, k = Math.floor(f) % n, u = f - Math.floor(f);
+                return table[k] * (1 - u) + table[(k + 1) % n] * u; };
+}
+// A hand fan: the outline filled with the picture, framed round its edge, on a flat handle that runs up behind the
+// bottom of the frame. Prints lying flat, picture side up; shown standing up.
+function buildHand(res, lo, hi, frame) {
+  const S = p.fanSize / 2, edge = handEdge(HAND[p.hand].inside);
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+  for (let k = 0; k < 720; ++k) { const a = 2 * Math.PI * k / 720, r = S * edge(a);
+    x0 = Math.min(x0, r * Math.cos(a)); x1 = Math.max(x1, r * Math.cos(a)); y0 = Math.min(y0, r * Math.sin(a)); y1 = Math.max(y1, r * Math.sin(a)); }
+  const n = 2 * Math.round(Math.max(x1 - x0, y1 - y0) / 2 / res) + 1;
+  const cols = Math.max(2, Math.round((x1 - x0) / res)), rows = Math.max(2, Math.round((y1 - y0) / res));
+  if (n * n > 2.5e6) return {problem: 'That is too fine to make: raise Detail mm, or make the fan smaller.'};
+  const light = brightness(cols, rows, [0, 0]);
+  const shade = (x, y) => light[Math.min(rows - 1, Math.max(0, Math.round((y1 - y) / res))) * cols + Math.min(cols - 1, Math.max(0, Math.round((x - x0) / res)))];
+  // The grid runs out from the middle in rings the shape of the outline, so its side is the outline.
+  const face = Lamp.sheet(n, n, false, (i, j, front) => {
+    const u = 2 * i / (n - 1) - 1, v = 2 * j / (n - 1) - 1, q = Math.max(Math.abs(u), Math.abs(v));
+    const a = Math.atan2(v, u), R = S * edge(a), r = q * R, x = r * Math.cos(a), y = r * Math.sin(a);
+    return [x, y, !front ? 0 : R - r < frame ? hi : hi - shade(x, y) * (hi - lo)];
+  });
+  // The handle: a flat bar, rounded at its end, from well up inside the fan down past its bottom edge.
+  const bottom = S * edge(-Math.PI / 2), w = 14, th = Math.max(hi + 1, 3.5), up = Math.min(bottom * 0.45, 30), sheets = [face];
+  if (p.handle > 0) {
+    sheets.push(Lamp.box(-w / 2, w / 2, -bottom - p.handle, -bottom + up, 0, th));
+    sheets.push(...Lamp.moved([Lamp.ring(() => 0.6, () => w / 2, 0, th, 48)], 0, -bottom - p.handle));
+  }
+  const stand = (x, y, z) => [x, -z, y + bottom + p.handle + w / 2];
+  const shown = mapSheets([face], stand), handleShown = mapSheets(sheets.slice(1), stand);
+  const [lo3, hi3] = Lamp.bounds(sheets);
+  return {hand: true, sheet: null, sheets, shown, handleShown, mount: {sheets: []}, stand: 'none', standSheets: [],
+          size: [hi3[0] - lo3[0], hi3[1] - lo3[1], hi3[2] - lo3[2]], triangles: 4 * n * n};
+}
+
+const viewer = new Lamp.Viewer($('canvas'));
+let timer = null, built = null;
+function update() {
+  for (const b of document.querySelectorAll('[data-shape]')) b.classList.toggle('on', b.dataset.shape === p.shape);
+  for (const b of document.querySelectorAll('[data-at]')) b.classList.toggle('on', b.dataset.at === p.at);
+  const isRound = p.shape === 'cylinder' || p.shape === 'lamp' || p.shape === 'globe', globe = p.shape === 'globe';
+  const fan = p.shape === 'fan';
+  const hand = p.shape === 'hand';
+  $('fanBox').classList.toggle('hidden', !fan);
+  $('handBox').classList.toggle('hidden', !hand);
+  for (const b of document.querySelectorAll('[data-hand]')) b.classList.toggle('on', b.dataset.hand === p.hand);
+  for (const b of document.querySelectorAll('[data-fan]')) b.classList.toggle('on', b.dataset.fan === p.fan);
+  $('rowWidth').classList.toggle('hidden', isRound || fan || hand);
+  $('rowOpening').classList.toggle('hidden', !globe);
+  $('globeHint').classList.toggle('hidden', !globe);
+  $('keepRow').classList.toggle('hidden', globe || fan || hand);
+  document.querySelector('[data-key="height"]').classList.toggle('hidden', globe || fan || hand);
+  $('rowArc').classList.toggle('hidden', p.shape !== 'curved');
+  $('rowDiameter').classList.toggle('hidden', !isRound);
+  $('rowRepeat').classList.toggle('hidden', !isRound || globe);
+  $('lampBox').classList.toggle('hidden', p.shape !== 'lamp');
+  $('standBox').classList.toggle('hidden', p.shape === 'lamp' || fan || hand);
+  $('placeBox').classList.toggle('hidden', globe);
+  for (const b of document.querySelectorAll('[data-fit]')) b.classList.toggle('on', b.dataset.fit === p.fit);
+  for (const b of document.querySelectorAll('[data-pad]')) b.classList.toggle('on', b.dataset.pad === p.pad);
+  for (const b of document.querySelectorAll('[data-stand]')) b.classList.toggle('on', b.dataset.stand === p.stand);
+  $('mirror').classList.toggle('on', p.mirror);
+  $('padRow').classList.toggle('hidden', p.fit === 'fill' && p.zoom >= 1);
+  $('standHint').textContent = {
+    none: '',
+    built: {flat: 'It prints standing up on a foot. Add a brim if your plate is slippery.', curved: 'A wide foot under the curve.',
+            cylinder: 'A flat ring round its foot.', globe: 'A flat ring round the opening, so it cannot roll.'}[p.shape],
+    separate: {flat: 'A base with a slot; the picture still prints lying flat and slides in.', curved: 'A curved base with a slot it stands in.',
+               cylinder: 'A base with a lip it sits over, and room inside for a tea light.', globe: 'A base with a collar that fits up into the opening, with room for a small light.'}[p.shape],
+  }[p.stand] || '';
+  $('fixtureHint').textContent = Lamp.FIXTURES[p.fixture].hint;
+  clearTimeout(timer);
+  timer = setTimeout(render, 120);
+}
+function render() {
+  built = build();
+  const problems = [];
+  if (built.problem) problems.push(built.problem);
+  if (built.mount && built.mount.problem) problems.push(built.mount.problem);
+  if (built.fan) { if (built.longest > Math.max(...printer.bed)) problems.push('A blade is longer than your plate.'); }
+  else if (built.size && !built.hand && Math.max(built.size[0], built.size[1]) > Math.max(...printer.bed)) problems.push('It is bigger than your plate.');
+  if (built.hand && Math.max(built.size[0], built.size[1]) > Math.max(...printer.bed)) problems.push('It is bigger than your plate: make the fan or handle smaller.');
+  if (built.size && !built.fan && !built.hand && built.size[2] > printer.height) problems.push('It is taller than your printer reaches.');
+  if (!image) problems.push('Choose a picture to make it from.');
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('add').disabled = !image || !!built.problem || !!(built.mount && built.mount.problem);
+  if (built.problem) return;
+  drawPlacement();
+  if (built.hand) {
+    viewer.show([{sheets: built.shown, colour: [0.9, 0.9, 0.88]}, {sheets: built.handleShown, colour: [0.55, 0.56, 0.62], glow: false}], $('glow').checked, false);
+    $('facts').textContent = `${built.size[0].toFixed(0)} × ${built.size[1].toFixed(0)} mm, ${(built.triangles / 1e6).toFixed(1)} million triangles. ` +
+      'Prints lying flat in one piece, picture side up. Print in white with 100% infill, so only the thickness changes the light.';
+    return;
+  }
+  if (built.fan) {
+    viewer.show([{sheets: built.shown, colour: [0.9, 0.9, 0.88]}, {sheets: built.pinShown, colour: [0.55, 0.56, 0.62], glow: false}], $('glow').checked, false);
+    const n = Math.round(p.blades);
+    $('facts').textContent = `Open: ${built.size[0].toFixed(0)} × ${built.size[2].toFixed(0)} mm, ${n} blades up to ${built.longest.toFixed(0)} mm long, ` +
+      `${(built.triangles / 1e6).toFixed(1)} million triangles. Each blade prints lying flat, picture side up. Push the pin up through the blades ` +
+      `in order, blade 1 first, and press the cap on; it holds by friction. Print in white with 100% infill.`;
+    return;
+  }
+  // A separate stand shows beside the lithophane, as both print.
+  let standShown = built.standSheets || [];
+  if (built.stand === 'separate' && standShown.length) {
+    const [a0, a1] = Lamp.bounds([built.sheet]), [b0, b1] = Lamp.bounds(standShown);
+    standShown = Lamp.moved(standShown, a1[0] - b0[0] + 15, (a0[1] + a1[1] - b0[1] - b1[1]) / 2);
+  }
+  viewer.show([{sheets: [built.sheet], colour: [0.9, 0.9, 0.88]}, {sheets: built.mount.sheets || [], colour: [0.55, 0.56, 0.62], glow: false},
+               {sheets: standShown, colour: [0.55, 0.56, 0.62], glow: false}], $('glow').checked, p.shape === 'lamp' && p.at === 'top');
+  const s = built.size, how = p.shape === 'flat' && built.stand === 'built' ? 'Prints standing on its foot.' : p.shape === 'flat' ? 'Prints lying flat, picture side up.' :
+              p.shape === 'globe' ? 'Prints standing on its opening. The top closes in steeply: print it slowly with good cooling.' : 'Prints standing up.';
+  $('facts').textContent = `${s.map(v => v.toFixed(0)).join(' × ')} mm, ${(built.triangles / 1e6).toFixed(1)} million triangles. ${how} ` +
+    'Print it in white with 100% infill, so only the thickness changes the light.' + (p.shape === 'lamp' ? ' Use LED bulbs only.' : '');
+}
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'image') {
+    if (message.error) { $('pictureName').textContent = message.error; return; }
+    const img = new Image();
+    img.onload = () => { image = img; $('thumb').src = message.data; $('pictureName').textContent = message.name; fitHeight(); update(); };
+    img.src = message.data;
+  }
+};
+$('pick').onclick = () => post({cmd: 'pick_image'});
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || $('add').disabled) return;
+  if (built.hand) { post(Lamp.addMessage('Hand fan', [{name: 'Hand fan', sheets: built.sheets}])); return; }
+  if (built.fan) {
+    const blades = built.flat.map((sheets, k) => ({name: `Fan blade ${k + 1}`, parts: [{name: 'Blade', sheets}]}));
+    post(Lamp.addMessage(blades[0].name, blades[0].parts, [...blades.slice(1),
+      {name: 'Fan pin and cap', parts: [{name: 'Pin', sheets: built.pin}, {name: 'Cap', sheets: Lamp.moved(built.cap, 16)}]}]));
+    return;
+  }
+  const separate = built.stand === 'separate';
+  post(Lamp.addMessage(p.shape === 'lamp' ? 'Lithophane lamp' : 'Lithophane',
+                       [{name: 'Lithophane', sheets: [built.sheet]}, {name: 'Mount', sheets: built.mount.sheets || []},
+                        {name: 'Stand', sheets: separate ? [] : built.standSheets || []}],
+                       separate ? [{name: 'Lithophane stand', parts: [{name: 'Stand', sheets: built.standSheets}]}] : []));
+};
+sync();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

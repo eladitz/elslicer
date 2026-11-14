@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Box Maker</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 330px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .models { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .models button { text-align: left; padding: 8px 10px; font-size: 13px; }
+  .models button small { display: block; color: var(--muted); font-size: 11px; margin-top: 2px; }
+  .models button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; }
+  .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); margin-top: 8px; }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Box maker</h1>
+  <p class="sub">Trays and boxes that print upright with no supports. Lids print as a second piece beside the box.</p>
+
+  <h3>Model</h3>
+  <div class="models" id="models"></div>
+
+  <h3>Size, outside</h3>
+  <div id="sizeSliders"></div>
+
+  <div id="compartments">
+    <h3>Compartments</h3>
+    <div id="divSliders"></div>
+    <div class="seg">
+      <button data-split="x" title="Click a compartment to put a divider across it, from front to back">Add divider |</button>
+      <button data-split="y" title="Click a compartment to put a divider across it, from side to side">Add divider —</button>
+    </div>
+    <canvas id="plan" style="width:100%;height:170px;flex:none;cursor:crosshair"></canvas>
+    <p class="muted" style="font-size:12px;margin:4px 0 0">Click a compartment to split it where you click. Drag a divider to move it; Alt-click or right-click one to take it out. The sliders above start again from an even grid.</p>
+  </div>
+
+  <h3>Options</h3>
+  <label class="check" id="stackRow"><input type="checkbox" id="stack"> Stackable: a foot that sits in the tray below</label>
+  <label class="check" id="ribsRow"><input type="checkbox" id="ribs"> Ribbed outside</label>
+  <div class="seg" id="lidRow">
+    <button data-lid="none">No lid</button>
+    <button data-lid="liftoff">Lift-off lid</button>
+  </div>
+  <div id="fitSliders"></div>
+
+  <p class="muted" style="font-size:12px;margin-top:12px">Want one that prints flat and folds up? Use Folding Box, next to Box Maker in the menus.</p>
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// x is the length, y the width, z up, as printed: the bed is z = 0.
+const MODELS = {
+  partition: {name: 'Partition tray', hint: 'Dividers, stacks', length: 120, width: 90, height: 40, cols: 3, rows: 2, stack: true, lid: 'none', ribs: false},
+  box:       {name: 'Box with lid', hint: 'Ribbed, lift-off lid', length: 120, width: 80, height: 60, cols: 1, rows: 1, stack: false, lid: 'liftoff', ribs: true},
+  carry:     {name: 'Carrying tray', hint: 'Handle, dividers', length: 230, width: 150, height: 60, cols: 3, rows: 1, stack: false, lid: 'none', ribs: false},
+  wall:      {name: 'Wall tray', hint: 'Screws to a wall', length: 80, width: 60, height: 80, cols: 1, rows: 1, stack: false, lid: 'none', ribs: false},
+  slide:     {name: 'Slide box', hint: 'Lid slides in grooves', length: 160, width: 70, height: 35, cols: 4, rows: 1, stack: false, lid: 'slide', ribs: false, wall: 2.4},
+  desk:      {name: 'Desk tray', hint: 'Low, stacks', length: 160, width: 110, height: 25, cols: 1, rows: 1, stack: true, lid: 'none', ribs: false},
+};
+const DEFAULTS = {radius: 6, wall: 1.8, floor: 1.2, divHeight: 100, divThick: 1.2, fit: 0.3};
+const p = {model: 'partition', ...DEFAULTS, ...MODELS.partition};
+
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+const sliders = {};
+slider($('sizeSliders'), 'length', 'Length mm', 30, 300, 1);
+slider($('sizeSliders'), 'width', 'Width mm', 30, 300, 1);
+slider($('sizeSliders'), 'height', 'Height mm', 12, 250, 1);
+slider($('sizeSliders'), 'radius', 'Corner radius mm', 1, 30, 0.5);
+slider($('sizeSliders'), 'wall', 'Wall mm', 0.8, 4, 0.1);
+slider($('sizeSliders'), 'floor', 'Floor mm', 0.6, 4, 0.1);
+slider($('divSliders'), 'cols', 'Across length', 1, 12, 1);
+slider($('divSliders'), 'rows', 'Across width', 1, 8, 1);
+slider($('divSliders'), 'divHeight', 'Divider height %', 20, 100, 1);
+slider($('divSliders'), 'divThick', 'Divider mm', 0.8, 3, 0.1);
+const fitRow = slider($('fitSliders'), 'fit', 'Lid fit mm', 0.1, 0.8, 0.05);
+
+for (const [key, m] of Object.entries(MODELS)) {
+  const b = document.createElement('button');
+  b.dataset.model = key;
+  b.innerHTML = `${m.name}<small>${m.hint}</small>`;
+  b.onclick = () => { Object.assign(p, DEFAULTS, m, {model: key}); syncAll(); update(); };
+  $('models').appendChild(b);
+}
+for (const b of document.querySelectorAll('[data-lid]')) b.onclick = () => { p.lid = b.dataset.lid; update(); };
+$('stack').onchange = () => { p.stack = $('stack').checked; update(); };
+$('ribs').onchange = () => { p.ribs = $('ribs').checked; update(); };
+function syncAll() { for (const [k, set] of Object.entries(sliders)) set(p[k]); }
+
+// ---------------------------------------------------------------------------------------------------------
+// Geometry. A rounded rectangle is its straight core plus an offset d along each point's outward normal, so the
+// outside (d = r) and the inside (d = r - wall) of a wall share their points and normals.
+const K = 16, RIB_PITCH = 6, RIB_DEPTH = 1.2;
+function outline(a, b, r, step) {
+  const pts = [], cs = [[a - r, b - r], [-(a - r), b - r], [-(a - r), -(b - r)], [a - r, -(b - r)]];
+  for (let q = 0; q < 4; ++q) {
+    const [cx, cy] = cs[q];
+    for (let k = 0; k <= K; ++k) {
+      const ang = (q + k / K) * Math.PI / 2;
+      pts.push({c: [cx, cy], n: [Math.cos(ang), Math.sin(ang)], side: -1});
+    }
+    // The straight side to the next corner, with its own points for ribs and grooves.
+    const [nx, ny] = cs[(q + 1) % 4], ang = (q + 1) * Math.PI / 2, len = Math.hypot(nx - cx, ny - cy);
+    const m = Math.max(1, Math.ceil(len / step));
+    for (let k = 1; k < m; ++k)
+      pts.push({c: [cx + (nx - cx) * k / m, cy + (ny - cy) * k / m], n: [Math.cos(ang), Math.sin(ang)], side: (q + 1) % 4, s: len * k / m, len});
+  }
+  return pts;
+}
+const at = (pt, d, z) => [pt.c[0] + d * pt.n[0], pt.c[1] + d * pt.n[1], z];
+
+// A wall along the points: f(pt, j) gives [z, inside offset, outside offset] for row j.
+const wall = (pts, rows, f, wrap = true) =>
+  Lamp.sheet(pts.length, rows, wrap, (i, j, front) => { const [z, din, dout] = f(pts[i], j); return at(pts[i], front ? dout : din, z); });
+
+// A solid rounded rectangle from z0 at offset d0 to z1 at offset d1: a frustum when they differ. Its grid runs
+// along the top half of the outline, left to right, and across to the mirrored bottom half.
+function slab(a, b, r, z0, d0, z1, d1) {
+  const top = [];
+  for (let k = K; k >= 0; --k) { const ang = Math.PI / 2 + k / K * Math.PI / 2; top.push({c: [-(a - r), b - r], n: [Math.cos(ang), Math.sin(ang)]}); }
+  for (let k = K; k >= 0; --k) { const ang = k / K * Math.PI / 2; top.push({c: [a - r, b - r], n: [Math.cos(ang), Math.sin(ang)]}); }
+  return Lamp.sheet(top.length, 2, false, (i, j, front) => {
+    const q = at(top[i], front ? d1 : d0, front ? z1 : z0);
+    return j ? q : [q[0], -q[1], q[2]];
+  });
+}
+
+// Corrugated ribs on the straight sides, clear of the corners.
+function rib(pt) {
+  if (!p.ribs || pt.side < 0) return 0;
+  const from = pt.s - pt.len / 2, room = pt.len / 2 - RIB_PITCH;
+  if (Math.abs(from) > room) return 0;
+  const v = 2 * Math.abs(((from / RIB_PITCH) % 1 + 1) % 1 - 0.5);
+  return RIB_DEPTH * Math.min(1, Math.max(0, (0.8 - v) / 0.3));
+}
+
+// Where a ray from o along angle t leaves a convex polygon.
+function exitPoint(poly, o, t) {
+  const d = [Math.cos(t), Math.sin(t)];
+  let best = Infinity;
+  for (let k = 0; k < poly.length; ++k) {
+    const P = poly[k], Q = poly[(k + 1) % poly.length], e = [Q[0] - P[0], Q[1] - P[1]];
+    const den = d[0] * e[1] - d[1] * e[0];
+    if (Math.abs(den) < 1e-12) continue;
+    const w = [P[0] - o[0], P[1] - o[1]], s = (w[0] * e[1] - w[1] * e[0]) / den, u = (w[0] * d[1] - w[1] * d[0]) / den;
+    if (s > 0 && u >= -1e-9 && u <= 1 + 1e-9) best = Math.min(best, s);
+  }
+  return [o[0] + best * d[0], o[1] + best * d[1]];
+}
+function hull(points) {
+  const s = [...points].sort((p, q) => p[0] - q[0] || p[1] - q[1]), cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const half = list => { const h = []; for (const q of list) { while (h.length >= 2 && cross(h[h.length - 2], h[h.length - 1], q) <= 0) h.pop(); h.push(q); } h.pop(); return h; };
+  return [...half(s), ...half(s.reverse())];
+}
+// A flat plate between a convex hole and a convex outline around it, both in the plane (u, v), y0 to y1 thick.
+// place(u, v, y) gives the 3D point. Rays from the hole's centre join them, with one through every corner.
+function holedPlate(hole, outer, centre, y0, y1, place) {
+  const angles = new Set();
+  for (let k = 0; k < 180; ++k) angles.add(2 * Math.PI * k / 180);
+  for (const q of [...hole, ...outer]) angles.add((Math.atan2(q[1] - centre[1], q[0] - centre[0]) + 2 * Math.PI) % (2 * Math.PI));
+  const list = [...angles].sort((a, b) => a - b).filter((t, k, all) => k === 0 || t - all[k - 1] > 1e-6);
+  const ins = list.map(t => exitPoint(hole, centre, t)), outs = list.map(t => exitPoint(outer, centre, t));
+  return Lamp.sheet(list.length, 2, true, (i, j, front) => { const q = j ? outs[i] : ins[i]; return place(q[0], q[1], front ? y1 : y0); });
+}
+const arc = (cx, cy, r, a0, a1, n = 12) => Array.from({length: n + 1}, (_, k) => { const t = a0 + (a1 - a0) * k / n; return [cx + r * Math.cos(t), cy + r * Math.sin(t)]; });
+
+// ---------------------------------------------------------------------------------------------------------
+// The compartments, as a tree: each one is whole, or split by one divider into two. Positions are fractions of the
+// inside, so the plan keeps its shape when the box is resized. axis 'x' is a divider at a fixed x, front to back.
+let plan = null, planFrom = '';
+function evenPlan() {
+  const cols = Math.round(p.cols), rows = p.model === 'carry' ? 1 : Math.round(p.rows);
+  const column = () => { let n = {}; const root = n; for (let k = 1; k < rows; ++k) { n.split = {axis: 'y', at: k / rows, a: {}, b: {}}; n = n.split.b; } return root; };
+  // Splits hold fractions of the whole inside, so a chain of them makes even columns, each split into rows.
+  const root = {};
+  let cur = root;
+  for (let k = 1; k < cols; ++k) { cur.split = {axis: 'x', at: k / cols, a: column(), b: {}}; cur = cur.split.b; }
+  Object.assign(cur, column());
+  return root;
+}
+// Walk the tree: every compartment's rectangle, in fractions of the inside.
+function walk(visit) {
+  const go = (n, x0, x1, y0, y1) => {
+    if (!n.split) { visit.cell && visit.cell(n, x0, x1, y0, y1); return; }
+    const d = n.split;
+    visit.divider && visit.divider(n, x0, x1, y0, y1);
+    if (d.axis === 'x') { go(d.a, x0, d.at, y0, y1); go(d.b, d.at, x1, y0, y1); }
+    else { go(d.a, x0, x1, y0, d.at); go(d.b, x0, x1, d.at, y1); }
+  };
+  go(plan, 0, 1, 0, 1);
+}
+function dividers() {
+  const out = [];
+  walk({divider: (n, x0, x1, y0, y1) => out.push(n.split.axis === 'x' ? {node: n, axis: 'x', at: n.split.at, from: y0, to: y1, lo: x0, hi: x1}
+                                                                       : {node: n, axis: 'y', at: n.split.at, from: x0, to: x1, lo: y0, hi: y1})});
+  return out;
+}
+function compartments() { const out = []; walk({cell: (n, x0, x1, y0, y1) => out.push({n, x0, x1, y0, y1})}); return out; }
+
+// The plan seen from above, drawn to scale, with each compartment's size inside it.
+let splitAxis = 'x', planView = null, dragging = null;
+function drawPlan() {
+  const c = $('plan'), dpr = window.devicePixelRatio || 1, W = c.clientWidth, H = c.clientHeight;
+  if (!W) return;
+  c.width = W * dpr; c.height = H * dpr;
+  const g = c.getContext('2d'); g.scale(dpr, dpr);
+  const iw = p.length - 2 * p.wall, ih = p.width - 2 * p.wall, s = Math.min((W - 16) / iw, (H - 16) / ih);
+  const ox = (W - iw * s) / 2, oy = (H - ih * s) / 2, dt = p.divThick;
+  // Fractions to pixels, the same mapping the model uses; y up in the box is up on the screen.
+  const px = f => ox + (-dt / 2 + f * (iw + dt)) * s, py = f => oy + ih * s - (-dt / 2 + f * (ih + dt)) * s;
+  planView = {px, py, fx: X => ((X - ox) / s + dt / 2) / (iw + dt), fy: Y => ((oy + ih * s - Y) / s + dt / 2) / (ih + dt)};
+  g.clearRect(0, 0, W, H);
+  g.fillStyle = '#16171a'; g.strokeStyle = '#6a6c74'; g.lineWidth = 1.5;
+  g.beginPath(); g.roundRect(ox, oy, iw * s, ih * s, Math.max(0, p.radius - p.wall) * s); g.fill(); g.stroke();
+  g.fillStyle = '#a0a2a9'; g.font = '11px -apple-system, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+  for (const c2 of compartments()) {
+    const w = (c2.x1 - c2.x0) * (iw + dt) - dt, h = (c2.y1 - c2.y0) * (ih + dt) - dt;
+    const cx = (px(c2.x0) + px(c2.x1)) / 2, cy = (py(c2.y0) + py(c2.y1)) / 2;
+    if ((px(c2.x1) - px(c2.x0)) > 44 && (py(c2.y0) - py(c2.y1)) > 16) g.fillText(`${f1(w)}×${f1(h)}`, cx, cy);
+  }
+  for (const d of dividers()) {
+    g.strokeStyle = d === dragging?.d || d.node === dragging?.d?.node ? '#8b8bf0' : '#5b5bd6'; g.lineWidth = Math.max(2, dt * s);
+    g.beginPath();
+    if (d.axis === 'x') { g.moveTo(px(d.at), py(d.from)); g.lineTo(px(d.at), py(d.to)); }
+    else { g.moveTo(px(d.from), py(d.at)); g.lineTo(px(d.to), py(d.at)); }
+    g.stroke();
+  }
+  if (p.model === 'carry') { g.setLineDash([4, 3]); g.strokeStyle = '#e0a83c'; g.beginPath(); g.moveTo(ox, oy + ih * s / 2); g.lineTo(ox + iw * s, oy + ih * s / 2); g.stroke(); g.setLineDash([]); }
+}
+function hitDivider(X, Y) {
+  const {px, py} = planView;
+  for (const d of dividers()) {
+    const near = d.axis === 'x' ? Math.abs(X - px(d.at)) < 6 && Y <= py(d.from) + 2 && Y >= py(d.to) - 2
+                                : Math.abs(Y - py(d.at)) < 6 && X >= px(d.from) - 2 && X <= px(d.to) + 2;
+    if (near) return d;
+  }
+  return null;
+}
+// Snap a split to a neat part of its compartment, a half, third or quarter, when the click is close to one.
+function snap(f, lo, hi) {
+  const u = (f - lo) / (hi - lo);
+  for (const q of [1 / 2, 1 / 3, 2 / 3, 1 / 4, 3 / 4]) if (Math.abs(u - q) < 0.035) return lo + q * (hi - lo);
+  return f;
+}
+const planXY = e => { const r = $('plan').getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; };
+$('plan').addEventListener('mousedown', e => {
+  if (!planView) return;
+  const [X, Y] = planXY(e), d = hitDivider(X, Y);
+  if (d && (e.altKey || e.button === 2)) { delete d.node.split; render(); return; }
+  if (d) { dragging = {d}; return; }
+  if (e.button !== 0) return;
+  const fx = planView.fx(X), fy = planView.fy(Y);
+  if (fx <= 0 || fx >= 1 || fy <= 0 || fy >= 1) return;
+  const cell = compartments().find(c => fx >= c.x0 && fx <= c.x1 && fy >= c.y0 && fy <= c.y1);
+  if (!cell) return;
+  const at = splitAxis === 'x' ? snap(fx, cell.x0, cell.x1) : snap(fy, cell.y0, cell.y1);
+  cell.n.split = {axis: splitAxis, at, a: {}, b: {}};
+  render();
+});
+$('plan').addEventListener('contextmenu', e => e.preventDefault());
+window.addEventListener('mousemove', e => {
+  if (!dragging || !planView) return;
+  const [X, Y] = planXY(e), d = dragging.d, sp = d.node.split;
+  // Kept clear of the compartment's other dividers, so nothing ends up inside out.
+  const room = d.axis === 'x' ? 8 / (p.length - 2 * p.wall) : 8 / (p.width - 2 * p.wall);
+  let lo = d.lo + room, hi = d.hi - room;
+  const inner = (n, side) => { let v = side ? -Infinity : Infinity;
+    const go = m => { if (!m.split) return; if (m.split.axis === d.axis) v = side ? Math.max(v, m.split.at) : Math.min(v, m.split.at); go(m.split.a); go(m.split.b); };
+    go(n); return v; };
+  lo = Math.max(lo, inner(sp.a, true) + room); hi = Math.min(hi, inner(sp.b, false) - room);
+  const f = d.axis === 'x' ? planView.fx(X) : planView.fy(Y);
+  if (lo < hi) sp.at = snap(Math.min(hi, Math.max(lo, f)), d.lo, d.hi);
+  render();
+});
+window.addEventListener('mouseup', () => { if (dragging) { dragging = null; drawPlan(); } });
+for (const b of document.querySelectorAll('[data-split]')) b.onclick = () => { splitAxis = b.dataset.split; update(); };
+window.addEventListener('resize', () => drawPlan());
+
+// ---------------------------------------------------------------------------------------------------------
+function build() {
+  const a = p.length / 2, b = p.width / 2, t = p.wall, H = p.height, problems = [];
+  const foot = 2.5, inset = t + p.fit, stack = p.stack && p.model !== 'wall' && p.model !== 'slide';
+  // The corners round about one centre, so everything set in from the outside needs the radius to reach: the
+  // inside, the stacking foot's inside, and the lid's lip.
+  const least = Math.max(t + 0.6, stack ? 2 * t + p.fit + 0.4 : 0, p.lid === 'liftoff' ? t + p.fit + 2 : 0);
+  const r = Math.min(Math.max(p.radius, least), Math.min(a, b) - 0.5);
+  const step = p.ribs ? RIB_PITCH / 10 : 8, pts = outline(a, b, r, step), sheets = [];
+  const floorTop = (stack ? foot : 0) + p.floor;
+  // Slide box: a groove near the top of every wall but the open end, which stops at the groove.
+  const slide = p.model === 'slide', gd = Math.min(1.2, t * 0.5), lt = 2.4, lip = 0.8;
+  const zg0 = H - lip - gd - lt, openEnd = pt => pt.n[0] > 1e-6 && pt.c[0] >= a - r - 1e-6;
+  if (slide && zg0 < floorTop + 6) problems.push('Too shallow for a sliding lid: make it taller.');
+
+  // Floor.
+  if (stack) {
+    sheets.push(slab(a, b, r, 0, r - inset - 0.2, floorTop, r - inset - 0.2));
+  } else sheets.push(slab(a, b, r, 0, r - 0.2, floorTop, r - 0.2));
+
+  // Walls. A stacking foot is inset by the wall and the fit, and widens back out at 45° above it.
+  const wallPts = p.model === 'wall' ? backless(pts, a, b, r) : pts;
+  if (slide) {
+    const zs = [0, zg0, zg0 + 0.05, zg0 + lt, zg0 + lt + gd, H];
+    sheets.push(wall(wallPts, zs.length, (pt, j) => {
+      if (openEnd(pt)) return [j === 0 ? 0 : zg0 - 0.05 * (zs.length - 1 - j), r - t, r];
+      const groove = j >= 2 && j <= 3 ? gd : 0;
+      return [zs[j], r - t + groove, r];
+    }));
+  } else if (stack) {
+    const zs = [0, foot, foot + inset, H], douts = [r - inset, r - inset, r, r];
+    sheets.push(wall(wallPts, 4, (pt, j) => { const dout = douts[j] + (j >= 2 ? rib(pt) : 0); return [zs[j], douts[j] - t, dout]; }));
+  } else {
+    sheets.push(wall(wallPts, 2, (pt, j) => [j ? H : 0, r - t, r + rib(pt)], p.model !== 'wall'));
+  }
+
+  // The inside: where the walls are, at a given x or y, so dividers reach them.
+  const ai = a - t, bi = b - t, ri = r - t;
+  const reach = (along, half, other, otherHalf) => {
+    const over = Math.abs(along) - (half - r);
+    return over <= 0 ? otherHalf : (other - r) + Math.sqrt(Math.max(0, ri * ri - over * over));
+  };
+  const top = slide ? Math.min(zg0 - 0.4, floorTop + (H - floorTop) * p.divHeight / 100) : floorTop + (H - floorTop) * p.divHeight / 100;
+  const dt = p.divThick;
+  // The dividers the plan asks for. Each runs across its compartment; at a wall it reaches into it, round a corner
+  // too, and at another divider it ends inside that one.
+  const toX = f => -ai - dt / 2 + f * (2 * ai + dt), toY = f => -bi - dt / 2 + f * (2 * bi + dt);
+  for (const d of dividers()) {
+    if (d.axis === 'x') {
+      const x = toX(d.at), wallY = Math.min(reach(x - dt / 2, a, b, bi), reach(x + dt / 2, a, b, bi)) + 0.3;
+      sheets.push(Lamp.box(x - dt / 2, x + dt / 2, d.from <= 0 ? -wallY : toY(d.from), d.to >= 1 ? wallY : toY(d.to), floorTop - 0.2, top));
+    } else {
+      const y = toY(d.at), wallX = Math.min(reach(y - dt / 2, b, a, ai), reach(y + dt / 2, b, a, ai)) + 0.3;
+      sheets.push(Lamp.box(d.from <= 0 ? -wallX : toX(d.from), d.to >= 1 ? wallX : toX(d.to), y - dt / 2, y + dt / 2, floorTop - 0.2, top));
+    }
+  }
+  const cells = compartments().map(c => [(c.x1 - c.x0) * (2 * ai + dt) - dt, (c.y1 - c.y0) * (2 * bi + dt) - dt]);
+  if (cells.some(([w, h]) => w < 8 || h < 8)) problems.push('A compartment is under 8 mm: move or take out a divider.');
+
+  // Carrying handle: the middle divider, rising into a grip with a hand hole. The hole's top is a short bridge
+  // between 45° slopes, so nothing over it needs support.
+  if (p.model === 'carry') {
+    const hl = Math.min(45, ai - 14), hr = 14, bar = 10, zc = H + 3 + hr, ht = Math.max(4, dt);
+    if (hl < 30) problems.push('Too short for a hand hole in the handle: make it longer.');
+    const hole = [...arc(hl - hr, zc, hr, -Math.PI / 2, 0, 8), [hl, zc], [hl - hr, zc + hr], [-(hl - hr), zc + hr], [-hl, zc], ...arc(-(hl - hr), zc, hr, Math.PI, 1.5 * Math.PI, 8)];
+    const grip = [];
+    for (const q of hole) for (let k = 0; k < 16; ++k) grip.push([q[0] + bar * Math.cos(k * Math.PI / 8), q[1] + bar * Math.sin(k * Math.PI / 8)]);
+    const x = reach(0, b, a, ai) + 0.3;
+    const outer = hull([...grip, [-x, floorTop - 0.2], [x, floorTop - 0.2], [-x, H], [x, H]]);
+    sheets.push(holedPlate(hull(hole), outer, [0, zc], -ht / 2, ht / 2, (u, v, y) => [u, y, v]));
+  }
+
+  // Wall tray: a back plate with teardrop screw holes, their points up so they print without support.
+  if (p.model === 'wall') {
+    const x0 = -(a - r) - 0.3, x1 = (a - r) + 0.3, zh = H * 0.72, rh = 2.3, two = a - r > 22;
+    const tear = cx => [...arc(cx, zh, rh, 0.75 * Math.PI, 2.25 * Math.PI, 18), [cx, zh + rh * Math.SQRT2]];
+    const tiles = two ? [[x0, 0], [0, x1]] : [[x0, x1]];
+    for (const [u0, u1] of tiles) {
+      const cx = (u0 + u1) / 2, rect = [[u0 - 0.01, 0], [u1 + 0.01, 0], [u1 + 0.01, H], [u0 - 0.01, H]];
+      sheets.push(holedPlate(tear(cx), rect, [cx, zh], b - t, b, (u, v, y) => [u, y, v]));
+    }
+  }
+
+  // Lids, made upside down: the top on the plate.
+  let lid = [];
+  if (p.lid === 'liftoff' && !slide) {
+    const lidT = Math.max(1.6, p.floor), dOut = r + (p.ribs ? RIB_DEPTH : 0), lipOut = r - t - p.fit, lipH = 5;
+    lid.push(slab(a, b, r, 0, dOut, lidT, dOut));
+    lid.push(wall(pts, 2, (pt, j) => [j ? lidT + lipH : lidT - 0.2, lipOut - 1.6, lipOut]));
+  }
+  if (slide) {
+    // It slides in the groove: as big as the groove's outline less the fit, and a ridge to push it by.
+    const d = r - t + gd - p.fit, thick = lt - 2 * p.fit, xr = (a - r) + d;
+    lid.push(slab(a, b, r, 0, d, thick, d));
+    lid.push(Lamp.box(xr - 9, xr - 6, -(b - r + d) * 0.5, (b - r + d) * 0.5, thick - 0.2, thick + 1.2));
+  }
+
+  const inside = {x: 2 * ai, y: 2 * bi, z: (slide ? zg0 : H) - floorTop, cells};
+  return {sheets, lid, problems, inside, r, top};
+}
+
+// Wall tray: the walls on three sides, ending on the back plate, which has the screw holes.
+function backless(pts, a, b, r) {
+  // Start just after the back's straight side, at the top left corner, and run round to the top right one.
+  const start = pts.findIndex(pt => pt.side === -1 && Math.abs(pt.n[0]) < 1e-9 && pt.n[1] > 0 && pt.c[0] < 0);
+  const ring = [...pts.slice(start), ...pts.slice(0, start)];
+  const end = ring.findIndex((pt, k) => k > 0 && pt.side === -1 && Math.abs(pt.n[0]) < 1e-9 && pt.n[1] > 0 && pt.c[0] > 0);
+  const open = ring.slice(0, end + 1);
+  return [{c: [-(a - r) + 0.6, b - r], n: [0, 1], side: -1}, ...open, {c: [(a - r) - 0.6, b - r], n: [0, 1], side: -1}];
+}
+
+// ---------------------------------------------------------------------------------------------------------
+const viewer = new Lamp.Viewer($('canvas'));
+let built = null, timer = null;
+function update() {
+  for (const b of document.querySelectorAll('[data-model]')) b.classList.toggle('on', b.dataset.model === p.model);
+  for (const b of document.querySelectorAll('[data-split]')) b.classList.toggle('on', b.dataset.split === splitAxis);
+  const grid = `${p.model}:${Math.round(p.cols)}x${Math.round(p.rows)}`;
+  if (grid !== planFrom || !plan) { plan = evenPlan(); planFrom = grid; }
+  const slide = p.model === 'slide';
+  if (slide) p.lid = 'slide'; else if (p.lid === 'slide') p.lid = 'none';
+  for (const b of document.querySelectorAll('[data-lid]')) b.classList.toggle('on', b.dataset.lid === p.lid);
+  $('stack').checked = p.stack; $('ribs').checked = p.ribs;
+  $('stackRow').classList.toggle('hidden', p.model === 'wall' || slide);
+  $('lidRow').classList.toggle('hidden', slide || p.model === 'carry' || p.model === 'wall');
+  fitRow.classList.toggle('hidden', !(p.stack || p.lid !== 'none'));
+  clearTimeout(timer);
+  timer = setTimeout(render, 40);
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+function render() {
+  built = build();
+  const [lo, hi] = Lamp.bounds(built.sheets), size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+  const problems = [...built.problems];
+  if (size[0] > printer.bed[0] || size[1] > printer.bed[1]) problems.push(`It is ${f1(size[0])} × ${f1(size[1])} mm, more than your plate.`);
+  if (size[2] > printer.height) problems.push(`It is ${f1(size[2])} mm tall, more than your printer reaches.`);
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  const lidAt = built.lid.length ? Lamp.moved(built.lid, 0, size[1] + 12) : [];
+  viewer.show([{sheets: built.sheets, colour: [0.55, 0.62, 0.78]}, {sheets: lidAt, colour: [0.86, 0.84, 0.78]}], false, false);
+  const i = built.inside, many = i.cells.length * (p.model === 'carry' ? 2 : 1);
+  const cells = many > 1 ? `${many} compartments` : `Inside ${f1(i.x)} × ${f1(i.y)} mm`;
+  drawPlan();
+  const how = {
+    partition: 'Trays of the same size stack, each one\'s foot inside the one below.',
+    desk: 'Trays of the same size stack, each one\'s foot inside the one below.',
+    box: built.lid.length ? 'The lid prints top down and its lip slips inside the box.' : '',
+    carry: 'The hand hole\'s top is a short bridge between 45° slopes.',
+    wall: 'The two screw holes take 4 mm screws; their pointed tops print without support. Screw it on from inside.',
+    slide: 'The lid prints flat and slides in from the low end; the groove\'s top slopes at 45°.',
+  }[p.model];
+  $('facts').textContent = `${f1(size[0])} × ${f1(size[1])} × ${f1(size[2])} mm outside. ${cells}, ${f1(i.z)} mm deep. Prints upright with no supports. ${how}`;
+}
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+};
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built) return;
+  const name = MODELS[p.model].name;
+  post(Lamp.addMessage(name, [{name, sheets: built.sheets}], built.lid.length ? [{name: name + ' lid', parts: [{name: 'Lid', sheets: built.lid}]}] : []));
+};
+syncAll();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

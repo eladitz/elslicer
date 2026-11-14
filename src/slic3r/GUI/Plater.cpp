@@ -17161,6 +17161,18 @@ bool Plater::add_model(bool imperial_units, std::string fname)
         paths.emplace_back(fname);
     }
 
+    // Elslicer: Import also takes zips; each one opens its models through the zip picker.
+    bool had_zip = false;
+    for (auto it = paths.begin(); it != paths.end();) {
+        if (boost::algorithm::iends_with(it->string(), ".zip")) {
+            had_zip |= preview_zip_archive(*it);
+            it = paths.erase(it);
+        } else
+            ++it;
+    }
+    if (paths.empty())
+        return had_zip;
+
     std::string snapshot_label;
     assert(! paths.empty());
     if (paths.size() == 1) {
@@ -18952,7 +18964,16 @@ bool Plater::preview_zip_archive(const boost::filesystem::path& archive_path)
         // selected_paths contains paths and its uncompressed size. The size is used to distinguish between files with same path.
         std::vector<std::pair<fs::path, size_t>> selected_paths;
         FileArchiveDialog dlg(static_cast<wxWindow*>(wxGetApp().mainframe), &archive, selected_paths);
-        if (dlg.ShowModal() == wxID_OK)
+        // Elslicer: a zip with one model opens it straight away; with several, the list starts all ticked.
+        if (dlg.model_count() == 0) {
+            close_zip_reader(&archive);
+            show_info(this, format_wxstr(_L("%1% has no model files that Elslicer can open."), from_path(archive_path.filename())), _L("Open ZIP"));
+            return false;
+        }
+        bool open_all = dlg.model_count() == 1;
+        if (open_all)
+            dlg.collect_selected();
+        if (open_all || dlg.ShowModal() == wxID_OK)
         {
             std::string archive_path_string = archive_path.string();
             archive_path_string = archive_path_string.substr(0, archive_path_string.size() - 4);

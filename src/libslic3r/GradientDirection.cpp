@@ -17,18 +17,32 @@
 namespace Slic3r {
 namespace GradientDirection {
 
-const char *const KEY = "elslicer_gradient_direction";
+const char *const KEY      = "elslicer_gradient_direction";
+const char *const SPAN_KEY = "elslicer_gradient_span";
+
+Span span(const ModelObject &object)
+{
+    const auto *values = dynamic_cast<const ConfigOptionFloats *>(object.config.option(SPAN_KEY));
+    if (values == nullptr || values->values.size() != 2)
+        return {};
+    const double from = std::clamp(values->values[0], 0., 1.), to = std::clamp(values->values[1], 0., 1.);
+    if (to - from < MIN_SPAN)
+        return {};
+    return {from, to};
+}
+
+double within(const Span &span, double t) { return std::clamp((t - span.from) / (span.to - span.from), 0., 1.); }
 
 std::optional<Vec3d> of(const ModelObject &object)
 {
-    const auto *values = dynamic_cast<const ConfigOptionFloats *>(object.config.option(KEY));
-    if (values == nullptr || values->values.size() != 3)
-        return std::nullopt;
-    const Vec3d direction(values->values[0], values->values[1], values->values[2]);
-    if (direction.norm() < 1e-6)
-        return std::nullopt;
-    const Vec3d unit = direction.normalized();
-    if (unit.z() > 0.9999)
+    Vec3d unit = Vec3d::UnitZ();
+    if (const auto *values = dynamic_cast<const ConfigOptionFloats *>(object.config.option(KEY)); values != nullptr && values->values.size() == 3) {
+        const Vec3d direction(values->values[0], values->values[1], values->values[2]);
+        if (direction.norm() >= 1e-6)
+            unit = direction.normalized();
+    }
+    // Straight up over the whole object is what the mix does by itself; over part of it, it is split here.
+    if (unit.z() > 0.9999 && span(object).whole())
         return std::nullopt;
     return unit;
 }
@@ -99,6 +113,18 @@ double layer_threshold(size_t layer)
 
 bool first_on_layer(const Slot &slot, double t, size_t layer) { return first_share(slot, t) > layer_threshold(layer); }
 
+double share_along(const Slot &slot, const Span &span, double t)
+{
+    // Past either end the object prints that end's filament alone, not the mix's end ratio.
+    if (t < span.from)
+        return first_share(slot, 0.) >= 0.5 ? 1. : 0.;
+    if (t > span.to)
+        return first_share(slot, 1.) >= 0.5 ? 1. : 0.;
+    return first_share(slot, within(span, t));
+}
+
+bool first_along(const Slot &slot, const Span &span, double t, size_t layer) { return share_along(slot, span, t) > layer_threshold(layer); }
+
 std::vector<unsigned int> used_filaments(const ModelObject &object)
 {
     std::set<unsigned int> used;
@@ -135,6 +161,7 @@ void split(const PrintObject &object, std::vector<std::vector<ExPolygons>> &segm
     if (!found || object.layer_count() == 0)
         return;
     const Vec3d direction = *found;
+    const Span   part      = span(*object.model_object());
     const size_t filaments = object.print()->config().filament_diameter.size();
     segmentation.resize(object.layer_count());
     for (std::vector<ExPolygons> &layer : segmentation)
@@ -204,7 +231,7 @@ void split(const PrintObject &object, std::vector<std::vector<ExPolygons>> &segm
             bool                inside = false;
             for (int i = 0; i <= samples; ++i) {
                 const double t     = double(i) / samples;
-                const bool   first = first_on_layer(slot, t, layer_id);
+                const bool   first = first_along(slot, part, t, layer_id);
                 if (first && !inside)
                     starts.push_back(i == 0 ? -1. : t - 0.5 / samples);
                 if (!first && inside)
@@ -218,7 +245,7 @@ void split(const PrintObject &object, std::vector<std::vector<ExPolygons>> &segm
             if (flat <= 1e-6) {
                 // Straight down: the whole layer is one filament.
                 const double t = (direction.z() * layer->slice_z - low) / (high - low);
-                if (first_on_layer(slot, t, layer_id))
+                if (first_along(slot, part, t, layer_id))
                     first_part = mine;
             } else {
                 // Each run is a strip across the bed, between two lines across the direction.

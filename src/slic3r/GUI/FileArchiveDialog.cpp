@@ -235,7 +235,12 @@ FileArchiveDialog::FileArchiveDialog(wxWindow* parent_window, mz_zip_archive* ar
         return struct_size + 1;
     };
 
-    const std::regex pattern_drop(".*[.](stl|obj|amf|3mf|step|stp)", std::regex::icase);
+    // Elslicer: every model type Import accepts, so a downloaded zip opens whatever it holds.
+#ifdef __APPLE__
+    const std::regex pattern_drop(".*[.](stl|obj|amf|3mf|step|stp|oltp|svg|drc|gltf|glb|fbx|ply|usd|usda|usdc|usdz|abc)", std::regex::icase);
+#else
+    const std::regex pattern_drop(".*[.](stl|obj|amf|3mf|step|stp|oltp|svg|drc|gltf|glb|fbx)", std::regex::icase);
+#endif
     mz_uint num_entries = mz_zip_reader_get_num_files(archive);
     mz_zip_archive_file_stat stat;
     std::vector<std::pair<boost::filesystem::path, size_t>> filtered_entries; // second is unzipped size
@@ -247,6 +252,12 @@ FileArchiveDialog::FileArchiveDialog(wxWindow* parent_window, mz_zip_archive* ar
                 continue;
             // filter out MACOS specific hidden files
             if (boost::algorithm::starts_with(path.string(), "__MACOSX"))
+                continue;
+            // and hidden files, such as the "._name.stl" resource forks macOS leaves beside a file
+            if (boost::algorithm::starts_with(path.filename().string(), "."))
+                continue;
+            // Elslicer: list only the models, so folders holding just images or notes don't show
+            if (!std::regex_match(path.extension().string(), pattern_drop))
                 continue;
             filtered_entries.emplace_back(std::move(path), stat.m_uncomp_size);
         }
@@ -270,8 +281,9 @@ FileArchiveDialog::FileArchiveDialog(wxWindow* parent_window, mz_zip_archive* ar
             entry_count++;
         }
     }
-    if (entry_count == 1)
-        on_all_button();
+    // Elslicer: every model starts ticked, so Open loads the whole zip.
+    m_model_count = entry_count;
+    on_all_button();
 
     toggle_column->SetWidth((4 + depth) * em);
 
@@ -306,6 +318,12 @@ void FileArchiveDialog::on_dpi_changed(const wxRect& suggested_rect)
 
 void FileArchiveDialog::on_open_button()
 {
+    collect_selected();
+    this->EndModal(wxID_OK);
+}
+
+void FileArchiveDialog::collect_selected()
+{
     wxDataViewItemArray top_items;
     m_avc->get_model()->GetChildren(wxDataViewItem(nullptr), top_items);
     
@@ -326,7 +344,6 @@ void FileArchiveDialog::on_open_button()
         ArchiveViewNode* node = static_cast<ArchiveViewNode*>(item.GetID());
         deep_fill(node);
     }
-    this->EndModal(wxID_OK);
 }
 
 void FileArchiveDialog::on_all_button()

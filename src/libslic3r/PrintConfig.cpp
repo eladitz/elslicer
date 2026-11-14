@@ -3593,6 +3593,13 @@ void PrintConfigDef::init_fff_params()
     def->mode    = comDevelop;
     def->set_default_value(new ConfigOptionFloats{});
 
+    def          = this->add("elslicer_gradient_span", coFloats);
+    def->label   = L("Gradient span");
+    def->tooltip = L("Where along this object a gradient mixed filament starts and ends, as two shares of its length from 0 to 1. "
+                     "Before the start it prints the first colour, after the end the last. Empty runs it over the whole object.");
+    def->mode    = comDevelop;
+    def->set_default_value(new ConfigOptionFloats{});
+
     def          = this->add("filament_mixed_gradient_per_part", coBools);
     def->label   = L("Mixed filament per-part gradient");
     def->tooltip = L("When gradient mode is enabled, apply the gradient to each part of an "

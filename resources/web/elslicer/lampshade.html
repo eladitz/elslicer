@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lampshade</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 330px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .chips button { padding: 6px 4px; font-size: 13px; }
+  .chips button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  select { width: 100%; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  .viewbar { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .viewbar .grow { flex: 1; }
+  canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); margin-top: 8px; }
+  .seg { display: flex; gap: 6px; }
+  .seg button { flex: 1; padding: 6px; }
+  .seg button.on { border-color: var(--accent); color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Lampshade</h1>
+  <p class="sub">Pick a shape and a surface, set the size, and choose the lamp holder it fits.</p>
+
+  <h3>Shape</h3>
+  <div class="chips" id="shapes"></div>
+  <div id="shapeSliders"></div>
+
+  <h3>Surface</h3>
+  <div class="chips" id="patterns"></div>
+  <div id="patternSliders"></div>
+  <div class="seg" style="margin-top:6px">
+    <button data-relief="outside" title="A smooth inside and the pattern raised outside: it glows brighter where it is thinner">Pattern outside</button>
+    <button data-relief="wall" title="The whole wall takes the pattern's shape, at one thickness">Shaped wall</button>
+  </div>
+
+  <h3>Modifiers</h3>
+  <div id="modSliders"></div>
+
+  <h3>Lamp holder</h3>
+  <select id="fixture"></select>
+  <p class="muted" id="fixtureHint" style="font-size:12px;margin:6px 0"></p>
+  <div id="mountSliders"></div>
+  <div class="seg" id="mountAt" style="margin-top:6px">
+    <button data-at="top">Holder at the top</button>
+    <button data-at="bottom">Holder at the bottom</button>
+  </div>
+
+  <h3>Wall</h3>
+  <div id="wallSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <div class="viewbar">
+    <button id="surprise">Surprise me</button>
+    <span class="grow"></span>
+    <label class="check" style="padding:0"><input type="checkbox" id="glow"> Light on</label>
+  </div>
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// Shapes as they stand in use. profile: how the radius runs up the height. belly is the widest (or for an
+// hourglass the waist) diameter, at a share bellyAt of the height; round bends the sides. sides makes it polygonal;
+// lobes push it out in petals that grow toward the open rim by lobeGrow; hem cuts the open rim in waves or points.
+const SHAPE_DEFAULTS = {facets: 0, facetSides: 8, ribWidth: 4, profile: 'classic', sides: 0, corner: 0.2, lobes: 0, lobeDepth: 0, lobeGrow: 1, hem: 0, hemCount: 8, hemSharp: 1};
+const SHAPES = {
+  globe:    {name: 'Globe', height: 150, belly: 160, top: 50, bottom: 60, at: 0.5, round: 1, holder: 'bottom'},
+  bell:     {name: 'Bell', height: 150, belly: 190, top: 60, bottom: 190, at: 0, round: 0.85, holder: 'top'},
+  dome:     {name: 'Dome', height: 110, belly: 220, top: 50, bottom: 220, at: 0, round: 1, holder: 'top'},
+  drum:     {name: 'Drum', height: 160, belly: 180, top: 180, bottom: 180, at: 0.5, round: 0, holder: 'top'},
+  cone:     {name: 'Cone', height: 160, belly: 200, top: 90, bottom: 200, at: 0, round: 0, holder: 'top'},
+  egg:      {name: 'Egg', height: 180, belly: 150, top: 50, bottom: 80, at: 0.38, round: 1, holder: 'bottom'},
+  ogee:     {name: 'Ogee bell', profile: 'ogee', height: 170, belly: 140, top: 50, bottom: 140, at: 0.45, round: 0.75, holder: 'top', pattern: 'ribs', count: 19, depth: 3},
+  tulip:    {name: 'Tulip', profile: 'tulip', height: 160, belly: 170, top: 170, bottom: 70, at: 0, round: 0.5, holder: 'bottom', lobes: 5, lobeDepth: 0.16, lobeGrow: 1, hem: 30, hemCount: 5, hemSharp: 2.2},
+  petal:    {name: 'Petal', height: 140, belly: 200, top: 60, bottom: 200, at: 0, round: 0.9, holder: 'top', lobes: 8, lobeDepth: 0.18, lobeGrow: 1, hem: 22, hemCount: 8, hemSharp: 0.6},
+  jelly:    {name: 'Jellyfish', height: 120, belly: 200, top: 60, bottom: 170, at: 0.35, round: 1, holder: 'top', lobes: 6, lobeDepth: 0.2, lobeGrow: 1, hem: 28, hemCount: 6, hemSharp: 0.8},
+  flame:    {name: 'Flame', height: 220, belly: 150, top: 40, bottom: 110, at: 0.3, round: 1, holder: 'bottom', lobes: 7, lobeDepth: 0.28, lobeGrow: 0.3, hem: 110, hemCount: 7, hemSharp: 2.5, twist: 50, pattern: 'smooth'},
+  hourglass:{name: 'Hourglass', profile: 'hourglass', height: 160, belly: 90, top: 150, bottom: 200, at: 0.5, round: 0, holder: 'top', pattern: 'pleats', count: 30, depth: 3, twist: 130},
+  pleated:  {name: 'Pleated cone', height: 150, belly: 210, top: 70, bottom: 210, at: 0, round: 0.2, holder: 'top', pattern: 'pleats', count: 36, depth: 5, hem: 6, hemCount: 36, hemSharp: 1},
+  lantern:  {name: 'Lantern', height: 170, belly: 170, top: 110, bottom: 120, at: 0.5, round: 0.7, holder: 'top', sides: 6, corner: 0.1, pattern: 'ripples', rows: 14, depth: 1.5},
+  squared:  {name: 'Squared drum', height: 160, belly: 170, top: 170, bottom: 170, at: 0.5, round: 0, holder: 'top', sides: 4, corner: 0.3, pattern: 'ribs', count: 48, depth: 1.5},
+  mushroom: {name: 'Mushroom', height: 100, belly: 240, top: 40, bottom: 230, at: 0.12, round: 1, holder: 'top'},
+  geometric:{name: 'Geometric', height: 220, belly: 200, top: 130, bottom: 140, at: 0.5, round: 0, holder: 'bottom', facets: 4, facetSides: 8, pattern: 'edges', depth: 2, ribWidth: 4},
+  spiral:   {name: 'Spiral', height: 180, belly: 170, top: 150, bottom: 160, at: 0.5, round: 0.4, holder: 'top', pattern: 'twisted', count: 12, depth: 5, twist: 300},
+};
+const PATTERNS = {
+  smooth:  {name: 'Smooth'},
+  ribs:    {name: 'Ribs', count: 24, depth: 2.5},
+  twisted: {name: 'Twisted ribs', count: 18, depth: 3, twist: 120},
+  waves:   {name: 'Waves', count: 20, rows: 4, depth: 2.5},
+  scales:  {name: 'Scales', count: 22, rows: 14, depth: 2.5},
+  bumps:   {name: 'Honeycomb', count: 22, rows: 12, depth: 3},
+  diamond: {name: 'Diamonds', count: 16, rows: 10, depth: 2.5},
+  ripples: {name: 'Ripples', rows: 18, depth: 2},
+  crumple: {name: 'Crumple', count: 9, rows: 5, depth: 3},
+  pleats:  {name: 'Pleats', count: 36, depth: 4},
+  edges:   {name: 'Facet edges', depth: 2},
+};
+
+const p = {shape: 'globe', pattern: 'scales', relief: 'outside', fixture: 'e27', at: 'bottom',
+           height: 150, belly: 160, top: 50, bottom: 60, bellyAt: 0.5, round: 1,
+           count: 22, rows: 14, depth: 2.5, twist: 0, ripple: 0, rippleRows: 6, wall: 1.0,
+           hole: 40.5, thick: 3, detail: 2, ...SHAPE_DEFAULTS};
+
+function slider(parent, key, label, min, max, step, unit = '') {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label title="${unit}">${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+}
+const sliders = {};
+slider($('shapeSliders'), 'height', 'Height mm', 40, 300, 1);
+slider($('shapeSliders'), 'belly', 'Widest mm', 40, 300, 1);
+slider($('shapeSliders'), 'top', 'Top opening mm', 20, 300, 1);
+slider($('shapeSliders'), 'bottom', 'Bottom opening mm', 20, 300, 1);
+slider($('shapeSliders'), 'bellyAt', 'Widest at', 0, 1, 0.01);
+slider($('shapeSliders'), 'round', 'Roundness', 0, 1, 0.01);
+slider($('patternSliders'), 'count', 'Around', 3, 60, 1);
+slider($('patternSliders'), 'rows', 'Rows', 1, 40, 1);
+slider($('patternSliders'), 'depth', 'Depth mm', 0, 8, 0.1);
+slider($('modSliders'), 'twist', 'Twist °', -360, 360, 1);
+slider($('modSliders'), 'facets', 'Facet rows (0 off)', 0, 10, 1);
+slider($('modSliders'), 'facetSides', 'Facet sides', 3, 16, 1);
+slider($('modSliders'), 'ribWidth', 'Rib width mm', 1, 8, 0.1);
+slider($('modSliders'), 'sides', 'Sides (0 round)', 0, 12, 1);
+slider($('modSliders'), 'corner', 'Corner round', 0, 1, 0.01);
+slider($('modSliders'), 'lobes', 'Petals', 0, 16, 1);
+slider($('modSliders'), 'lobeDepth', 'Petal depth', 0, 0.45, 0.01);
+slider($('modSliders'), 'lobeGrow', 'Petals grow to rim', 0, 1, 0.01);
+slider($('modSliders'), 'hem', 'Rim waves mm', 0, 150, 1);
+slider($('modSliders'), 'hemCount', 'Rim waves', 1, 48, 1);
+slider($('modSliders'), 'hemSharp', 'Rim pointiness', 0.3, 4, 0.05);
+slider($('modSliders'), 'ripple', 'Ripple mm', 0, 15, 0.5);
+slider($('modSliders'), 'rippleRows', 'Ripple rows', 1, 20, 1);
+slider($('mountSliders'), 'hole', 'Hole mm', 5, 80, 0.5);
+slider($('mountSliders'), 'thick', 'Mount mm', 2, 6, 0.5);
+slider($('wallSliders'), 'wall', 'Wall mm', 0.6, 4, 0.05);
+slider($('wallSliders'), 'detail', 'Detail', 1, 4, 1);
+
+for (const [key, s] of Object.entries(SHAPES)) {
+  const b = document.createElement('button');
+  b.textContent = s.name; b.dataset.shape = key;
+  b.onclick = () => {
+    p.shape = key;
+    Object.assign(p, SHAPE_DEFAULTS, {twist: 0}, s, {bellyAt: s.at, at: s.holder});
+    if (s.pattern) {
+      const q = PATTERNS[s.pattern];
+      p.pattern = s.pattern;
+      for (const k of ['count', 'rows', 'depth']) if (s[k] === undefined && q[k] !== undefined) p[k] = q[k];
+    }
+    syncAll(); update();
+  };
+  $('shapes').appendChild(b);
+}
+for (const [key, s] of Object.entries(PATTERNS)) {
+  const b = document.createElement('button');
+  b.textContent = s.name; b.dataset.pattern = key;
+  b.onclick = () => { p.pattern = key; for (const k of ['count', 'rows', 'depth']) if (s[k] !== undefined) p[k] = s[k]; p.twist = s.twist || 0; syncAll(); update(); };
+  $('patterns').appendChild(b);
+}
+for (const [key, f] of Object.entries(Lamp.FIXTURES)) $('fixture').add(new Option(f.name, key));
+$('fixture').onchange = () => { p.fixture = $('fixture').value; p.hole = Lamp.FIXTURES[p.fixture].hole || p.hole; syncAll(); update(); };
+for (const b of document.querySelectorAll('[data-at]')) b.onclick = () => { p.at = b.dataset.at; update(); };
+for (const b of document.querySelectorAll('[data-relief]')) b.onclick = () => { p.relief = b.dataset.relief; update(); };
+function syncAll() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('fixture').value = p.fixture; }
+
+// ---------------------------------------------------------------------------------------------------------
+// The shade, in use: radius of the base shape at height share v, and the pattern at angle a and v, from 0 to 1.
+function profile(v) {
+  const R = p.belly / 2, rb = p.bottom / 2, rt = p.top / 2, b = p.bellyAt, k = p.round;
+  let base;
+  if (p.profile === 'ogee') {
+    // An S from the wide bottom to a narrow neck at the top, its middle at bellyAt; round steepens the S.
+    const x = v < b ? 0.5 * v / Math.max(b, 1e-3) : 0.5 + 0.5 * (v - b) / Math.max(1 - b, 1e-3), e = 1 + 4 * k;
+    base = rb + (rt - rb) * Math.pow(x, e) / (Math.pow(x, e) + Math.pow(1 - x, e));
+  } else if (p.profile === 'tulip') {
+    // From a narrow foot flaring out to the top, more sharply with round.
+    base = rb + (rt - rb) * Math.pow(v, 1 + 2 * k);
+  } else if (p.profile === 'hourglass') {
+    // A hyperboloid: the waist (belly) at bellyAt, straight lines out to each end when twisted.
+    const re = v < b ? rb : rt, d = v < b ? (b - v) / Math.max(b, 1e-3) : (v - b) / Math.max(1 - b, 1e-3), w = Math.min(R, re);
+    base = Math.sqrt(w * w + (re * re - w * w) * d * d);
+  } else {
+    const rbc = Math.min(rb, R), rtc = Math.min(rt, R);
+    // Round shapes leave each opening at a slope, not flat, so they print without a ledge.
+    const s = x => 1 - Math.pow(1 - x, 1 + 1.2 * k);
+    base = b > 0 && (v < b || b >= 1) ? rbc + (R - rbc) * s(Math.min(1, v / b)) : rtc + (R - rtc) * s(Math.min(1, (1 - v) / (1 - b)));
+  }
+  return base + p.ripple * (0.5 - 0.5 * Math.cos(2 * Math.PI * p.rippleRows * v));
+}
+// How far v is from the holder's end, 0 there and 1 at the open rim.
+const fromHolder = v => p.at === 'top' ? 1 - v : v;
+// The cross-section: a polygon with rounded corners, and petals, at angle a and height v.
+function section(a, v) {
+  let scale = 1;
+  const n = Math.round(p.sides);
+  if (n >= 3) {
+    const seg = 2 * Math.PI / n, x = ((a % seg) + seg) % seg - seg / 2;
+    scale = 1 + (Math.cos(Math.PI / n) / Math.cos(x) - 1) * (1 - p.corner);
+  }
+  if (p.lobes >= 1 && p.lobeDepth > 0) {
+    const w = 1 - p.lobeGrow + p.lobeGrow * Math.pow(fromHolder(v), 1.5);
+    scale *= 1 + p.lobeDepth * w * Math.cos(Math.round(p.lobes) * (a + p.twist * Math.PI / 180 * v));
+  }
+  return scale;
+}
+// Facets: rings of facetSides corners on the base shape at rows + 1 heights, each ring turned half a step from the
+// last, joined by flat triangles. Gives the radius of the flat facet at angle a and use height z, and how far that
+// point is from the nearest facet edge, in mm. Without facet rows the edges follow a grid of 4 rows.
+function facetAt(a, z) {
+  const H = p.height, M = Math.max(1, Math.round(p.facets) || 4), N = Math.max(3, Math.round(p.facetSides));
+  const k = Math.min(M - 1, Math.max(0, Math.floor(z / H * M))), z0 = H * k / M, z1 = H * (k + 1) / M;
+  const corner = (ring, i) => {
+    const ang = 2 * Math.PI * (i + 0.5 * (ring % 2)) / N, zz = H * ring / M, r = profile(zz / H);
+    return [r * Math.cos(ang), r * Math.sin(ang), zz];
+  };
+  const off = 0.5 * (k % 2), w = ((a / (2 * Math.PI) * N - off) % N + N) % N, i = Math.floor(w), f = w - i;
+  const s = Math.min(1, Math.max(0, (z - z0) / (z1 - z0)));
+  // Ring k's corners sit at whole steps, ring k + 1's half a step on: the point is in one of three triangles.
+  const lo = m => corner(k, i + m), hi = m => corner(k + 1, i + m - (k % 2 ? 0 : 1));
+  const tri = f < 0.5 * s ? [lo(0), hi(0), hi(1)] : f > 1 - 0.5 * s ? [lo(1), hi(1), hi(2)] : [lo(0), lo(1), hi(1)];
+  // Where a level ray from the axis at height z meets the triangle's plane.
+  const [A, B, C] = tri, u = [B[0] - A[0], B[1] - A[1], B[2] - A[2]], v = [C[0] - A[0], C[1] - A[1], C[2] - A[2]];
+  const n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+  const d = [Math.cos(a), Math.sin(a)], den = n[0] * d[0] + n[1] * d[1];
+  const r = Math.abs(den) < 1e-9 ? profile(z / H) : (n[0] * A[0] + n[1] * A[1] + n[2] * (A[2] - z)) / den;
+  const P = [r * d[0], r * d[1], z];
+  const toEdge = (E, F) => {
+    const e = [F[0] - E[0], F[1] - E[1], F[2] - E[2]], q = [P[0] - E[0], P[1] - E[1], P[2] - E[2]];
+    const t = Math.max(0, Math.min(1, (q[0] * e[0] + q[1] * e[1] + q[2] * e[2]) / (e[0] * e[0] + e[1] * e[1] + e[2] * e[2])));
+    return Math.hypot(q[0] - t * e[0], q[1] - t * e[1], q[2] - t * e[2]);
+  };
+  const lean = Math.atan2(Math.abs(n[2]), Math.hypot(n[0], n[1]));
+  return {r, lean, edge: Math.min(toEdge(A, B), toEdge(B, C), toEdge(C, A))};
+}
+
+// The open rim's edge at angle a, from 0 (cut furthest in) to 1 (a tip).
+function rimTip(a) {
+  const vEnd = p.at === 'top' ? 0 : 1, c = 0.5 + 0.5 * Math.cos(Math.round(p.hemCount) * (a + p.twist * Math.PI / 180 * vEnd));
+  return Math.pow(c, p.hemSharp);
+}
+const frac = x => x - Math.floor(x);
+const tri = x => 1 - 2 * Math.abs(frac(x) - 0.5);
+function pattern(a, v) {
+  const u = a / (2 * Math.PI) + p.twist / 360 * v, N = Math.round(p.count), M = p.rows;
+  switch (p.pattern) {
+    case 'ribs': case 'twisted': return 0.5 + 0.5 * Math.cos(2 * Math.PI * N * u);
+    case 'pleats': return tri(N * u) * (0.3 + 0.7 * fromHolder(v));
+    case 'edges': {
+      // A ridge along each facet edge with straight flanks, so even the level ribs print without supports: a flank
+      // plus its facet's lean stays within 45°, so the ridge stands lower on a leaning facet.
+      const half = p.ribWidth / 2, f = facetAt(a, v * p.height), most = half * Math.tan(Math.max(0.1, Math.PI / 4 - f.lean));
+      return f.edge < half ? Math.min(1, most / Math.max(0.01, p.depth)) * (1 - f.edge / half) : 0;
+    }
+    case 'waves': return 0.5 + 0.5 * Math.cos(2 * Math.PI * (N * u + 0.18 * Math.sin(2 * Math.PI * M * v)));
+    case 'ripples': return 0.5 - 0.5 * Math.cos(2 * Math.PI * M * v);
+    case 'diamond': return Math.pow(tri(N * u + M * v / 2) * tri(N * u - M * v / 2), 0.6);
+    case 'bumps': {
+      const x = N * u, y = M * v;
+      let best = 1;
+      for (let j = Math.floor(y) - 1; j <= Math.floor(y) + 1; ++j) {
+        const off = (j & 1) ? 0.5 : 0, cx = Math.floor(x - off) + off + 0.5;
+        for (const c of [cx - 1, cx, cx + 1]) best = Math.min(best, Math.hypot(x - c, (y - j - 0.5) * 1.15));
+      }
+      return Math.sqrt(Math.max(0, 1 - best * best / 0.25));
+    }
+    case 'scales': {
+      // Rows of rounded scales, each overlapping the one below like roof tiles.
+      const x = N * u, y = M * v;
+      let value = 0;
+      for (let j = Math.floor(y) - 1; j <= Math.floor(y) + 1; ++j) {
+        const off = (j & 1) ? 0.5 : 0, cx = Math.floor(x - off) + off + 0.5;
+        for (const c of [cx - 1, cx, cx + 1]) {
+          const dx = (x - c) / 0.56, dy = (y - j - 0.55) / 0.8, s = 1 - dx * dx - dy * dy;
+          if (s > 0) value = Math.sqrt(s) * (0.55 + 0.45 * Math.min(1, 0.5 - dy * 0.5));
+        }
+      }
+      return value;
+    }
+    case 'crumple': {
+      let s = 0;
+      const waves = [[1, 1.3, 0.4], [2, -2.1, 1.7], [3, 3.2, 2.9], [5, -1.7, 4.1]];
+      for (const [i, j, ph] of waves) s += Math.sin(2 * Math.PI * (Math.round(N * i / 3) * u + j * M * v / 2) + ph) / i;
+      return 0.5 + 0.35 * s;
+    }
+    default: return 0;
+  }
+}
+
+// The shade's sheets and mount as printed, with the holder's end on the bed, and what to say about it.
+function build() {
+  const H = p.height, top = p.at === 'top', many = Math.max(p.count, p.lobes * 3, p.hemCount * 3, p.sides * 4, p.pattern === 'edges' || p.facets >= 1 ? p.facetSides * 14 : 0);
+  const nu = Math.max(120, Math.min(1080, Math.round(many * 10 * p.detail / 2 + 120 * p.detail)));
+  const nv = Math.max(40, Math.min(600, Math.round(H / (1.2 / p.detail))));
+  // Use height share of print row j, and the print position of a point at use angle a, radius r and use height z.
+  const useV = j => top ? 1 - j / (nv - 1) : j / (nv - 1);
+  const place = (a, r, z) => top ? [r * Math.cos(a), -r * Math.sin(a), H - z] : [r * Math.cos(a), r * Math.sin(a), z];
+  // The use height of grid share v at angle a: the open rim is cut back between its tips.
+  const height = (a, v) => {
+    if (p.hem <= 0) return H * v;
+    const cut = Math.min(p.hem, H * 0.8) * (1 - rimTip(a));
+    return top ? cut + v * (H - cut) : v * (H - cut);
+  };
+  // Patterns fade out at the far rim, which ends them cleanly, but not on the plate, where a pattern growing out as it
+  // rises would overhang. Facet edges run along both rims as ribs.
+  const fade = z => p.pattern === 'edges' ? 1 : Math.min(1, Math.max(0, (top ? z : H - z) / 4));
+  const radii = (a, z) => {
+    const v = z / H, dv = 1 / (nv - 1);
+    const r = p.facets >= 1 ? facetAt(a, z).r : profile(v) * section(a, v), slope = (profile(Math.min(1, v + dv)) - profile(Math.max(0, v - dv))) / (2 * dv * H);
+    const wall = p.wall * Math.min(3, Math.sqrt(1 + slope * slope)), d = p.depth * pattern(a, v) * fade(z);
+    // The third radius is the outside with the wall's true thickness, for the overhang check: the wall is made
+    // wider across where the shape leans, so that it stays as thick through, and its outside leans no more for it.
+    return p.relief === 'wall' ? [r + d, r + d + wall, r + d + p.wall] : [r, r + wall + d, r + p.wall + d];
+  };
+  const shade = Lamp.sheet(nu, nv, true, (i, j, front) => {
+    const a = 2 * Math.PI * i / nu, z = height(a, useV(j)), [inner, outer] = radii(a, z);
+    return place(a, front ? outer : inner, z);
+  });
+  // The mount at the bed end: print angle b is use angle -b when turned over.
+  const zEnd = top ? H : 0;
+  const wallIn = b => radii(top ? -b : b, zEnd)[0];
+  const mount = Lamp.mount(p.fixture, p.hole, wallIn, p.wall * 0.5, p.thick);
+  // The steepest overhang of the base shape, as printed. A thin wall overhangs by its lean either way: out, or
+  // in and under its own inside.
+  let steepest = 0;
+  const rows = 160, cols = Math.min(720, Math.max(180, many * 6)), dz = H / rows;
+  for (let i = 0; i < cols; ++i) {
+    const b = 2 * Math.PI * i / cols, a = top ? -b : b;
+    let prev = null;
+    for (let k = 0; k <= rows; ++k) {
+      const zp = k * dz, now = radii(a, top ? H - zp : zp);
+      if (prev) steepest = Math.max(steepest, Math.atan2(now[2] - prev[2], dz) * 180 / Math.PI, Math.atan2(prev[0] - now[0], dz) * 180 / Math.PI);
+      prev = now;
+    }
+  }
+  let widest = 0;
+  for (let k = 0; k < shade.pos.length; k += 3) widest = Math.max(widest, Math.hypot(shade.pos[k], shade.pos[k + 1]));
+  return {shade, mount, steepest, size: 2 * widest, triangles: 4 * nu * nv};
+}
+
+const viewer = new Lamp.Viewer($('canvas'));
+let timer = null, built = null;
+function update() {
+  for (const b of document.querySelectorAll('[data-shape]')) b.classList.toggle('on', b.dataset.shape === p.shape);
+  for (const b of document.querySelectorAll('[data-pattern]')) b.classList.toggle('on', b.dataset.pattern === p.pattern);
+  for (const b of document.querySelectorAll('[data-at]')) b.classList.toggle('on', b.dataset.at === p.at);
+  for (const b of document.querySelectorAll('[data-relief]')) b.classList.toggle('on', b.dataset.relief === p.relief);
+  const f = Lamp.FIXTURES[p.fixture];
+  $('fixtureHint').textContent = f.hint;
+  $('mountSliders').classList.toggle('hidden', p.fixture === 'none');
+  $('mountAt').classList.toggle('hidden', p.fixture === 'none');
+  clearTimeout(timer);
+  timer = setTimeout(render, 60);
+}
+function render() {
+  built = build();
+  const problems = [];
+  if (built.mount.problem) problems.push(built.mount.problem);
+  if (built.size > Math.min(...printer.bed)) problems.push(`It is ${built.size.toFixed(0)} mm across, more than your plate.`);
+  if (p.height > printer.height) problems.push(`It is ${p.height} mm tall, more than your printer reaches.`);
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('add').disabled = !!built.mount.problem;
+  viewer.show([{sheets: [built.shade], colour: [0.86, 0.84, 0.78]}, {sheets: built.mount.sheets || [], colour: [0.55, 0.56, 0.62], glow: false}], $('glow').checked, p.at === 'top');
+  const overhang = built.steepest > 50 ? ` <span style="color:var(--warn)">Its steepest overhang is ${built.steepest.toFixed(0)}°: it needs supports. Make the wide part less sudden, the pattern shallower, or the ribs wider.</span>` :
+                   ` Steepest overhang ${Math.max(0, built.steepest).toFixed(0)}°, fine without supports.`;
+  $('facts').innerHTML = `${built.size.toFixed(0)} × ${p.height} mm, shown as it hangs or stands. It prints with the holder end on the plate, turned over if need be.${overhang} Use LED bulbs only: plastic softens near a hot bulb.`;
+}
+$('glow').onchange = render;
+if (location.hash === '#glow') $('glow').checked = true;
+
+function surprise() {
+  const pick = o => { const k = Object.keys(o); return k[Math.floor(Math.random() * k.length)]; };
+  Object.assign(p, SHAPE_DEFAULTS);
+  const rnd = (a, b, step = 1) => Math.round((a + Math.random() * (b - a)) / step) * step;
+  $('shapes').querySelector(`[data-shape="${pick(SHAPES)}"]`).click();
+  $('patterns').querySelector(`[data-pattern="${pick(PATTERNS)}"]`).click();
+  Object.assign(p, {count: rnd(8, 36), rows: rnd(4, 20), depth: rnd(1.5, 4, 0.1), twist: Math.random() < 0.5 ? 0 : rnd(-180, 180, 5),
+                    ripple: Math.random() < 0.3 ? rnd(2, 8, 0.5) : 0, rippleRows: rnd(2, 8), round: rnd(0.4, 1, 0.01)});
+  if (Math.random() < 0.4) Object.assign(p, {lobes: rnd(4, 10), lobeDepth: rnd(0.08, 0.25, 0.01), lobeGrow: rnd(0, 1, 0.05)});
+  if (Math.random() < 0.35) Object.assign(p, {hem: rnd(8, 40), hemCount: Math.random() < 0.5 && p.lobes ? p.lobes : rnd(5, 24), hemSharp: rnd(0.5, 2.5, 0.05)});
+  if (Math.random() < 0.2) Object.assign(p, {sides: rnd(4, 8), corner: rnd(0, 0.4, 0.01)});
+  syncAll(); update();
+}
+$('surprise').onclick = surprise;
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+};
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!built || built.mount.problem) return;
+  post(Lamp.addMessage('Lampshade', [{name: 'Shade', sheets: [built.shade]}, {name: 'Mount', sheets: built.mount.sheets}]));
+};
+syncAll();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

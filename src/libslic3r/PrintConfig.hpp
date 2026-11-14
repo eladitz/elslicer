@@ -1284,6 +1284,7 @@ PRINT_CONFIG_CLASS_DEFINE(
 
     // Elslicer: the way a gradient mixed filament runs across the object; see GradientDirection.hpp.
     ((ConfigOptionFloats,              elslicer_gradient_direction))
+    ((ConfigOptionFloats,              elslicer_gradient_span))
     ((ConfigOptionFloat,               brim_object_gap))
     ((ConfigOptionFloat,               brim_flow_ratio))
     ((ConfigOptionBool,                brim_use_efc_outline))
