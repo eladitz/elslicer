@@ -27,8 +27,13 @@
 <body>
 <div class="side">
   <h1>Box maker</h1>
-  <p class="sub">Trays and boxes that print upright with no supports. Lids print as a second piece beside the box.</p>
+  <p class="sub">Trays and boxes that print upright with no supports, or flat and folded up so no outside face shows layer lines.</p>
+  <div class="seg" id="printsRow">
+    <button data-prints="upright">Prints upright</button>
+    <button data-prints="flat">Prints flat, folds up</button>
+  </div>
 
+  <div id="upright">
   <h3>Model</h3>
   <div class="models" id="models"></div>
 
@@ -55,7 +60,35 @@
   </div>
   <div id="fitSliders"></div>
 
-  <p class="muted" style="font-size:12px;margin-top:12px">Want one that prints flat and folds up? Use Folding Box, next to Box Maker in the menus.</p>
+  </div>
+
+  <div id="flat" class="hidden">
+    <h3>Shape</h3>
+    <div class="seg"><button data-fshape="rect">Rectangle</button><button data-fshape="poly">Polygon</button></div>
+    <div id="fShapeSliders"></div>
+    <h3>Net</h3>
+    <div class="seg">
+      <button data-flayout="petals" title="Every wall hinges on the floor; the walls' upright corners are the seams">Walls round the floor</button>
+      <button data-flayout="strip" title="The walls hinge to each other in a row; the seams run round the floor">Walls in a row</button>
+    </div>
+    <h3>Seams</h3>
+    <div class="seg">
+      <button data-fjoint="fingers" title="Square corners interlock like finger joints">Fingers</button>
+      <button data-fjoint="mitre" title="The edges are bevelled to meet at the corner; glue or tape them">Mitred</button>
+    </div>
+    <div id="fJointSliders"></div>
+    <h3>Outside face</h3>
+    <div class="seg">
+      <button data-foutside="top" title="The top face goes outside; the folds are grooved underneath">Top, raised pattern</button>
+      <button data-foutside="bed" title="The face on the plate goes outside, with the plate's texture; a pattern there is a second filament">Plate side, smooth</button>
+    </div>
+    <h3>Pattern</h3>
+    <div class="seg" id="fPatterns"></div>
+    <div id="fPatternSliders"></div>
+    <h3>Lid</h3>
+    <div class="seg"><button data-flid="none">No lid</button><button data-flid="liftoff">Lift-off lid</button></div>
+    <div id="fLidSliders"></div>
+  </div>
   <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
   <div class="footer">
     <button id="cancel">Cancel</button>
@@ -63,10 +96,12 @@
   </div>
 </div>
 <div class="view">
+  <div class="seg hidden" id="fView" style="margin:0 0 8px;max-width:260px"><button data-fview="flat">As printed</button><button data-fview="folded">Folded</button></div>
   <canvas id="canvas"></canvas>
   <div id="facts"></div>
 </div>
 <script src="lampkit.js"></script>
+<script src="flatbox.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const post = message => window.wx.postMessage(JSON.stringify(message));
@@ -83,6 +118,11 @@ const MODELS = {
 };
 const DEFAULTS = {radius: 6, wall: 1.8, floor: 1.2, divHeight: 100, divThick: 1.2, fit: 0.3};
 const p = {model: 'partition', ...DEFAULTS, ...MODELS.partition};
+// Flat boxes keep their own settings beside the upright ones.
+const fq = {shape: 'rect', length: 100, width: 70, sides: 6, side: 40, height: 50, layout: 'petals', joint: 'fingers',
+  finger: 10, thick: 2, hinge: 0.4, outside: 'top', pattern: 'swirl', period: 6, relief: 0.8, inlay: 0.6,
+  lid: 'none', lidDepth: 15, fit: 0.3};
+let prints = 'upright', fview = 'flat';
 
 function slider(parent, key, label, min, max, step) {
   const row = document.createElement('div');
@@ -108,6 +148,50 @@ slider($('divSliders'), 'rows', 'Across width', 1, 8, 1);
 slider($('divSliders'), 'divHeight', 'Divider height %', 20, 100, 1);
 slider($('divSliders'), 'divThick', 'Divider mm', 0.8, 3, 0.1);
 const fitRow = slider($('fitSliders'), 'fit', 'Lid fit mm', 0.1, 0.8, 0.05);
+
+// Flat sliders write to fq.
+function fslider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { fq[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  set(fq[key]);
+  row.set = set;
+  return row;
+}
+const fRows = {
+  length: fslider($('fShapeSliders'), 'length', 'Length mm', 30, 250, 1),
+  width: fslider($('fShapeSliders'), 'width', 'Width mm', 30, 250, 1),
+  sides: fslider($('fShapeSliders'), 'sides', 'Sides', 3, 12, 1),
+  side: fslider($('fShapeSliders'), 'side', 'Side mm', 15, 150, 1),
+  height: fslider($('fShapeSliders'), 'height', 'Height mm', 15, 200, 1),
+  thick: fslider($('fShapeSliders'), 'thick', 'Panels mm', 1.2, 4, 0.1),
+  hinge: fslider($('fShapeSliders'), 'hinge', 'Fold skin mm', 0.2, 1, 0.05),
+  finger: fslider($('fJointSliders'), 'finger', 'Finger mm', 4, 30, 1),
+  period: fslider($('fPatternSliders'), 'period', 'Spacing mm', 2, 20, 0.5),
+  relief: fslider($('fPatternSliders'), 'relief', 'Raised mm', 0.2, 2, 0.1),
+  inlay: fslider($('fPatternSliders'), 'inlay', 'Colour depth mm', 0.2, 1.2, 0.1),
+  lidDepth: fslider($('fLidSliders'), 'lidDepth', 'Lid depth mm', 8, 60, 1),
+  fit: fslider($('fLidSliders'), 'fit', 'Lid fit mm', 0.1, 0.8, 0.05),
+};
+for (const k of ['none', 'swirl', 'waves', 'rings', 'lines']) {
+  const b = document.createElement('button');
+  b.dataset.fpattern = k; b.textContent = k[0].toUpperCase() + k.slice(1);
+  $('fPatterns').appendChild(b);
+}
+const pick = (attr, apply) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { apply(b.dataset[attr]); update(); }; };
+pick('prints', v => { prints = v; });
+pick('fshape', v => { fq.shape = v; });
+pick('flayout', v => { fq.layout = v; });
+pick('fjoint', v => { fq.joint = v; });
+pick('foutside', v => { fq.outside = v; });
+pick('fpattern', v => { fq.pattern = v; });
+pick('flid', v => { fq.lid = v; });
+pick('fview', v => { fview = v; });
 
 for (const [key, m] of Object.entries(MODELS)) {
   const b = document.createElement('button');
@@ -425,6 +509,26 @@ function backless(pts, a, b, r) {
 const viewer = new Lamp.Viewer($('canvas'));
 let built = null, timer = null;
 function update() {
+  const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+  on('prints', prints);
+  $('upright').classList.toggle('hidden', prints !== 'upright');
+  $('flat').classList.toggle('hidden', prints !== 'flat');
+  $('fView').classList.toggle('hidden', prints !== 'flat');
+  if (prints === 'flat') {
+    on('fshape', fq.shape); on('flayout', fq.layout); on('fjoint', fq.joint); on('foutside', fq.outside);
+    on('fpattern', fq.pattern); on('flid', fq.lid); on('fview', fview);
+    const rect = fq.shape === 'rect';
+    for (const k of ['length', 'width']) fRows[k].classList.toggle('hidden', !rect);
+    for (const k of ['sides', 'side']) fRows[k].classList.toggle('hidden', rect);
+    fRows.finger.classList.toggle('hidden', fq.joint !== 'fingers');
+    for (const k of ['period']) fRows[k].classList.toggle('hidden', fq.pattern === 'none');
+    fRows.relief.classList.toggle('hidden', fq.pattern === 'none' || fq.outside !== 'top');
+    fRows.inlay.classList.toggle('hidden', fq.pattern === 'none' || fq.outside !== 'bed');
+    for (const k of ['lidDepth', 'fit']) fRows[k].classList.toggle('hidden', fq.lid === 'none');
+    clearTimeout(timer);
+    timer = setTimeout(renderFlat, 60);
+    return;
+  }
   for (const b of document.querySelectorAll('[data-model]')) b.classList.toggle('on', b.dataset.model === p.model);
   for (const b of document.querySelectorAll('[data-split]')) b.classList.toggle('on', b.dataset.split === splitAxis);
   const grid = `${p.model}:${Math.round(p.cols)}x${Math.round(p.rows)}`;
@@ -464,11 +568,73 @@ function render() {
   $('facts').textContent = `${f1(size[0])} × ${f1(size[1])} × ${f1(size[2])} mm outside. ${cells}, ${f1(i.z)} mm deep. Prints upright with no supports. ${how}`;
 }
 
+// ---------------------------------------------------------------------------------------------------------
+// Flat boxes.
+let flat = null;
+function renderFlat() {
+  // Finer where it matters, coarser for big nets so the preview stays quick.
+  const area = fq.shape === 'rect' ? (fq.length + 2 * fq.height) * (fq.width + 2 * fq.height) : Math.pow(fq.side * fq.sides / Math.PI + 2 * fq.height, 2);
+  const q = {...fq, res: Math.max(0.3, Math.min(1, Math.sqrt(area / 120000)))};
+  flat = {q, ...FlatBox.build(q)};
+  const {box, lid} = flat;
+  // In the preview the inlay sits a hair outside the body's face, which it shares, so it doesn't flicker.
+  const show = b => b && {...b, inlay: Lamp.moved(b.inlay, 0, 0, -0.05)};
+  const pb = show(box), pl = show(lid);
+  const [lo, hi] = Lamp.bounds(box.body), size = [hi[0] - lo[0], hi[1] - lo[1]];
+  let lidAt = null;
+  if (lid) {
+    const [llo, lhi] = Lamp.bounds(lid.body), dx = hi[0] + 10 - llo[0];
+    lidAt = {body: Lamp.moved(lid.body, dx), inlay: Lamp.moved(pl.inlay, dx), size: [lhi[0] - llo[0], lhi[1] - llo[1]]};
+  }
+  const problems = [...flat.problems];
+  if (size[0] > printer.bed[0] || size[1] > printer.bed[1]) problems.push(`Laid flat it is ${f1(size[0])} × ${f1(size[1])} mm, more than your plate.`);
+  if (lidAt && (lidAt.size[0] > printer.bed[0] || lidAt.size[1] > printer.bed[1])) problems.push('The lid, laid flat, is more than your plate.');
+  $('problem').innerHTML = [...problems, ...flat.notes].join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length && !flat.notes.length);
+  $('add').disabled = flat.problems.length > 0;
+  const body = [0.55, 0.62, 0.78], ink = [0.25, 0.27, 0.34], lidC = [0.86, 0.84, 0.78];
+  if (fview === 'folded') {
+    const fb = FlatBox.foldSheets(q, box.body, box.centre), fi = FlatBox.foldSheets(q, pb.inlay, box.centre);
+    const parts = [{sheets: fb, colour: body}, {sheets: fi, colour: ink}];
+    if (lid) {
+      // The lid over the box, open side down, a little above it.
+      const bhi = Lamp.bounds(fb)[1];
+      const turn = list => FlatBox.foldSheets(q, list, lid.centre).map(s => {
+        const pos = new Float32Array(s.pos);
+        for (let k = 0; k < pos.length; k += 3) { pos[k] += box.centre[0] - lid.centre[0]; pos[k + 1] = 2 * box.centre[1] - (pos[k + 1] - lid.centre[1] + box.centre[1]); pos[k + 2] = bhi[2] + 12 + fq.lidDepth - pos[k + 2]; }
+        return {...s, pos};
+      });
+      parts.push({sheets: turn(lid.body), colour: lidC}, {sheets: turn(pl.inlay), colour: ink});
+    }
+    viewer.show(parts, false, false);
+  } else {
+    const parts = [{sheets: box.body, colour: body}, {sheets: pb.inlay, colour: ink}];
+    if (lidAt) parts.push({sheets: lidAt.body, colour: lidC}, {sheets: lidAt.inlay, colour: ink});
+    viewer.show(parts, false, false);
+  }
+  const T = fq.thick, rect = fq.shape === 'rect';
+  const inside = rect ? `${f1(fq.length - 2 * T)} × ${f1(fq.width - 2 * T)}` : `${fq.sides} sides of ${f1(fq.side)} mm outside`;
+  const fold = fq.outside === 'top' ? 'Fold every groove shut, the pattern outside' : 'Fold every groove shut, the plate side outside';
+  const two = box.inlay.length ? ' The pattern is filament 2.' : '';
+  $('facts').textContent = `Laid flat ${f1(size[0])} × ${f1(size[1])} mm. Inside ${inside}, ${f1(fq.height - T)} mm deep. ${fold}; ${fq.joint === 'fingers' ? 'press the fingers together and glue them' : 'glue or tape the mitred seams'}. Fold it once, slowly: PETG bends better than PLA, and a hair dryer on PLA helps.${two}`;
+}
+
 window.fromApp = message => {
-  if (message.type === 'printer') { printer = message; update(); }
+  if (message.type === 'printer') {
+    printer = message;
+    // Two layers make a skin that bends without tearing.
+    if (message.layer) fRows.hinge.set(Math.max(0.3, Math.round(2 * message.layer * 100) / 100));
+    update();
+  }
 };
 $('cancel').onclick = () => post({cmd: 'close'});
 $('add').onclick = () => {
+  if (prints === 'flat') {
+    if (!flat || flat.problems.length) return;
+    const name = 'Folding box', parts = b => [{name: 'Box', sheets: b.body}, {name: 'Pattern', sheets: b.inlay, extruder: 2}];
+    post(Lamp.addMessage(name, parts(flat.box), flat.lid ? [{name: name + ' lid', parts: parts(flat.lid)}] : []));
+    return;
+  }
   if (!built) return;
   const name = MODELS[p.model].name;
   post(Lamp.addMessage(name, [{name, sheets: built.sheets}], built.lid.length ? [{name: name + ' lid', parts: [{name: 'Lid', sheets: built.lid}]}] : []));

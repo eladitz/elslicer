@@ -35,11 +35,19 @@
   <div id="shapeSliders" style="margin-top:6px"></div>
 
   <h3>Eyes</h3>
+  <div class="seg">
+    <button data-eye="almond">Almond</button>
+    <button data-eye="round">Round</button>
+    <button data-eye="cat">Cat eye</button>
+    <button data-eye="diamond">Diamond</button>
+    <button data-eye="heart">Heart</button>
+  </div>
   <div id="eyeSliders"></div>
 
   <h3>Lace</h3>
   <div class="grid">
-    <button data-net="lace">Lace<small>flowers on tulle</small></button>
+    <button data-net="guipure">Guipure<small>echoes and cells</small></button>
+    <button data-net="lace">Flowers<small>on tulle</small></button>
     <button data-net="filigree">Filigree<small>vines and curls</small></button>
     <button data-net="diamond">Diamond<small>net</small></button>
     <button data-net="honey">Honeycomb</button>
@@ -92,32 +100,36 @@ let printer = {bed: [256, 256], height: 256, layer: 0.2};
 // Right half of each outline, mm, from the top centre clockwise to the nose bridge; the eyes are centred on y = 0.
 // Drawn for a mask 180 mm wide and scaled to the width chosen. A third value of 1 makes a sharp point.
 // curls: [tip x, y, centre dx, dy, turn] are tendrils curling off the outline, antennae: [from, control, to] end in a curl.
-// Petal tops come from petals: [[valley x, y], ...] with a rounded petal between each pair.
 const SHAPES = {
-  classic:   {name: 'Classic', hint: 'curled wing tips', pts: [[0,22,1],[5,27],[13,26],[24,20],[37,18],[51,21],[65,28],[77,38],[86,49],[93,57,1],[91,45],[87,31],[88,15],[86,0],[80,-12],[70,-22],[58,-27],[46,-26],[34,-21],[22,-17],[12,-15],[5,-12],[0,-9,1]],
-               curls: [[93,57,-2,6,1]]},
+  classic:   {name: 'Classic', hint: 'a spire and swept tips', pts: [[0,40,1],[3,30],[7,23],[14,20],[24,21],[36,23],[50,25],[62,27],[74,30],[84,36],[92,43],[97,49,1],[94,36],[93,22],[95,6,1],
+               [90,-4],[80,-12],[68,-18],[54,-20],[40,-19],[28,-16],[16,-13],[8,-13],[3,-17],[0,-21,1]]},
+  carnival:  {name: 'Carnival', hint: 'upturned horns', pts: [[0,20],[6,24],[12,30,1],[18,24],[28,22],[40,23],[54,25],[66,28],[76,33],[84,40],[90,48],[94,56,1],[96,44],[96,30],[94,16],[95,6,1],
+               [88,-4],[80,-14],[68,-20],[54,-22],[40,-21],[28,-18],[18,-15],[10,-15],[4,-20],[0,-26,1]],
+               curls: [[94,56,-4,1,1]]},
+  bow:       {name: 'Bow', hint: 'wings above and below', pts: [[0,6,1],[4,10],[10,16],[20,24],[32,30],[46,34],[60,36],[74,37],[86,40],[96,46,1],[94,34],[90,24],[92,12],[95,4,1],
+               [90,-6],[80,-14],[68,-19],[58,-24],[48,-32],[38,-40],[28,-46],[20,-47,1],[16,-36],[10,-24],[5,-18],[0,-15,1]],
+               curls: [[96,46,-2,5,1],[20,-47,4,2,-1]]},
+  flick:     {name: 'Flick', hint: 'slim, tails flicked up', pts: [[0,26,1],[3,20],[6,17],[12,14],[22,15],[34,17],[48,18],[62,17],[74,16],[84,18],[92,24],[98,32],[101,38,1],[96,24],[92,12],[90,2],
+               [86,-8],[78,-14],[66,-18],[54,-19],[42,-18],[30,-16],[18,-13],[9,-12],[3,-15],[0,-17,1]],
+               curls: [[101,38,-4,1,1]]},
+  venetian:  {name: 'Venetian', hint: 'swept wings, cheek curls', pts: [[0,24,1],[4,20],[9,17],[16,17],[26,20],[38,26],[50,33],[62,41],[72,49],[80,56],[85,61,1],[84,52],[82,44],[84,36],[88,28],[92,18],[94,8,1],
+               [92,0],[88,-8],[84,-16],[80,-25,1],[74,-20],[66,-18],[58,-20],[48,-22],[38,-21],[28,-18],[18,-15],[10,-14],[4,-16],[0,-19,1]],
+               curls: [[85,61,-2,6,1],[80,-25,3,-3,-1]]},
+  crown:     {name: 'Crown', hint: 'a fleur-de-lis crest', pts: [[0,50,1],[2,44],[4,40],[7,39],[10,43],[12,47,1],[12,40],[10,34],[12,30],[16,27],[22,26],[32,28],[44,32],[56,38],[68,46],[78,54],[86,60,1],
+               [86,50],[86,40],[89,30],[93,18],[94,6,1],[90,-4],[82,-14],[70,-21],[56,-23],[42,-22],[30,-19],[18,-16],[9,-15],[3,-18],[0,-22,1]],
+               curls: [[86,60,-2,6,1]]},
+  fox:       {name: 'Fox', hint: 'tall ears, pointed snout', pts: [[0,18],[14,19],[28,22],[40,27],[50,33,1],[57,48],[64,62],[70,74,1],[76,60],[82,46],[89,32],[96,18,1],
+               [94,4],[92,-8],[94,-19],[96,-28,1],[86,-23],[76,-21],[64,-21],[52,-21],[40,-21],[30,-22],[20,-25],[12,-30],[5,-36],[0,-40,1]]},
+  bat:       {name: 'Bat', hint: 'scalloped wings', pts: [[0,6,1],[2,9],[4,16],[6,22,1],[9,14],[12,12],[20,14],[32,20],[46,28],[60,36],[74,44],[86,52],[96,58,1],
+               [91,45],[94,32,1],[89,20],[93,8,1],[88,-2],[80,-12],[68,-19],[54,-22],[40,-21],[28,-18],[16,-15],[7,-12],[0,-12,1]]},
   butterfly: {name: 'Butterfly', hint: 'wings and antennae', pts: [[0,7,1],[8,14],[20,30],[32,46],[46,58],[62,64],[78,60],[89,48],[93,34],[90,21],[84,13],[77,8,1],[84,1],[89,-13],[86,-27],[75,-39],[61,-45],[48,-43],[37,-34],[27,-27],[16,-24],[7,-22],[0,-26,1]],
                antennae: [[[1,8],[1,28],[9,40]]], body: true},
-  cat:       {name: 'Cat', hint: 'soft ears', pts: [[0,19],[9,20],[19,24],[27,32],[33,44],[37,52,1],[43,42],[52,32],[64,27],[78,26],[90,31],[96,36,1],[93,25],[88,12],[86,0],[80,-11],[68,-20],[53,-24],[38,-22],[24,-17],[12,-13],[0,-10,1]],
-               curls: [[96,36,-1,5,1]]},
-  petals:    {name: 'Petals', hint: 'a crown of petals', petals: [[0,22],[18,24],[38,28],[58,34],[77,40]], pts: [[96,40],[93,24],[90,8],[86,-6],[78,-17],[66,-25],[52,-28],[38,-25],[24,-19],[12,-15],[0,-11,1]]},
   wings:     {name: 'Wings', hint: 'swept up feathers', pts: [[0,15,1],[6,20],[16,21],[30,24],[46,31],[62,42],[76,54],[88,63],[98,68,1],[96,56],[92,42],[90,27],[89,10],[84,-6],[72,-19],[57,-26],[43,-25],[29,-20],[15,-16],[5,-12],[0,-10,1]],
                curls: [[98,68,-4,4,1]]},
-  domino:    {name: 'Domino', hint: 'soft and simple', pts: [[0,15,1],[7,21],[20,26],[38,28],[56,27],[72,22],[84,14],[90,3],[87,-9],[76,-19],[60,-25],[44,-24],[30,-19],[17,-15],[7,-12],[0,-10,1]]},
+  slim:      {name: 'Slim', hint: 'a narrow band', pts: [[0,22,1],[2,17],[6,14],[14,14],[26,17],[40,19],[54,19],[66,17],[78,13],[87,7],[92,0],[89,-7],[81,-13],[70,-17],[57,-19],[43,-18],[29,-16],[17,-13],[8,-12],[0,-14,1]]},
 };
-// The petal crown becomes ordinary outline points: sharp at each valley, round over each petal.
-for (const sh of Object.values(SHAPES)) if (sh.petals) {
-  const top = [];
-  sh.petals.forEach(([x, y], n) => {
-    top.push([x, y, 1]);
-    const next = sh.petals[n + 1] || [sh.pts[0][0], sh.pts[0][1]], mx = (x + next[0]) / 2, w = next[0] - x, h = 0.55 * w;
-    const my = (y + next[1]) / 2;
-    top.push([x + 0.12 * w, my + 0.55 * h], [mx, my + h], [next[0] - 0.12 * w, my + 0.55 * h]);
-  });
-  sh.pts = [...top, ...sh.pts];
-}
 
-const p = {shape: 'classic', net: 'lace', edge: 'picot', loop: 'ring', width: 210, height: 110, eyeGap: 64, eyeW: 42, eyeH: 20, eyeTilt: 4,
+const p = {shape: 'classic', net: 'guipure', edge: 'picot', loop: 'ring', eyeShape: 'almond', width: 185, height: 110, eyeGap: 66, eyeW: 46, eyeH: 23, eyeTilt: 4,
            rimW: 2.2, pitch: 2.2, line: 1.1, scroll: 4.5, ribbon: 6, loopY: 3, thick: 0.9, res: 0.25, seed: 1, tulle: 2.2};
 
 const sliders = {};
@@ -135,10 +147,10 @@ function slider(parent, key, label, min, max, step) {
 }
 slider($('shapeSliders'), 'width', 'Width mm', 150, 250, 1);
 slider($('shapeSliders'), 'height', 'Height %', 70, 140, 1);
-slider($('eyeSliders'), 'eyeGap', 'Eye centres mm', 54, 72, 0.5);
-slider($('eyeSliders'), 'eyeW', 'Eye width mm', 28, 48, 0.5);
-slider($('eyeSliders'), 'eyeH', 'Eye height mm', 12, 28, 0.5);
-slider($('eyeSliders'), 'eyeTilt', 'Tilt mm', 0, 10, 0.5);
+slider($('eyeSliders'), 'eyeGap', 'Spread mm', 44, 100, 0.5);
+slider($('eyeSliders'), 'eyeW', 'Eye width mm', 20, 64, 0.5);
+slider($('eyeSliders'), 'eyeH', 'Eye height mm', 8, 44, 0.5);
+slider($('eyeSliders'), 'eyeTilt', 'Tilt mm', -8, 14, 0.5);
 slider($('laceSliders'), 'pitch', 'Openness mm', 1.5, 6, 0.1);
 slider($('laceSliders'), 'line', 'Thread mm', 0.5, 1.2, 0.05);
 const tulleRow = slider($('laceSliders'), 'tulle', 'Tulle mesh mm', 1.6, 4, 0.1);
@@ -156,7 +168,7 @@ for (const [key, s] of Object.entries(SHAPES)) {
   $('shapes').appendChild(b);
 }
 const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
-choose('shape', 'shape'); choose('net', 'net'); choose('edge', 'edge'); choose('loop', 'loop');
+choose('shape', 'shape'); choose('net', 'net'); choose('edge', 'edge'); choose('loop', 'loop'); choose('eye', 'eyeShape');
 $('reseed').onclick = () => { p.seed++; update(); };
 for (const id of ['scrolls', 'centre', 'eyeBeads', 'colour']) $(id).oninput = update;
 function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); }
@@ -183,14 +195,30 @@ function outlinePoints() {
   }
   return out;
 }
-// An almond eye: inner corner a little low, outer corner raised by the tilt. side is +1 (right) or -1.
+// One eye, side +1 (right) or -1: drawn from the inner corner over the top to the outer corner and back along the
+// bottom, centred on y = -1.5, then sheared so the outer corner sits higher by the tilt.
 function eyePoints(side) {
-  const cx = side * p.eyeGap / 2, w = p.eyeW / 2, inner = [cx - side * w, -1.5], outer = [cx + side * w, -1.5 + p.eyeTilt], out = [];
-  const lid = (ctrlY, from, to) => { for (let s = 0; s < 40; ++s) { const t = s / 40, u = 1 - t;
-    out.push([u * u * from[0] + 2 * u * t * cx + t * t * to[0], u * u * from[1] + 2 * u * t * ctrlY + t * t * to[1]]); } };
-  lid(p.eyeH + p.eyeTilt / 2 - 1.5, inner, outer);
-  lid(-p.eyeH * 0.9 + p.eyeTilt / 2 - 1.5, outer, inner);
-  return out;
+  const w = p.eyeW / 2, h = p.eyeH, out = [];
+  const bez = (a, c, b, n = 40) => { for (let s = 0; s < n; ++s) { const t = s / n, u = 1 - t;
+    out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); } };
+  const line = (a, b, n = 30) => { for (let s = 0; s < n; ++s) out.push([a[0] + (b[0] - a[0]) * s / n, a[1] + (b[1] - a[1]) * s / n]); };
+  if (p.eyeShape === 'round') {
+    for (let s = 0; s < 80; ++s) { const a = Math.PI * s / 40; out.push([-w * Math.cos(a), h / 2 * Math.sin(a)]); }
+  } else if (p.eyeShape === 'cat') {
+    const tip = [w * 1.3, h * 0.45];
+    bez([-w, 0], [0.1 * w, h], tip); bez(tip, [0.15 * w, -0.95 * h], [-w, 0]);
+  } else if (p.eyeShape === 'diamond') {
+    line([-w, 0], [0, h / 2]); line([0, h / 2], [w, 0]); line([w, 0], [0, -h / 2]); line([0, -h / 2], [-w, 0]);
+  } else if (p.eyeShape === 'heart') {
+    // The classic heart curve spans x ±16 and y -17..12; fitted to the eye's width and height.
+    for (let s = 0; s < 120; ++s) { const t = 2 * Math.PI * s / 120;
+      out.push([16 * Math.sin(t) ** 3 * w / 16,
+                ((13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t)) + 2.5) * h / 29]); }
+  } else {
+    bez([-w, 0], [0, h], [w, 0]); bez([w, 0], [0, -0.9 * h], [-w, 0]);
+  }
+  const cx = side * p.eyeGap / 2;
+  return out.map(([x, y]) => [cx + side * x, y - 1.5 + p.eyeTilt * (x + w) / (2 * w)]);
 }
 // Points along a polyline every `step` mm, with the inward normal there (the outline runs clockwise).
 function along(pts, step, offset = 0) {
@@ -322,7 +350,8 @@ function draw(k, ox, oy, W, H) {
   }
 
   // Scrolls curling in from the edge, on the right half then mirrored, kept clear of the eyes and the edge itself.
-  if (p.net === 'filigree' || p.net === 'lace') filigree(band, outline, outlinePath, eyes, eyePaths, p.net === 'lace');
+  if (p.net === 'guipure') guipure(band, outline, outlinePath, eyes);
+  else if (p.net === 'filigree' || p.net === 'lace') filigree(band, outline, outlinePath, eyes, eyePaths, p.net === 'lace');
   else if ($('scrolls').checked) {
     const r0 = p.scroll, w = Math.max(0.8, Math.min(1.4, p.rimW * 0.55)), placed = [];
     hit.setTransform(1, 0, 0, 1, 0, 0);
@@ -423,7 +452,7 @@ function filigree(g, outline, outlinePath, eyes, eyePaths, lace) {
     for (let n = 0; n < outline.length; ++n) { const a = outline[n], b = outline[(n + 1) % outline.length];
       if ((a[0] - x) * (b[0] - x) <= 0 && a[0] !== b[0]) { const y = a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0]); top = Math.max(top, y); bot = Math.min(bot, y); } }
     return [bot, top]; };
-  const [spineLo, spineHi] = crossX(0), inner = [p.eyeGap / 2 - p.eyeW / 2, -1.5], outerC = [p.eyeGap / 2 + p.eyeW / 2, -1.5 + p.eyeTilt];
+  const [spineLo, spineHi] = crossX(0), inner = eyes[0].reduce((a, b) => b[0] < a[0] ? b : a), outerC = eyes[0].reduce((a, b) => b[0] > a[0] ? b : a);
   const edgeX = sideAt(outline, outerC[1] + 3);
   const curve = (a, c, b) => { const out = []; for (let t = 0; t <= 1.0001; t += 0.02) { const u = 1 - t; out.push([u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]]); } return out; };
   const bridges = [[[0, spineLo], [0, spineHi]],
@@ -567,6 +596,159 @@ function filigree(g, outline, outlinePath, eyes, eyePaths, lace) {
   }
   g.restore();
 }
+// Guipure: a beaded ribbon that echoes the eyes halfway to the edge, morphing from one shape to the other, ribs
+// running out from the eyes to it like the vanes of a feather, and scrolls packed into the rest. t is 0 on the eye
+// rims and 1 on the edge; echoes are lines of equal t and ribs follow its slope. Worked on the right half, mirrored.
+function guipure(g, outline, outlinePath, eyes) {
+  const c = 0.5, [lo, hi] = extentY(outline), X = Math.max(...outline.map(q => q[0])) + 1;
+  const NX = Math.ceil(X / c) + 1, NY = Math.ceil((hi - lo) / c) + 3, y0 = lo - c;
+  const T = new Float32Array(NX * NY).fill(NaN), D = new Float32Array(NX * NY);
+  const edge = outline.filter(q => q[0] > -3), rims = [...eyes[0], ...eyes[1]];
+  hit.setTransform(1, 0, 0, 1, 0, 0);
+  const eyePaths = eyes.map(e => pathOf(e));
+  for (let j = 0; j < NY; ++j) for (let i = 0; i < NX; ++i) {
+    const x = i * c, y = y0 + j * c;
+    if (!hit.isPointInPath(outlinePath, x, y) || eyePaths.some(e => hit.isPointInPath(e, x, y))) continue;
+    let de = Infinity, dO = Infinity;
+    for (const q of rims) de = Math.min(de, (q[0] - x) ** 2 + (q[1] - y) ** 2);
+    for (const q of edge) dO = Math.min(dO, (q[0] - x) ** 2 + (q[1] - y) ** 2);
+    de = Math.sqrt(de); dO = Math.sqrt(dO);
+    T[j * NX + i] = de / (de + dO); D[j * NX + i] = de + dO;
+  }
+  // The field anywhere, mirrored across the middle; NaN outside the lace.
+  const at = (A, x, y) => {
+    const fx = Math.abs(x) / c, fy = (y - y0) / c, i = Math.floor(fx), j = Math.floor(fy);
+    if (i < 0 || j < 0 || i + 1 >= NX || j + 1 >= NY) return NaN;
+    const u = fx - i, v = fy - j, n = j * NX + i;
+    return (A[n] * (1 - u) + A[n + 1] * u) * (1 - v) + (A[n + NX] * (1 - u) + A[n + NX + 1] * u) * v;
+  };
+  const grad = (x, y) => { const e = c; return [(at(T, x + e, y) - at(T, x - e, y)) / (2 * e), (at(T, x, y + e) - at(T, x, y - e)) / (2 * e)]; };
+
+  const w = p.line, cellW = 2 * p.pitch + w, minW = 0.8 * cellW, ribbon = 3 * w;
+  const lines = new Path2D(), ribs = new Path2D(), cords = [], marks = [];
+  // Echoes: a beaded ribbon halfway out where there is room for it, and a plain cord three quarters out where the
+  // lace is wide. Each is a set of short pieces from marching squares.
+  const echo = (L, need) => { const out = [];
+    for (let j = 0; j + 1 < NY; ++j) for (let i = 0; i + 1 < NX; ++i) {
+      const n = j * NX + i, v = [T[n], T[n + 1], T[n + NX + 1], T[n + NX]];
+      if (v.some(isNaN) || (D[n] + D[n + 1] + D[n + NX] + D[n + NX + 1]) / 4 < need * minW) continue;
+      const corner = [[0, 0], [1, 0], [1, 1], [0, 1]], cut = [];
+      for (let k = 0; k < 4; ++k) { const a = v[k], b = v[(k + 1) % 4];
+        if ((a - L) * (b - L) < 0) { const f = (L - a) / (b - a), [ax, ay] = corner[k], [bx, by] = corner[(k + 1) % 4];
+          cut.push([(i + ax + (bx - ax) * f) * c, y0 + (j + ay + (by - ay) * f) * c]); } }
+      for (let k = 0; k + 1 < cut.length; k += 2) out.push([...cut[k], ...cut[k + 1]]);
+    }
+    return out; };
+  const mid = echo(0.5, 2.6), outer = echo(0.78, 5);
+  for (const [ax, ay, bx, by] of mid) { cords.push([ax, ay, bx, by]); marks.push([(ax + bx) / 2, (ay + by) / 2, ribbon / 2]); }
+  for (const [ax, ay, bx, by] of outer) { lines.moveTo(ax, ay); lines.lineTo(bx, by); marks.push([(ax + bx) / 2, (ay + by) / 2, 0.65 * w]); }
+  // Ribs: evenly spaced lines along the slope from the eye rim out to the ribbon, like the vanes of a feather, and
+  // right across to the edge where the lace is too narrow for a ribbon. A rib that runs into another joins it.
+  const sep = cellW * 1.25, test = sep * 0.5, G = test, GW = Math.ceil(X / G) + 2, GH = Math.ceil((hi - lo) / G) + 3;
+  const grid = Array.from({length: GW * GH}, () => []);
+  const cellOf = (x, y) => { const i = Math.floor(x / G), j = Math.floor((y - y0) / G); return i < 0 || j < 0 || i >= GW || j >= GH ? -1 : j * GW + i; };
+  const near = (x, y, r, id) => { let best = null, bd = r * r;
+    const i0 = Math.floor(x / G), j0 = Math.floor((y - y0) / G);
+    for (let j = j0 - 2; j <= j0 + 2; ++j) for (let i = i0 - 2; i <= i0 + 2; ++i) {
+      if (i < 0 || j < 0 || i >= GW || j >= GH) continue;
+      for (const q of grid[j * GW + i]) if (q[2] !== id) { const d = (q[0] - x) ** 2 + (q[1] - y) ** 2; if (d < bd) { bd = d; best = q; } } }
+    return best; };
+  const seeds = [];
+  for (let j = 1; j + 1 < NY; j += 2) for (let i = 1; i + 1 < NX; i += 2) { const n = j * NX + i;
+    if (Math.abs(T[n] - 0.25) < 0.03) seeds.push([i * c, y0 + j * c]); }
+  let id = 0;
+  const h = 0.3, started = performance.now();
+  while (seeds.length && performance.now() - started < 1500) {
+    const [sx, sy] = seeds.shift();
+    const t0 = at(T, sx, sy);
+    if (sx < 0 || isNaN(t0) || t0 > 0.5 || near(sx, sy, sep * 0.95, -1)) continue;
+    const me = ++id, line = [[sx, sy]];
+    for (const dir of [1, -1]) {
+      let x = sx, y = sy, run = [];
+      for (let s = 0; s < 800; ++s) {
+        const [gx, gy] = grad(x, y), L = Math.hypot(gx, gy);
+        if (!(L > 0)) break;
+        const nx = x + dir * h * gx / L, ny = y + dir * h * gy / L, t = at(T, nx, ny);
+        if (isNaN(t) || nx < 0) { run.push([Math.max(0, nx), ny]); break; }
+        const o = near(nx, ny, test, me);
+        if (o) { run.push([o[0], o[1]]); break; }
+        x = nx; y = ny; run.push([x, y]);
+        if (t < 0.01 || t > 0.99 || (t > 0.5 && at(D, x, y) >= 2.6 * minW)) break;
+      }
+      if (dir > 0) line.push(...run); else line.unshift(...run.reverse());
+    }
+    let len = 0; for (let k = 1; k < line.length; ++k) len += Math.hypot(line[k][0] - line[k - 1][0], line[k][1] - line[k - 1][1]);
+    if (len < 1.5) continue;
+    line.forEach(([x, y], k) => { k ? ribs.lineTo(x, y) : ribs.moveTo(x, y); const n = cellOf(x, y); if (n >= 0) grid[n].push([x, y, me]); marks.push([x, y, w / 2]); });
+    for (let k = 0; k < line.length; k += Math.max(1, Math.round(sep / 2 / h))) {
+      const [x, y] = line[k], [gx, gy] = grad(x, y), L = Math.hypot(gx, gy);
+      if (!(L > 0)) continue;
+      for (const side of [1, -1]) seeds.push([x - side * sep * gy / L, y + side * sep * gx / L]);
+    }
+  }
+  // The ribbon: two cords with a row of beads between.
+  const spaced = (segs, every) => { const kept = [];
+    for (const [ax, ay, bx, by] of segs) { const x = (ax + bx) / 2, y = (ay + by) / 2;
+      if (kept.every(([kx, ky]) => (kx - x) ** 2 + (ky - y) ** 2 > every * every)) kept.push([x, y]); }
+    return kept; };
+  const cordPath = new Path2D(), beads = new Path2D();
+  for (const [ax, ay, bx, by] of cords) { cordPath.moveTo(ax, ay); cordPath.lineTo(bx, by); }
+  for (const [x, y] of spaced(cords, 2.2 * w + 0.8)) { beads.moveTo(x + 0.55 * w, y); beads.arc(x, y, 0.55 * w, 0, 2 * Math.PI); }
+  g.save(); g.lineCap = g.lineJoin = 'round';
+  for (const flip of [1, -1]) {
+    g.save(); g.scale(flip, 1);
+    g.lineWidth = ribbon; g.stroke(cordPath);
+    g.globalCompositeOperation = 'destination-out'; g.lineWidth = ribbon - 2 * Math.max(0.8, 0.85 * w); g.stroke(cordPath);
+    g.globalCompositeOperation = 'source-over'; g.fill(beads);
+    g.lineWidth = 1.2 * w; g.stroke(lines); g.lineWidth = w; g.stroke(ribs);
+    g.restore();
+  }
+  g.restore();
+  // Scrolls: again and again, the biggest curl that fits in the open spaces, each starting where it touches the
+  // lace already there, so nothing floats. Small spaces get an eyelet instead.
+  const rnd = random(p.seed), occ = new Uint8Array(NX * NY), dist = new Float32Array(NX * NY), NXx = new Float32Array(NX * NY), NYy = new Float32Array(NX * NY);
+  const stamp = (x, y, r) => { const r2 = (r + c / 2) ** 2;
+    for (let j = Math.max(0, Math.floor((y - r - y0) / c)); j <= Math.min(NY - 1, Math.ceil((y + r - y0) / c)); ++j)
+      for (let i = Math.max(0, Math.floor((x - r) / c)); i <= Math.min(NX - 1, Math.ceil((x + r) / c)); ++i)
+        if ((i * c - x) ** 2 + (y0 + j * c - y) ** 2 <= r2) occ[j * NX + i] = 1; };
+  for (let n = 0; n < occ.length; ++n) if (isNaN(T[n]) || n % NX === 0) occ[n] = 1;
+  for (const [x, y, r] of marks) stamp(x, y, r);
+  if ($('centre').checked) { const s = Math.max(0.6, Math.min(1.6, (p.eyeGap - p.eyeW) / 24));
+    for (let y = -7 * s; y < 23 * s; y += c) stamp(3 * s, y, 5 * s); }
+  const scrolls = new Path2D(), dots = new Path2D(), rings = new Path2D();
+  const curl = (cx, cy, a0, dir, r0) => {
+    const turns = Math.max(0.6, Math.min(2.2, 0.72 * r0 / (w + 0.9))), A = 2 * Math.PI * turns;
+    let x = 0, y = 0;
+    for (let s = 0; s <= 80; ++s) { const th = A * s / 80, r = r0 * (1 - 0.72 * th / A), a = a0 + dir * th;
+      x = cx + r * Math.cos(a); y = cy + r * Math.sin(a); s ? scrolls.lineTo(x, y) : scrolls.moveTo(x, y); }
+    dots.moveTo(x + 0.85 * w, y); dots.arc(x, y, 0.85 * w, 0, 2 * Math.PI);
+  };
+  for (let pass = 0; pass < 14; ++pass) {
+    for (let n = 0; n < occ.length; ++n) { if (occ[n]) { dist[n] = 0; NXx[n] = (n % NX) * c; NYy[n] = y0 + Math.floor(n / NX) * c; } else dist[n] = Infinity; }
+    const relax = (n, m) => { if (dist[m] === Infinity) return; const x = (n % NX) * c, y = y0 + Math.floor(n / NX) * c, d = Math.hypot(NXx[m] - x, NYy[m] - y);
+      if (d < dist[n]) { dist[n] = d; NXx[n] = NXx[m]; NYy[n] = NYy[m]; } };
+    for (let j = 1; j < NY; ++j) for (let i = 1; i + 1 < NX; ++i) { const n = j * NX + i; if (occ[n]) continue; relax(n, n - 1); relax(n, n - NX - 1); relax(n, n - NX); relax(n, n - NX + 1); }
+    for (let j = NY - 2; j >= 0; --j) for (let i = NX - 2; i >= 1; --i) { const n = j * NX + i; if (occ[n]) continue; relax(n, n + 1); relax(n, n + NX + 1); relax(n, n + NX); relax(n, n + NX - 1); }
+    const order = [];
+    for (let n = 0; n < occ.length; ++n) if (!occ[n] && dist[n] - c / 2 > 1.3) order.push(n);
+    if (!order.length) break;
+    order.sort((a, b) => dist[b] - dist[a]);
+    const placed = [];
+    for (const n of order) {
+      const x = (n % NX) * c, y = y0 + Math.floor(n / NX) * c, r0 = dist[n] - c / 2;
+      if (placed.some(([px, py, pr]) => Math.hypot(px - x, py - y) < pr + r0 + 0.3)) continue;
+      placed.push([x, y, r0]);
+      const a0 = Math.atan2(NYy[n] - y, NXx[n] - x);
+      if (r0 < 2.4) { rings.moveTo(x + r0 - w / 2, y); rings.arc(x, y, Math.max(0.4, r0 - w / 2), 0, 2 * Math.PI); }
+      else curl(x, y, a0, rnd() < 0.5 ? 1 : -1, r0);
+      if (placed.length > 40) break;
+    }
+    for (const [x, y, r] of placed) stamp(x, y, r + w / 2);
+  }
+  g.save(); g.lineCap = g.lineJoin = 'round';
+  for (const flip of [1, -1]) { g.save(); g.scale(flip, 1); g.lineWidth = w; g.stroke(scrolls); g.stroke(rings); g.fill(dots); g.restore(); }
+  g.restore();
+}
 function extentY(pts) { let lo = Infinity, hi = -Infinity; for (const [, y] of pts) { lo = Math.min(lo, y); hi = Math.max(hi, y); } return [lo, hi]; }
 
 function build() {
@@ -600,8 +782,8 @@ function build() {
 let built = null, timer = 0;
 const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
 function update() {
-  on('shape', p.shape); on('net', p.net); on('edge', p.edge); on('loop', p.loop);
-  $('scrollsRow').classList.toggle('hidden', p.net === 'filigree' || p.net === 'lace'); $('seedRow').classList.toggle('hidden', p.net !== 'filigree' && p.net !== 'lace');
+  on('shape', p.shape); on('net', p.net); on('edge', p.edge); on('loop', p.loop); on('eye', p.eyeShape);
+  $('scrollsRow').classList.toggle('hidden', p.net === 'filigree' || p.net === 'lace' || p.net === 'guipure'); $('seedRow').classList.toggle('hidden', p.net !== 'filigree' && p.net !== 'lace' && p.net !== 'guipure');
   tulleRow.classList.toggle('hidden', p.net !== 'lace');
   clearTimeout(timer);
   timer = setTimeout(render, 120);

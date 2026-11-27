@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Card Embosser</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 350px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+  .grid button { padding: 6px 2px; font-size: 12px; }
+  .grid button.on, .seg button.on, .tabs button.on, .items button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 116px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; flex-wrap: wrap; }
+  .seg button { flex: 1; padding: 6px; font-size: 12px; white-space: nowrap; }
+  .items { display: flex; flex-direction: column; gap: 4px; margin: 6px 0; }
+  .items button { text-align: left; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .edit { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-top: 6px; background: var(--panel); }
+  .edit textarea { width: 100%; resize: vertical; min-height: 40px; }
+  .edit select { width: 100%; margin: 4px 0; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  .tabs { display: flex; gap: 6px; }
+  .tabs button { font-size: 13px; padding: 5px 14px; }
+  .stage { flex: 1; min-height: 0; position: relative; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 8px; background: #101114; }
+  #card { cursor: default; touch-action: none; }
+  #facts { font-size: 13px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Card Embosser</h1>
+  <p class="sub">Two geared rollers that press your pattern, logo and words into a business card as you turn the crank. The raised roller pushes the design up and the recessed roller takes it from behind.</p>
+
+  <h3>Card</h3>
+  <div class="seg" id="cards"></div>
+  <div id="cardSliders"></div>
+
+  <h3>Pattern</h3>
+  <div class="grid" id="patterns"></div>
+  <div id="patternSliders" style="margin-top:6px"></div>
+  <div id="tileEdit" class="hidden">
+    <div class="seg"><button id="pickTile" title="A picture: dark parts are raised">Choose picture…</button></div>
+    <p class="hint" id="tileName"></p>
+    <div class="seg" id="repeats"></div>
+    <div id="tileSliders"></div>
+    <label class="check"><input type="checkbox" id="tileInv"> Raise the light parts instead</label>
+  </div>
+  <div class="seg" id="areas"></div>
+  <div id="bandRow"></div>
+
+  <h3>Border</h3>
+  <div class="seg" id="borders"></div>
+  <div id="borderSliders"></div>
+
+  <h3>Logos and words</h3>
+  <div class="seg">
+    <button id="addLogo" title="A picture: dark parts are raised">Add logo…</button>
+    <button id="addText">Add words</button>
+  </div>
+  <p class="hint" id="noItems">Drag a logo or words on the card to move them; scroll over one to resize it.</p>
+  <div class="items" id="items"></div>
+  <div class="edit hidden" id="edit">
+    <div id="textEdit">
+      <textarea id="text" rows="2"></textarea>
+      <select id="font"></select>
+      <label class="check"><input type="checkbox" id="bold"> Bold</label>
+    </div>
+    <div id="logoEdit">
+      <label class="check"><input type="checkbox" id="invert"> Raise the light parts instead</label>
+    </div>
+    <div id="itemSliders"></div>
+    <div class="seg"><button id="centreItem">Centre it</button><button id="remove">Remove</button></div>
+  </div>
+
+  <h3>Embossing</h3>
+  <div id="embossSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <div class="tabs">
+    <button data-tab="card">Card</button>
+    <button data-tab="back">Other side</button>
+    <button data-tab="parts">Parts</button>
+  </div>
+  <div class="stage">
+    <canvas id="card"></canvas>
+    <canvas id="gl" class="hidden"></canvas>
+  </div>
+  <div id="facts"></div>
+</div>
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+const K = 10;   // design pixels per mm
+
+const CARDS = {eu: ['85 × 55', 85, 55], us: ['3.5 × 2 in', 88.9, 50.8], jp: ['91 × 55', 91, 55], custom: ['Custom']};
+const PATTERNS = {none: 'None', dots: 'Dots', rings: 'Rings', diamonds: 'Diamonds', linen: 'Grid', stripes: 'Stripes', waves: 'Waves',
+                  chevron: 'Chevron', hex: 'Honeycomb', scales: 'Scales', stars: 'Stars', ripples: 'Ripples', image: 'Picture'};
+const REPEATS = {grid: 'Grid', brick: 'Brick', halfdrop: 'Half drop', mirror: 'Mirror', turn: 'Turn', once: 'Once'};
+const AREAS = {whole: 'Whole card', border: 'Edge band', left: 'Left', right: 'Right', top: 'Top', bottom: 'Bottom'};
+const BORDERS = {none: 'None', line: 'Line', double: 'Double', dots: 'Dots', corners: 'Corners'};
+const FONTS = ['Didot', 'Bodoni 72', 'Baskerville', 'Georgia', 'Futura', 'Avenir Next', 'Helvetica Neue', 'Gill Sans', 'Copperplate',
+               'Optima', 'Snell Roundhand', 'Savoye LET', 'Zapfino', 'Bradley Hand', 'American Typewriter', 'Menlo'];
+
+const p = {card: 'eu', W: 85, H: 55, thick: 0.35, relief: 0.6, res: 0.25,
+           pattern: 'diamonds', size: 6, line: 1, area: 'border', band: 10, border: 'line', inset: 3, bline: 1,
+           repeat: 'grid', tileW: 8, tileGap: 2, tileRot: 0};
+let items = [], sel = -1, tab = 'card';
+let tile = null, wanted = 'logo';   // the pattern's picture; which button the next picked picture is for
+
+// ---------------------------------------------------------------------------------------------------------------
+// Controls
+const sliders = {};
+function slider(parent, obj, key, label, min, max, step, after) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const target = () => typeof obj === 'function' ? obj() : obj;
+  const show = () => { const t = target(); if (t) { range.value = t[key]; box.value = +(+t[key]).toFixed(3); } };
+  const set = v => { const t = target(); if (!t) return; t[key] = v; show(); if (after) after(); update(); };
+  range.oninput = () => set(+range.value);
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) set(Math.min(max, Math.max(min, v))); };
+  parent.appendChild(row);
+  sliders[Object.keys(sliders).length] = show;
+  return {row, show};
+}
+function buttons(parent, map, key, after) {
+  for (const [k, v] of Object.entries(map)) {
+    const b = document.createElement('button');
+    b.textContent = Array.isArray(v) ? v[0] : v;
+    b.dataset[key] = k;
+    b.onclick = () => { p[key] = k; if (after) after(k); update(); };
+    parent.appendChild(b);
+  }
+}
+const showAll = () => { for (const s of Object.values(sliders)) s(); };
+
+buttons($('cards'), CARDS, 'card', k => { if (CARDS[k][1]) { p.W = CARDS[k][1]; p.H = CARDS[k][2]; } showAll(); });
+slider($('cardSliders'), p, 'W', 'Width mm', 60, 100, 0.1, () => { p.card = 'custom'; });
+slider($('cardSliders'), p, 'H', 'Height mm', 40, 70, 0.1, () => { p.card = 'custom'; });
+const pickPicture = what => { wanted = what; post({cmd: 'pick_image'}); };
+buttons($('patterns'), PATTERNS, 'pattern', k => { if (k === 'image' && !tile) pickPicture('tile'); });
+slider($('patternSliders'), p, 'size', 'Spacing mm', 2.5, 15, 0.1);
+slider($('patternSliders'), p, 'line', 'Line mm', 0.5, 3, 0.05);
+buttons($('repeats'), REPEATS, 'repeat');
+slider($('tileSliders'), p, 'tileW', 'Width mm', 3, 100, 0.1);
+slider($('tileSliders'), p, 'tileGap', 'Gap mm', 0, 20, 0.1);
+slider($('tileSliders'), p, 'tileRot', 'Turn °', -180, 180, 1);
+slider($('tileSliders'), () => tile, 'th', 'Darkness', 10, 245, 1, () => makeMask(tile));
+$('pickTile').onclick = () => pickPicture('tile');
+$('tileInv').onchange = () => { if (!tile) return; tile.inv = $('tileInv').checked; makeMask(tile); update(); };
+buttons($('areas'), AREAS, 'area');
+const bandRow = slider($('bandRow'), p, 'band', 'Band mm', 4, 30, 0.5).row;
+buttons($('borders'), BORDERS, 'border');
+slider($('borderSliders'), p, 'inset', 'From edge mm', 1, 10, 0.1);
+slider($('borderSliders'), p, 'bline', 'Line mm', 0.5, 3, 0.05);
+slider($('embossSliders'), p, 'relief', 'Raised mm', 0.3, 1.2, 0.05);
+slider($('embossSliders'), p, 'thick', 'Card thick mm', 0.2, 0.7, 0.01);
+slider($('embossSliders'), p, 'res', 'Detail mm', 0.15, 0.4, 0.01);
+
+const cur = () => items[sel];
+const itemSize = slider($('itemSliders'), cur, 'size', 'Size mm', 2, 80, 0.1);
+slider($('itemSliders'), cur, 'rot', 'Turn °', -180, 180, 1);
+const thRow = slider($('itemSliders'), cur, 'th', 'Darkness', 10, 245, 1, () => makeMask(cur())).row;
+slider($('itemSliders'), cur, 'outline', 'Outline mm', 0, 3, 0.05);
+slider($('itemSliders'), cur, 'clear', 'Clear around mm', 0, 6, 0.1);
+for (const f of FONTS) { const o = document.createElement('option'); o.textContent = f; o.style.fontFamily = f; $('font').appendChild(o); }
+$('text').oninput = () => { cur().text = $('text').value; listItems(); update(); };
+$('font').onchange = () => { cur().font = $('font').value; update(); };
+$('bold').onchange = () => { cur().bold = $('bold').checked; update(); };
+$('invert').onchange = () => { cur().inv = $('invert').checked; makeMask(cur()); update(); };
+$('remove').onclick = () => { items.splice(sel, 1); select(Math.min(sel, items.length - 1)); update(); };
+$('centreItem').onclick = () => { cur().x = p.W / 2; cur().y = p.H / 2; update(); };
+$('addText').onclick = () => {
+  items.push({kind: 'text', text: items.some(i => i.kind === 'text') ? 'Your title' : 'Your Name', font: 'Didot', bold: false,
+              size: 7, rot: 0, outline: 0, clear: 1.2, x: p.W / 2, y: p.H / 2});
+  select(items.length - 1); update();
+};
+$('addLogo').onclick = () => pickPicture('logo');
+
+function listItems() {
+  const box = $('items');
+  box.innerHTML = '';
+  items.forEach((it, n) => {
+    const b = document.createElement('button');
+    b.textContent = it.kind === 'text' ? `Words: ${it.text.replace(/\n/g, ' / ') || '(empty)'}` : `Logo: ${it.name}`;
+    b.classList.toggle('on', n === sel);
+    b.onclick = () => { select(n); render(); };
+    box.appendChild(b);
+  });
+  $('noItems').classList.toggle('hidden', items.length > 0 && false);
+}
+function select(n) {
+  sel = n;
+  const it = cur();
+  $('edit').classList.toggle('hidden', !it);
+  if (it) {
+    $('textEdit').classList.toggle('hidden', it.kind !== 'text');
+    $('logoEdit').classList.toggle('hidden', it.kind !== 'logo');
+    thRow.classList.toggle('hidden', it.kind !== 'logo');
+    if (it.kind === 'text') { $('text').value = it.text; $('font').value = it.font; $('bold').checked = it.bold; }
+    else $('invert').checked = it.inv;
+    itemSize.row.querySelector('label').textContent = it.kind === 'text' ? 'Letters mm' : 'Width mm';
+  }
+  showAll();
+  listItems();
+}
+
+// A logo's raised parts: dark pixels, or light ones when inverted, as an opaque black mask.
+function makeMask(it) {
+  const img = it.img, s = Math.min(1, 1000 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(img.width * s)); c.height = Math.max(1, Math.round(img.height * s));
+  const g = c.getContext('2d');
+  g.drawImage(img, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height), px = d.data;
+  for (let k = 0; k < px.length; k += 4) {
+    const ink = (0.3 * px[k] + 0.59 * px[k + 1] + 0.11 * px[k + 2] < it.th) !== it.inv;
+    px[k] = px[k + 1] = px[k + 2] = 0; px[k + 3] = ink ? 255 : 0;
+  }
+  g.putImageData(d, 0, 0);
+  it.mask = c;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The design: what is raised on the card, seen from the raised side, in design pixels (K per mm, y down).
+function drawPattern(g, W, H) {
+  const s = p.size, w = p.line;
+  g.fillStyle = g.strokeStyle = '#000'; g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round';
+  const line = (x0, y0, x1, y1) => { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); };
+  const stagger = (dx, dy, f) => {
+    for (let r = 0, y = dy / 2; y < H + dy; y += dy, ++r)
+      for (let x = (r % 2 ? dx : 0) / 2 - dx; x < W + dx; x += dx) f(x, y);
+  };
+  switch (p.pattern) {
+    case 'dots': stagger(s, s * 0.866, (x, y) => { g.beginPath(); g.arc(x, y, w * 0.8, 0, 2 * Math.PI); g.fill(); }); break;
+    case 'rings': stagger(s, s * 0.866, (x, y) => { g.beginPath(); g.arc(x, y, Math.max(w, s * 0.3), 0, 2 * Math.PI); g.stroke(); }); break;
+    case 'diamonds': for (let c = -H; c < W + H; c += s) { line(c, 0, c + H, H); line(c, 0, c - H, H); } break;
+    case 'linen': for (let x = s / 2; x < W; x += s) line(x, 0, x, H); for (let y = s / 2; y < H; y += s) line(0, y, W, y); break;
+    case 'stripes': for (let c = -H; c < W + H; c += s) line(c, 0, c + H, H); break;
+    case 'waves': case 'chevron':
+      for (let y = s / 2 - s; y < H + s; y += s) {
+        g.beginPath();
+        for (let x = -1; x <= W + 1; x += 0.25) {
+          const t = x / (s * 1.6), off = p.pattern === 'waves' ? 0.28 * s * Math.sin(2 * Math.PI * t) : 0.35 * s * (4 * Math.abs(t - Math.floor(t + 0.5)) - 1);
+          x < 0 ? g.moveTo(x, y + off) : g.lineTo(x, y + off);
+        }
+        g.stroke();
+      }
+      break;
+    case 'hex': {
+      const r = s / Math.sqrt(3);
+      stagger(s, 1.5 * r, (x, y) => {
+        g.beginPath();
+        for (let k = 0; k <= 6; ++k) { const a = Math.PI / 6 + k * Math.PI / 3; k ? g.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)) : g.moveTo(x + r * Math.cos(a), y + r * Math.sin(a)); }
+        g.stroke();
+      });
+      break;
+    }
+    case 'scales': stagger(s, s / 2, (x, y) => { g.beginPath(); g.arc(x, y, s / 2, 0, Math.PI); g.stroke(); }); break;
+    case 'stars': stagger(s, s * 0.866, (x, y) => {
+      const ro = Math.max(s * 0.32, w * 1.6), ri = ro * 0.45;
+      g.beginPath();
+      for (let k = 0; k < 10; ++k) { const a = -Math.PI / 2 + k * Math.PI / 5, rr = k % 2 ? ri : ro; k ? g.lineTo(x + rr * Math.cos(a), y + rr * Math.sin(a)) : g.moveTo(x + rr * Math.cos(a), y + rr * Math.sin(a)); }
+      g.closePath(); g.fill();
+    }); break;
+    case 'image': if (tile) drawTiles(g, W, H, tile); break;
+    case 'ripples': for (let r = s / 2; r < Math.hypot(W, H); r += s) { g.beginPath(); g.arc(W / 2, H / 2, r, 0, 2 * Math.PI); g.stroke(); } break;
+  }
+}
+// The picture repeated over the card from its centre. Turn and mirror work on blocks of four, so they need square cells.
+function drawTiles(g, W, H, t) {
+  const tw = p.tileW, th = tw * t.mask.height / t.mask.width, gap = p.tileGap, even = n => (n % 2 + 2) % 2 === 0;
+  const put = (x, y, a, sx, sy) => {
+    g.save(); g.translate(x, y); g.rotate(a + p.tileRot * Math.PI / 180); g.scale(sx, sy);
+    g.drawImage(t.mask, -tw / 2, -th / 2, tw, th); g.restore();
+  };
+  if (p.repeat === 'once') { put(W / 2, H / 2, 0, 1, 1); return; }
+  const turn = p.repeat === 'turn', side = Math.max(tw, th);
+  const dx = (turn ? side : tw) + gap, dy = (turn ? side : th) + gap;
+  const nx = Math.ceil(W / dx) + 1, ny = Math.ceil(H / dy) + 1;
+  for (let r = -ny; r <= ny; ++r)
+    for (let c = -nx; c <= nx; ++c) {
+      let x = W / 2 + c * dx, y = H / 2 + r * dy, a = 0, sx = 1, sy = 1;
+      if (p.repeat === 'brick' && !even(r)) x += dx / 2;
+      if (p.repeat === 'halfdrop' && !even(c)) y += dy / 2;
+      if (p.repeat === 'mirror') { sx = even(c) ? 1 : -1; sy = even(r) ? 1 : -1; }
+      if (turn) a = [[0, 1], [3, 2]][even(r) ? 0 : 1][even(c) ? 0 : 1] * Math.PI / 2;
+      put(x, y, a, sx, sy);
+    }
+}
+function drawBorder(g, W, H) {
+  const i = p.inset, w = p.bline;
+  g.fillStyle = g.strokeStyle = '#000'; g.lineWidth = w; g.lineCap = 'round'; g.lineJoin = 'round';
+  const dotsAlong = (x0, y0, x1, y1) => {
+    const n = Math.max(1, Math.round(Math.hypot(x1 - x0, y1 - y0) / (w * 2.6)));
+    for (let k = 0; k < n; ++k) { g.beginPath(); g.arc(x0 + (x1 - x0) * k / n, y0 + (y1 - y0) * k / n, w * 0.75, 0, 2 * Math.PI); g.fill(); }
+  };
+  switch (p.border) {
+    case 'line': g.strokeRect(i, i, W - 2 * i, H - 2 * i); break;
+    case 'double': g.strokeRect(i, i, W - 2 * i, H - 2 * i); { const j = i + 2.4 * w; g.lineWidth = w * 0.7; g.strokeRect(j, j, W - 2 * j, H - 2 * j); } break;
+    case 'dots': dotsAlong(i, i, W - i, i); dotsAlong(W - i, i, W - i, H - i); dotsAlong(W - i, H - i, i, H - i); dotsAlong(i, H - i, i, i); break;
+    case 'corners':
+      for (const [cx, cy, sx, sy] of [[i, i, 1, 1], [W - i, i, -1, 1], [W - i, H - i, -1, -1], [i, H - i, 1, -1]]) {
+        const L = Math.min(W, H) * 0.22;
+        g.beginPath(); g.moveTo(cx + sx * L, cy); g.lineTo(cx, cy); g.lineTo(cx, cy + sy * L); g.stroke();
+        g.beginPath(); g.arc(cx + sx * 2.6 * w, cy + sy * 2.6 * w, w * 0.9, 0, 2 * Math.PI); g.fill();
+        g.beginPath(); g.moveTo(cx + sx * L, cy); g.quadraticCurveTo(cx + sx * L * 1.25, cy + sy * L * 0.12, cx + sx * L * 1.1, cy + sy * L * 0.3); g.stroke();
+        g.beginPath(); g.moveTo(cx, cy + sy * L); g.quadraticCurveTo(cx + sx * L * 0.12, cy + sy * L * 1.25, cx + sx * L * 0.3, cy + sy * L * 1.1); g.stroke();
+      }
+      break;
+  }
+}
+const fontOf = it => `${it.bold ? '700 ' : ''}${it.size}px "${it.font}", Georgia, serif`;
+// An item's width and height in mm, before turning.
+function itemBox(it, g) {
+  if (it.kind === 'logo') return [it.size, it.size * it.mask.height / it.mask.width];
+  g.font = fontOf(it);
+  const lines = it.text.split('\n');
+  return [Math.max(1, ...lines.map(l => g.measureText(l).width)), it.size * 1.2 * lines.length];
+}
+function drawItem(g, it) {
+  g.save();
+  g.translate(it.x, it.y); g.rotate(it.rot * Math.PI / 180);
+  g.fillStyle = '#000';
+  if (it.kind === 'logo') { const [w, h] = itemBox(it, g); g.drawImage(it.mask, -w / 2, -h / 2, w, h); }
+  else {
+    g.font = fontOf(it); g.textAlign = 'center'; g.textBaseline = 'middle';
+    const lines = it.text.split('\n');
+    lines.forEach((l, n) => g.fillText(l, 0, (n - (lines.length - 1) / 2) * it.size * 1.2));
+  }
+  g.restore();
+}
+
+// Squared distances to the nearest pixel where mask equals want (Felzenszwalb and Huttenlocher).
+function edt(mask, w, h, want) {
+  const BIG = 1e12, n = Math.max(w, h), f = new Float64Array(n), d = new Float64Array(n), v = new Int32Array(n), z = new Float64Array(n + 1);
+  const out = new Float64Array(w * h);
+  const pass = (len) => {
+    let k = 0; v[0] = 0; z[0] = -Infinity; z[1] = Infinity;
+    for (let q = 1; q < len; ++q) {
+      let s;
+      for (;;) { const r = v[k]; s = (f[q] + q * q - f[r] - r * r) / (2 * q - 2 * r); if (s <= z[k]) --k; else break; }
+      ++k; v[k] = q; z[k] = s; z[k + 1] = Infinity;
+    }
+    k = 0;
+    for (let q = 0; q < len; ++q) { while (z[k + 1] < q) ++k; const r = v[k]; d[q] = (q - r) * (q - r) + f[r]; }
+  };
+  for (let x = 0; x < w; ++x) {
+    for (let y = 0; y < h; ++y) f[y] = mask[y * w + x] === want ? 0 : BIG;
+    pass(h);
+    for (let y = 0; y < h; ++y) out[y * w + x] = d[y];
+  }
+  for (let y = 0; y < h; ++y) {
+    for (let x = 0; x < w; ++x) f[x] = out[y * w + x];
+    pass(w);
+    for (let x = 0; x < w; ++x) out[y * w + x] = d[x];
+  }
+  return out;
+}
+const alphaOf = (c) => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, m = new Uint8Array(c.width * c.height); for (let k = 0; k < m.length; ++k) m[k] = d[4 * k + 3] > 127 ? 1 : 0; return m; };
+function layer(W, H, draw) {
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const g = c.getContext('2d');
+  g.setTransform(K, 0, 0, K, 0, 0);
+  draw(g);
+  return c;
+}
+
+// The raised design as a signed distance in mm from its edge, negative inside.
+function compose() {
+  const W = Math.round(p.W * K), H = Math.round(p.H * K), N = W * H;
+  const ink = alphaOf(layer(W, H, g => {
+    const b = p.band;
+    g.beginPath();
+    if (p.area === 'border') { g.rect(0, 0, p.W, p.H); g.rect(b, b, p.W - 2 * b, p.H - 2 * b); }
+    else g.rect(...({whole: [0, 0, p.W, p.H], left: [0, 0, b, p.H], right: [p.W - b, 0, b, p.H], top: [0, 0, p.W, b], bottom: [0, p.H - b, p.W, b]})[p.area]);
+    g.clip('evenodd');
+    drawPattern(g, p.W, p.H);
+  }));
+  const border = alphaOf(layer(W, H, g => drawBorder(g, p.W, p.H)));
+  for (let k = 0; k < N; ++k) ink[k] |= border[k];
+  const marks = items.map(it => alphaOf(layer(W, H, g => drawItem(g, it))));
+  items.forEach((it, n) => {
+    if (it.clear <= 0) return;
+    const d = edt(marks[n], W, H, 1), r2 = (it.clear * K) ** 2;
+    for (let k = 0; k < N; ++k) if (d[k] < r2) ink[k] = 0;
+  });
+  items.forEach((it, n) => {
+    const m = marks[n];
+    if (it.outline > 0) {
+      const d = edt(m, W, H, 0), r2 = (it.outline * K + 0.5) ** 2;
+      for (let k = 0; k < N; ++k) if (m[k] && d[k] <= r2) ink[k] = 1;
+    } else for (let k = 0; k < N; ++k) ink[k] |= m[k];
+  });
+  const out = edt(ink, W, H, 1), inn = edt(ink, W, H, 0), S = new Float32Array(N);
+  let any = false;
+  for (let k = 0; k < N; ++k) { S[k] = ink[k] ? -(Math.sqrt(inn[k]) - 0.5) / K : (Math.sqrt(out[k]) - 0.5) / K; any ||= !!ink[k]; }
+  return {W, H, S, any};
+}
+// The signed distance at X mm from the card's left edge and Y mm up from its bottom edge, seen from the raised side.
+function sample(d, X, Y) {
+  const x = Math.min(d.W - 1.001, Math.max(0, X * K - 0.5)), y = (p.H - Y) * K - 0.5;
+  if (y < -1 || y > d.H) return 99;
+  const yy = Math.min(d.H - 1.001, Math.max(0, y)), i = Math.floor(x), j = Math.floor(yy), fx = x - i, fy = yy - j, o = j * d.W + i;
+  return (d.S[o] * (1 - fx) + d.S[o + 1] * fx) * (1 - fy) + (d.S[o + d.W] * (1 - fx) + d.S[o + d.W + 1] * fx) * fy;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The machine. The two rollers stand side by side, each one card long round, so one turn presses one card and a
+// logo lands once. They turn on pins in the base and in the lid, and gears printed on their bottoms keep them in
+// step, so the raised and recessed designs always meet. Everything is laid out as it prints, in mm.
+const ring = (r0, r1, z0, z1, segs) => Lamp.ring(typeof r0 === 'function' ? r0 : () => r0, typeof r1 === 'function' ? r1 : () => r1, z0, z1, segs);
+const at = (sheets, x, y) => Lamp.moved(sheets, x, y);
+// A round shaft of radius r with a flat at f from the axis, facing angle af: the gears fit only one way round.
+const dShaft = (r, f, af) => a => { const c = Math.cos(a - af); return c > f / r ? Math.min(r, f / c) : r; };
+// How far a ray from (px, py) along (ux, uy) goes to leave a stadium: two circles of radius rho at (±e, 0), joined.
+function rayStadium(px, py, ux, uy, e, rho) {
+  let best = Infinity;
+  for (const yl of [rho, -rho]) if (uy * yl > 0) { const t = (yl - py) / uy, x = px + t * ux; if (t > 0 && Math.abs(x) <= e) best = Math.min(best, t); }
+  for (const cx of [e, -e]) {
+    const qx = px - cx, b = ux * qx + uy * py, c = qx * qx + py * py - rho * rho, disc = b * b - c;
+    if (disc >= 0) { const t = -b + Math.sqrt(disc), x = px + t * ux; if (t > 0 && Math.sign(cx) * x >= e - 1e-9) best = Math.min(best, t); }
+  }
+  return best;
+}
+// An involute spur gear's outline as a radius at each angle; a tooth is centred on phase.
+function gearOutline(N, m, phase) {
+  const Rp = N * m / 2, alpha = 20 * Math.PI / 180, rb = Rp * Math.cos(alpha), ra = Rp + m - 0.1, rf = Rp - 1.25 * m;
+  const inv = x => Math.tan(x) - x, half = Math.PI / (2 * N) - 0.08 / Rp, pitch = 2 * Math.PI / N;
+  const psi = r => half + inv(alpha) - inv(Math.acos(Math.min(1, rb / Math.max(r, rb))));
+  const lo = Math.max(rb, rf), psiTip = psi(ra), psiLo = psi(lo);
+  return a => {
+    let d = ((a - phase) % pitch + pitch) % pitch;
+    d = Math.abs(d > pitch / 2 ? d - pitch : d);
+    if (d <= psiTip) return ra;
+    if (d >= psiLo) return rf;
+    let r0 = lo, r1 = ra;
+    for (let k = 0; k < 30; ++k) { const r = (r0 + r1) / 2; psi(r) > d ? (r0 = r) : (r1 = r); }
+    return (r0 + r1) / 2;
+  };
+}
+// A convex outline around (cx, cy), z0 to z1.
+const prism = (pts, cx, cy, z0, z1) => Lamp.sheet(pts.length, 2, true, (i, j, front) => [...(j ? pts[i] : [cx, cy]), front ? z1 : z0]);
+
+function machine(design) {
+  const t = p.thick, R = p.W / (2 * Math.PI), e = R, Rs = R - 0.45 * t;
+  const N = Math.max(14, Math.round(2 * R / 1.5)), m = 2 * R / N;
+  const floorT = 3, collar = 0.6, gearT = 7, Lr = p.H + 2, gap = 3, lidT = 4, crankT = 5;
+  const Ri = R + m + 1.2, Ro = Ri + 3, Rf = Ro + 6, slot = 0.8;
+  const bodyTop = gearT + Lr, ledge = floorT + collar + gearT + 1;   // the card rests on the ledges in the slots, above the gears
+  const wallTop = floorT + collar + bodyTop + gap, lidTop = bodyTop + gap + lidT;
+  const D = {r: 5, pin: 4, bore: 4.35, shaft: 3.9, flat: 2.7, fit: 0.2};
+
+  // Rollers, printed standing on their gears: the gear, a thick tube carrying the design from 1 mm below the card's
+  // edge, a plug above the pin hole, and a journal up through the lid. The raised roller ends in a keyed peg for the
+  // crank; the drive between the rollers is all in the printed teeth, so nothing can slip out of step.
+  const nu = Math.round(p.W / p.res), nv = Math.round(Lr / p.res) + 1;
+  function roller(raised) {
+    const r = new Float32Array(nu * nv), depth = p.relief + 0.2, room = t + 0.1;
+    for (let j = 0; j < nv; ++j) {
+      const Y = Lr * j / (nv - 1) - 1;
+      for (let i = 0; i < nu; ++i) {
+        // The raised roller meets the card at its own angle u; the recessed one turns the other way, meeting it at π - u.
+        const X = raised ? p.W * i / nu : ((p.W * (0.5 - i / nu)) % p.W + p.W) % p.W;
+        const s = sample(design, X, Y);
+        r[j * nu + i] = raised ? Rs + p.relief * Math.min(1, Math.max(0, 0.5 - s / 0.2))
+                               : Rs - depth * Math.min(1, Math.max(0, 0.5 - (s - room) / 0.2));
+      }
+    }
+    const body = Lamp.sheet(nu, nv, true, (i, j, front) => {
+      const a = 2 * Math.PI * i / nu, rr = front ? r[j * nu + i] : D.bore;
+      return [rr * Math.cos(a), rr * Math.sin(a), gearT - 0.01 + (Lr + 0.01) * j / (nv - 1)];
+    });
+    // The raised roller has a tooth facing the other roller where the recessed one has a gap, so the designs meet.
+    const gear = ring(D.bore, gearOutline(N, m, raised ? 0 : Math.PI + Math.PI / N), 0, gearT, N * 40);
+    const top = raised ? lidTop + 0.8 : lidTop + 0.3;
+    const out = [gear, body, ring(0, D.bore + 1.6, 10, bodyTop, 64), ring(0, D.r, bodyTop - 0.5, top, 96)];
+    if (raised) out.push(ring(0, dShaft(D.shaft, D.flat, 0), top - 0.3, top + crankT - 0.3, 96));
+    // A dot on the top of each roller, on the side that faces the other one when they are put in.
+    const a = raised ? 0 : Math.PI, dr = (D.r + Rs) / 2 + 1;
+    out.push(...at([ring(0, 1.2, bodyTop - 0.01, bodyTop + 0.6, 24)], dr * Math.cos(a), dr * Math.sin(a)));
+    return out;
+  }
+
+  // Base: floor, two walls with the card slot between them at front and back, the ledges the card slides on, pins
+  // and collars for the rollers, and arrows at the way in.
+  const wallHalf = side => {
+    const ns = 10, na = 72, n = 2 * ns + na + 1;
+    const pt = (rr, k) => {
+      let x, y;
+      if (k <= ns) { x = slot + (e - slot) * k / ns; y = -rr; }
+      else if (k <= ns + na) { const a = -Math.PI / 2 + Math.PI * (k - ns) / na; x = e + rr * Math.cos(a); y = rr * Math.sin(a); }
+      else { x = e - (e - slot) * (k - ns - na) / ns; y = rr; }
+      return [side * x, y];
+    };
+    return Lamp.sheet(n, 2, false, (i, j, front) => [...pt(j ? Ro : Ri, i), front ? wallTop : floorT - 0.5]);
+  };
+  const arrow = x => prism([[x - 2.4, -Ro - 4.6], [x + 2.4, -Ro - 4.6], [x, -Ro - 1.2]], x, -Ro - 3.4, floorT - 0.3, floorT + 0.8);
+  const base = [ring(0, a => rayStadium(0, 0, Math.cos(a), Math.sin(a), e, Rf), 0, floorT, 240), wallHalf(1), wallHalf(-1),
+                Lamp.box(-1.5, 1.5, -Ro, -Ri + 0.01, floorT - 0.5, ledge), Lamp.box(-1.5, 1.5, Ri - 0.01, Ro, floorT - 0.5, ledge), arrow(-5), arrow(5)];
+  for (const side of [1, -1])
+    base.push(...at([ring(0, D.pin, floorT - 0.5, floorT + collar + 9.5, 64), ring(0, D.bore + 2.2, floorT - 0.5, floorT + collar, 64)], side * e, 0));
+
+  // Lid, printed top down: a plate in two halves round the journal holes, and lips that drop inside the walls.
+  const lid = [];
+  for (const side of [1, -1]) {
+    const cx = side * e;
+    lid.push(...at([ring(D.r + 0.35, a => {
+      const ux = Math.cos(a), uy = Math.sin(a);
+      let r = rayStadium(cx, 0, ux, uy, e, Ro);
+      if (side * ux < 0) r = Math.min(r, (-side * 0.2 - cx) / ux);
+      return r;
+    }, 0, lidT, 192)], cx, 0));
+    const a0 = side > 0 ? 0 : Math.PI;
+    lid.push(...at([Lamp.arcBlock(Ri - 0.35 - 2, Ri - 0.35, a0 - 0.95, a0 + 0.95, lidT - 0.01, lidT + gap - 0.5, 48)], cx, 0));
+  }
+
+  // Crank: a hub on the keyed peg, with the arm pointing the way the flat faces, an arm and a knob.
+  const Lk = 30;
+  const crank = [ring(dShaft(D.shaft + D.fit, D.flat + D.fit, 0), 8.5, 0, crankT, 96), Lamp.box(7, Lk, -5, 5, 0, crankT),
+                 ...at([ring(0, 6.5, 0, crankT, 64), ring(0, 5.5, 0, crankT + 22, 64)], Lk, 0)];
+
+  return {parts: [
+    {name: 'Embosser base', sheets: base, colour: [0.55, 0.57, 0.62]},
+    {name: 'Embosser lid', sheets: lid, colour: [0.55, 0.57, 0.62]},
+    {name: 'Raised roller', sheets: roller(true), colour: [0.86, 0.72, 0.42]},
+    {name: 'Recessed roller', sheets: roller(false), colour: [0.62, 0.74, 0.86]},
+    {name: 'Crank', sheets: crank, colour: [0.75, 0.75, 0.78]},
+  ], R, N, m, tall: lidTop + crankT + 0.5, roller: lidTop + crankT + 0.5};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Views
+let design = null, built = null, viewer = null, timer = 0, preview = null;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+function update() {
+  on('card', p.card); on('pattern', p.pattern); on('area', p.area); on('border', p.border); on('tab', tab);
+  bandRow.classList.toggle('hidden', p.area === 'whole' || p.pattern === 'none');
+  on('repeat', p.repeat);
+  const picture = p.pattern === 'image';
+  $('tileEdit').classList.toggle('hidden', !picture);
+  for (const row of $('patternSliders').children) row.classList.toggle('hidden', picture || p.pattern === 'none');
+  $('tileName').textContent = tile ? `Picture: ${tile.name}` : 'No picture yet.';
+  $('pickTile').textContent = tile ? 'Change picture…' : 'Choose picture…';
+  $('tileInv').checked = !!(tile && tile.inv);
+  built = null;
+  clearTimeout(timer);
+  timer = setTimeout(render, 70);
+}
+
+// The card lit from the top left, raised parts catching the light: what it looks like, from either side.
+function cardImage(d, back) {
+  const {W, H, S} = d, img = new ImageData(W, H), h = new Float32Array(W * H), px = img.data;
+  // Height in display order: raised from the front; from behind, a dent with left and right swapped.
+  for (let y = 0; y < H; ++y)
+    for (let x = 0; x < W; ++x) {
+      const v = Math.min(1, Math.max(0, 0.5 - S[y * W + (back ? W - 1 - x : x)] / 0.45));
+      h[y * W + x] = back ? -v : v;
+    }
+  const H_ = (x, y) => h[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
+  for (let y = 0; y < H; ++y)
+    for (let x = 0; x < W; ++x) {
+      const hk = h[y * W + x], gx = H_(x + 1, y) - H_(x - 1, y), gy = H_(x, y + 1) - H_(x, y - 1);
+      const shadow = Math.max(0, H_(x - 3, y - 3) - hk);
+      const shade = 0.84 + 0.07 * hk + 1.2 * (gx + gy) - 0.12 * shadow;
+      const o = 4 * (y * W + x);
+      px[o] = Math.min(255, 239 * shade); px[o + 1] = Math.min(255, 235 * shade); px[o + 2] = Math.min(255, 226 * shade); px[o + 3] = 255;
+    }
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+function render() {
+  design = compose();
+  preview = {front: cardImage(design, false), back: null};
+  problems();
+  draw();
+  if (tab === 'parts') showParts();
+  facts();
+}
+function problems() {
+  const out = [];
+  if (!design.any) out.push('Nothing to press yet: choose a pattern or a border, or add a logo or words.');
+  if (p.pattern === 'image' && !tile) out.push('Choose a picture for the pattern.');
+  if (p.pattern === 'image' && tile && p.tileW < 5) out.push('A picture under 5 mm wide loses its detail on the roller; only bold shapes will come out.');
+  const thin = [!['none', 'dots', 'stars', 'image'].includes(p.pattern) ? p.line : 9, p.border !== 'none' ? p.bline : 9];
+  if (Math.min(...thin) < 0.8) out.push('Lines under 0.8 mm are narrower than two 0.4 mm nozzle lines; they may not print on the roller. Use thicker lines or a 0.2 mm nozzle.');
+  if (items.some(it => it.kind === 'text' && it.size < 4 && !it.bold)) out.push('Letters under 4 mm need to be bold, or printed with a 0.2 mm nozzle, to come out on the roller.');
+  if (p.relief > 0.9 && p.thick < 0.4) out.push('Pressing deeper than 0.9 mm into a thin card may split it at sharp corners.');
+  const R = p.W / (2 * Math.PI);
+  if (p.H + 30 > printer.height) out.push('The rollers are taller than your printer can print.');
+  $('problem').innerHTML = out.join('<br>');
+  $('problem').classList.toggle('hidden', !out.length);
+}
+function facts() {
+  const R = p.W / (2 * Math.PI);
+  $('facts').textContent = tab === 'parts'
+    ? `Five parts, all printed as shown with no supports: rollers standing on their gears, the lid top down. Print the rollers at 0.12 mm layers for the sharpest design. ` +
+      `With the arrows towards you, put the raised roller on the left pin and the recessed one on the right, with the dots on their tops facing each other, then fit the lid and the crank. ` +
+      `To press a card, turn the crank to point at the recessed roller, push the card in at the arrows until it stops, and turn the crank anticlockwise.`
+    : `Rollers ${(2 * R).toFixed(1)} mm across: one turn presses one ${p.W} mm card. ` +
+      `The design is shown from the raised side; words read the right way round there. Drag logos and words to place them.`;
+}
+
+let view = null;   // where the card is drawn: {x, y, s}
+function draw() {
+  const c = $('card'), dpr = window.devicePixelRatio || 1;
+  c.width = c.clientWidth * dpr; c.height = c.clientHeight * dpr;
+  const g = c.getContext('2d');
+  g.clearRect(0, 0, c.width, c.height);
+  if (!design || tab === 'parts') return;
+  const back = tab === 'back';
+  if (back && !preview.back) preview.back = cardImage(design, true);
+  const img = back ? preview.back : preview.front, pad = 30 * dpr;
+  const s = Math.min((c.width - 2 * pad) / p.W, (c.height - 2 * pad) / p.H), x = (c.width - p.W * s) / 2, y = (c.height - p.H * s) / 2;
+  view = {x: x / dpr, y: y / dpr, s: s / dpr};
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,.6)'; g.shadowBlur = 16 * dpr; g.shadowOffsetY = 4 * dpr;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(img, x, y, p.W * s, p.H * s);
+  g.restore();
+  const it = cur();
+  if (it && !back) {
+    const [w, h] = itemBox(it, g);
+    g.save();
+    g.translate(x + it.x * s, y + it.y * s); g.rotate(it.rot * Math.PI / 180);
+    g.strokeStyle = '#7b7bf0'; g.setLineDash([5 * dpr, 4 * dpr]); g.lineWidth = 1.5 * dpr;
+    g.strokeRect(-w / 2 * s - 3 * dpr, -h / 2 * s - 3 * dpr, w * s + 6 * dpr, h * s + 6 * dpr);
+    g.restore();
+  }
+}
+function showParts() {
+  if (!viewer) viewer = new Lamp.Viewer($('gl'));
+  if (!built) built = machine(design);
+  // As they might sit on the plate: rows of parts, side by side.
+  let x = 0, y = 0, row = 0;
+  const laid = built.parts.map(part => {
+    const [lo, hi] = Lamp.bounds(part.sheets);
+    if (x > 0 && x + hi[0] - lo[0] > 150) { x = 0; y += row + 10; row = 0; }
+    const sheets = Lamp.moved(part.sheets, x - lo[0], y - lo[1], 0);
+    x += hi[0] - lo[0] + 10; row = Math.max(row, hi[1] - lo[1]);
+    return {...part, sheets};
+  });
+  viewer.show(laid, false);
+}
+
+for (const b of document.querySelectorAll('[data-tab]'))
+  b.onclick = () => {
+    tab = b.dataset.tab;
+    on('tab', tab);
+    $('gl').classList.toggle('hidden', tab !== 'parts');
+    $('card').classList.toggle('hidden', tab === 'parts');
+    if (tab === 'parts') setTimeout(showParts, 0); else draw();
+    facts();
+  };
+
+// Dragging and resizing logos and words on the card.
+const card = $('card');
+let drag = null;
+const toMm = e => { const r = card.getBoundingClientRect(); return [(e.clientX - r.left - view.x) / view.s, (e.clientY - r.top - view.y) / view.s]; };
+function hit(mx, my) {
+  const g = card.getContext('2d');
+  for (let n = items.length - 1; n >= 0; --n) {
+    const it = items[n], [w, h] = itemBox(it, g), a = -it.rot * Math.PI / 180, dx = mx - it.x, dy = my - it.y;
+    const u = dx * Math.cos(a) - dy * Math.sin(a), v = dx * Math.sin(a) + dy * Math.cos(a);
+    if (Math.abs(u) <= w / 2 + 1 && Math.abs(v) <= h / 2 + 1) return n;
+  }
+  return -1;
+}
+card.addEventListener('pointerdown', e => {
+  if (!view || tab !== 'card') return;
+  const [mx, my] = toMm(e), n = hit(mx, my);
+  select(n);
+  if (n >= 0) { drag = {dx: items[n].x - mx, dy: items[n].y - my}; card.setPointerCapture(e.pointerId); }
+  draw();
+});
+card.addEventListener('pointermove', e => {
+  if (!view) return;
+  const [mx, my] = toMm(e);
+  if (drag) {
+    const it = cur();
+    it.x = Math.min(p.W, Math.max(0, mx + drag.dx)); it.y = Math.min(p.H, Math.max(0, my + drag.dy));
+    update();
+  } else card.style.cursor = hit(mx, my) >= 0 ? 'move' : 'default';
+});
+card.addEventListener('pointerup', () => { drag = null; });
+card.addEventListener('wheel', e => {
+  if (!view || tab !== 'card') return;
+  const n = hit(...toMm(e));
+  if (n < 0) return;
+  e.preventDefault();
+  if (n !== sel) select(n);
+  const it = cur();
+  it.size = Math.min(80, Math.max(2, it.size * Math.exp(-e.deltaY * 0.002)));
+  showAll();
+  update();
+}, {passive: false});
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'image') {
+    if (message.error) { alert(message.error); return; }
+    const img = new Image();
+    img.onload = () => {
+      if (wanted === 'tile') {
+        tile = {name: message.name, img, th: 128, inv: false};
+        makeMask(tile);
+        p.pattern = 'image';
+        if (p.tileW > Math.min(p.W, p.H)) p.tileW = 8;
+        showAll(); update();
+        return;
+      }
+      const it = {kind: 'logo', name: message.name, img, th: 128, inv: false, size: Math.min(30, p.H * 0.5 * img.width / img.height),
+                  rot: 0, outline: 0, clear: 1.2, x: p.W / 2, y: p.H / 2};
+      makeMask(it);
+      items.push(it);
+      select(items.length - 1);
+      update();
+    };
+    img.src = message.data;
+  }
+};
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  if (!design || !design.any) return;
+  if (!built) built = machine(design);
+  const [first, ...rest] = built.parts;
+  post(Lamp.addMessage(first.name, [{name: first.name, sheets: first.sheets}], rest.map(part => ({name: part.name, parts: [{name: part.name, sheets: part.sheets}]}))));
+};
+window.onresize = () => { clearTimeout(timer); timer = setTimeout(() => { draw(); }, 80); };
+document.fonts && document.fonts.ready.then(() => update());
+select(-1);
+showAll();
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

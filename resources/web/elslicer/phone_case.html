@@ -1,0 +1,1341 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phone Case</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  input[type=text], select { width: 100%; }
+  .field { margin: 6px 0; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .two input { width: 100%; }
+  .row { display: flex; gap: 6px; align-items: center; }
+  .row input { flex: 1; }
+  input[type=date], input[type=time] { font: inherit; color: var(--text); background: #16171a; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; color-scheme: dark; }
+  .viewbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; font-size: 12px; }
+  .viewbar .seg { margin: 0; }
+  .viewbar .seg button { flex: 0 0 auto; padding: 5px 12px; }
+  #refBox { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  #refBox .slider { grid-template-columns: auto 90px 52px; margin: 0; }
+  #openList { width: 100%; background: #16171a; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: inherit; font-size: 13px; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); }
+  #lookupNote { font-size: 12px; margin: 4px 0 0; }
+  .picker .now { width: 100%; text-align: left; display: flex; justify-content: space-between; }
+  .picker .now::after { content: '▾'; color: var(--muted); }
+  .picker .list { margin-top: 6px; max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; }
+  .picker .brand { width: 100%; text-align: left; border: 0; background: none; font-weight: 600; padding: 6px 8px; display: flex; gap: 8px; }
+  .picker .brand span { color: var(--muted); font-weight: 400; margin-left: auto; }
+  .picker .item { display: flex; align-items: center; }
+  .picker .item button { flex: 1; text-align: left; border: 0; background: none; padding: 5px 8px 5px 26px; font-size: 13px; }
+  .picker .item button:hover, .picker .brand:hover { background: var(--panel); }
+  .picker .item button.on { color: var(--accent); }
+  .picker .item .forget { flex: none; padding: 5px 8px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Phone Case</h1>
+  <p class="sub">A case that prints back down with no supports. TPU gives a case that grips; PLA or PETG a rigid one.</p>
+
+  <h3>Phone</h3>
+  <div class="field picker">
+    <button id="phoneNow" class="now" aria-expanded="false"></button>
+    <div id="phoneList" class="list hidden"></div>
+  </div>
+  <div class="field"><label for="lookup">Not listed? Type the model</label>
+    <div class="row"><input type="text" id="lookup" placeholder="e.g. Galaxy Z Flip 6, Nothing Phone 3"><button id="lookupGo">Look up</button></div>
+    <p id="lookupNote" class="muted">Asks the AI service chosen in AI Setup, billed by that service (about a cent). Check its figures with a ruler.</p>
+  </div>
+  <div id="sizeSliders"></div>
+  <div class="seg">
+    <button data-cammode="one" title="One opening round the whole camera, as for an iPhone or a Pixel">One camera opening</button>
+    <button data-cammode="lenses" title="A round hole for each lens and one for the flash, for phones whose lenses stand out on their own">A hole per lens</button>
+  </div>
+  <div id="lensSliders"></div>
+  <label class="check"><input type="checkbox" id="bottomBar" checked> A bar over the bottom opening, so the lip holds the phone there too</label>
+  <label class="check" id="flashRow"><input type="checkbox" id="flash" checked> A hole for the flash</label>
+
+  <h3>Openings</h3>
+  <p class="muted" style="font-size:12px;margin:0 0 6px">Choose one to move or resize it, or drag it in the Flat view. Sizes are as seen from outside the case.</p>
+  <select id="openList" size="7"></select>
+  <div id="openSliders"></div>
+  <div class="row" style="margin:6px 0"><button id="openReset">Put it back</button><button id="openDelete">Remove it</button></div>
+  <div class="field"><label for="addFace">Add your own opening on the</label>
+    <select id="addFace"><option value="back">Back</option><option value="left">Left side (seen from the screen)</option><option value="right">Right side (seen from the screen)</option><option value="bottom">Bottom</option><option value="top">Top</option></select></div>
+  <div class="seg">
+    <button data-addshape="rect">+ Square</button><button data-addshape="circle">+ Circle</button><button data-addshape="round">+ Rounded</button>
+  </div>
+
+  <h3>Fit</h3>
+  <div class="seg">
+    <button data-material="tpu" title="Soft and grippy; the lip over the screen stretches on">TPU</button>
+    <button data-material="rigid" title="PLA or PETG: hard, so the lip is small and the fit a little looser">PLA / PETG</button>
+  </div>
+  <div id="fitSliders"></div>
+
+  <h3>Back</h3>
+  <div class="grid" id="designs">
+    <button data-design="plain">Plain</button>
+    <button data-design="honey">Honeycomb</button>
+    <button data-design="diamond">Diamonds</button>
+    <button data-design="dots">Dots</button>
+    <button data-design="hearts">Hearts</button>
+    <button data-design="stars">Stars</button>
+    <button data-design="waves">Waves</button>
+    <button data-design="sky">Star chart<small>a real night sky</small></button>
+    <button data-design="picture">Your picture<small>a PNG or photo</small></button>
+  </div>
+  <div id="patternSliders" style="margin-top:6px"></div>
+  <div id="pictureBox" class="hidden">
+    <div class="row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
+      <button id="pick">Choose a picture…</button><span class="muted" id="pictureName" style="font-size:12px">None yet</span>
+    </div>
+    <div class="seg"><button data-pictile="tile">Repeat it</button><button data-pictile="one">One, big</button></div>
+    <div class="seg">
+      <button data-pichow="cut" title="The picture is cut through the back">Holes</button>
+      <button data-pichow="inlay" title="The back stays whole and the picture is set flush into its outside in filament 2">Filament 2</button>
+    </div>
+    <label class="check"><input type="checkbox" id="invert"> Cut the light parts instead of the dark</label>
+    <div id="pictureSliders"></div>
+  </div>
+  <div id="skyBox" class="hidden">
+    <div class="field"><label for="city">Place</label><select id="city"></select></div>
+    <div class="two">
+      <div class="field"><label for="date">Date</label><input type="date" id="date"></div>
+      <div class="field"><label for="time">Local time</label><input type="time" id="time" value="21:00"></div>
+    </div>
+    <label class="check"><input type="checkbox" id="figures" checked> Constellation lines, pressed into the back</label>
+    <div id="skySliders"></div>
+  </div>
+
+  <h3>Words</h3>
+  <div class="field"><input type="text" id="words" placeholder="Words on the back, or leave empty"></div>
+  <div class="two">
+    <div class="field"><label for="font">Font</label><select id="font"></select></div>
+    <div class="field"><label for="cut">How</label><select id="cut"><option value="cut">Cut through</option><option value="press">Pressed in</option></select></div>
+  </div>
+  <div id="wordSliders"></div>
+
+  <h3>QR code</h3>
+  <div class="field"><input type="text" id="qr" placeholder="A link or text for a QR code, or leave empty"></div>
+  <div id="qrSliders"></div>
+
+  <h3>Ears</h3>
+  <div class="seg">
+    <button data-ears="none">None</button>
+    <button data-ears="cat">Cat</button>
+    <button data-ears="bunny">Bunny</button>
+    <button data-ears="bear">Bear</button>
+  </div>
+  <div id="earSliders"></div>
+
+  <h3>On the back</h3>
+  <div class="seg">
+    <button data-extra="none">Nothing</button>
+    <button data-extra="wallet" title="A pocket for cards that clips into four keyholes in the back">Card wallet</button>
+    <button data-extra="stand" title="A plate that clips into the keyholes, with a leg that plugs in to stand the phone up">Stand</button>
+    <button data-extra="grip" title="A grip that pulls out to hold the phone by, and pushes flat again">Grip</button>
+  </div>
+  <div id="extraSliders"></div>
+  <div id="coverBox" class="hidden">
+    <div class="field"><input type="text" id="coverWords" placeholder="Words on the wallet, or leave empty"></div>
+    <div id="coverWordSliders"></div>
+    <div class="field"><input type="text" id="coverQr" placeholder="A QR code on the wallet, or leave empty"></div>
+    <div id="coverQrSliders"></div>
+    <p class="muted" style="font-size:12px;margin:2px 0 0">Both are set flush into the wallet's cover in filament 2.</p>
+  </div>
+
+  <h3>Printing</h3>
+  <div id="printSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <div class="viewbar">
+    <div class="seg"><button data-view="3d">3D</button><button data-view="flat" title="The back seen from outside, with the sides folded out flat round it">Flat</button></div>
+    <button id="refPick" title="A photo of a case you already have, to compare with this one">Compare with a photo…</button>
+    <div id="refBox" class="hidden">
+      <div class="seg"><button data-refmode="over">Over it</button><button data-refmode="beside">Side by side</button></div>
+      <div id="refSliders" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+      <label class="check" style="margin:0"><input type="checkbox" id="refFlip"> Mirror</label>
+      <button id="refClear">Remove photo</button>
+    </div>
+  </div>
+  <canvas id="canvas"></canvas>
+  <canvas id="flat" class="hidden" style="cursor:default"></canvas>
+  <div id="facts"></div>
+</div>
+
+<script src="lampkit.js"></script>
+<script src="sky_data.js"></script>
+<script src="sky_math.js"></script>
+<script src="qr.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+// ---------------------------------------------------------------------------------------------------------------
+// Phones, from their makers' published sizes, mm: width, height, depth (without the camera bump), corner radius.
+// cam: the camera cut-out seen from the back, phone upright: [from the left edge, from the top, width, height,
+// corner radius]. right and left: button runs seen from the front, [from the top, length]. bottom: the opening
+// for the port and speakers. Corner radii, cameras and buttons are measured from pictures: near, not exact.
+const IP = (W, H, D, R, cam, big, control) => ({W, H, D, R, cam, bottom: 46,
+  left: big ? [[24, 10], [43, 32]] : [[22, 10], [40, 31]], right: [[big ? 41 : 38, big ? 24 : 22], ...(control ? [[control, 20]] : [])]});
+const SAM = (W, H, D, R, cam, top = 27) => ({W, H, D, R, cam, bottom: 40, left: [], right: [[top, 50]]});
+const PIX = (W, H, D, R, cam) => ({W, H, D, R, cam, bottom: 40, left: [], right: [[32, 50]]});
+const PHONES = {
+  'Apple': {
+    'iPhone 17 Pro Max': IP(78.0, 163.4, 8.75, 11, [2, 2, 74, 30, 9], true, 102),
+    'iPhone 17 Pro':     IP(71.9, 150.0, 8.75, 10.5, [2, 2, 68, 29, 9], false, 92),
+    'iPhone Air':        IP(74.7, 156.2, 5.64, 11, [3, 3, 69, 23, 11], true),
+    'iPhone 17':         IP(71.5, 149.6, 7.95, 10.5, [6, 6, 19, 36, 9.5], false, 92),
+    'iPhone 16 Pro Max': IP(77.6, 163.0, 8.25, 11, [5, 5, 42, 42, 11], true, 102),
+    'iPhone 16 Pro':     IP(71.5, 149.6, 8.25, 10.5, [5, 5, 39, 40, 10], false, 92),
+    'iPhone 16 Plus':    IP(77.8, 160.9, 7.8, 11, [6, 6, 19, 36, 9.5], true, 100),
+    'iPhone 16':         IP(71.6, 147.6, 7.8, 10, [6, 6, 19, 36, 9.5], false, 90),
+    'iPhone 16e':        IP(71.5, 146.7, 7.8, 10, [7, 7, 15, 15, 7.5], false),
+    'iPhone 15 Pro Max': IP(76.7, 159.9, 8.25, 11, [5, 5, 42, 42, 11], true),
+    'iPhone 15 Pro':     IP(70.6, 146.6, 8.25, 10, [5, 5, 39, 40, 10], false),
+    'iPhone 15 Plus':    IP(77.8, 160.9, 7.8, 11, [5, 5, 33, 33, 8.5], true),
+    'iPhone 15':         IP(71.6, 147.6, 7.8, 10, [5, 5, 33, 33, 8.5], false),
+    'iPhone 14 Pro Max': IP(77.6, 160.7, 7.85, 11, [5, 5, 42, 42, 11], true),
+    'iPhone 14 Pro':     IP(71.5, 147.5, 7.85, 10, [5, 5, 39, 40, 10], false),
+    'iPhone 14 Plus':    IP(78.1, 160.8, 7.8, 11, [5, 5, 33, 33, 8.5], true),
+    'iPhone 14':         IP(71.5, 146.7, 7.8, 10, [5, 5, 32, 32, 8], false),
+    'iPhone 13 Pro Max': IP(78.1, 160.8, 7.65, 11, [5, 5, 40, 40, 10], true),
+    'iPhone 13 Pro':     IP(71.5, 146.7, 7.65, 10, [5, 5, 37, 38, 9.5], false),
+    'iPhone 13':         IP(71.5, 146.7, 7.65, 10, [5, 5, 31, 31, 8], false),
+    'iPhone 13 mini':    IP(64.2, 131.5, 7.65, 9, [5, 5, 29, 29, 7.5], false),
+    'iPhone 12 Pro Max': IP(78.1, 160.8, 7.4, 11, [5, 5, 36, 37, 9], true),
+    'iPhone 12 / 12 Pro':IP(71.5, 146.7, 7.4, 10, [5, 5, 31, 33, 8], false),
+    'iPhone 12 mini':    IP(64.2, 131.5, 7.4, 9, [5, 5, 28, 28, 7], false),
+    'iPhone 11':         IP(75.7, 150.9, 8.3, 10, [5, 5, 34, 34, 9], false),
+    'iPhone SE (2nd, 3rd)': IP(67.3, 138.4, 7.3, 9, [7, 6, 12, 22, 6], false),
+  },
+  'Samsung': {
+    'Galaxy S25 Ultra': SAM(77.6, 162.8, 8.2, 8, [7, 9, 24, 47, 6], 30),
+    'Galaxy S25+':      SAM(75.8, 158.4, 7.3, 9, [8, 10, 14, 44, 7]),
+    'Galaxy S25':       SAM(70.5, 146.9, 7.2, 9, [7, 9, 13, 42, 6.5]),
+    'Galaxy S24 Ultra': SAM(79.0, 162.3, 8.6, 4, [7, 9, 24, 48, 6], 30),
+    'Galaxy S24+':      SAM(75.9, 158.5, 7.7, 9, [8, 10, 14, 44, 7]),
+    'Galaxy S24':       SAM(70.6, 147.0, 7.6, 9, [7, 9, 13, 42, 6.5]),
+    'Galaxy S23 Ultra': SAM(78.1, 163.4, 8.9, 4, [7, 9, 24, 48, 6], 30),
+    'Galaxy S23':       SAM(70.9, 146.3, 7.6, 9, [7, 9, 13, 42, 6.5]),
+    'Galaxy A55':       SAM(77.4, 161.1, 8.2, 9, [8, 9, 14, 42, 7]),
+    'Galaxy A54':       SAM(76.7, 158.2, 8.2, 9, [8, 9, 14, 42, 7]),
+  },
+  'Google': {
+    'Pixel 9 Pro XL': PIX(76.6, 162.8, 8.5, 11, [8, 10, 60.6, 26, 13]),
+    'Pixel 9 Pro':    PIX(72.0, 152.8, 8.5, 10, [8, 10, 56, 24, 12]),
+    'Pixel 9':        PIX(72.0, 152.8, 8.5, 10, [8, 10, 56, 24, 12]),
+    'Pixel 8 Pro':    PIX(76.5, 162.6, 8.8, 10, [-2, 12, 80.5, 22, 4]),
+    'Pixel 8':        PIX(70.8, 150.5, 8.9, 10, [-2, 12, 74.8, 22, 4]),
+    'Pixel 8a':       PIX(72.7, 152.1, 8.9, 10, [-2, 12, 76.7, 20, 4]),
+    'Pixel 7':        PIX(73.2, 155.6, 8.7, 10, [-2, 15.5, 77.2, 19, 3]),
+    'Pixel 7a':       PIX(72.9, 152.4, 9.0, 10, [-2, 13, 76.9, 19, 4]),
+  },
+};
+// Phones the AI looked up, by name, kept by the app so they needn't be looked up again. Their keys are 'saved:<name>'.
+let SAVED = {};
+const findPhone = key => key.startsWith('saved:') ? SAVED[key.slice(6)] : Object.values(PHONES).map(g => g[key]).find(Boolean);
+const phoneName = key => key.startsWith('saved:') ? key.slice(6) : key;
+const phone = () => {
+  const base = findPhone(p.phone) || PHONES.Apple['iPhone 16'];
+  return {...base, W: p.W, H: p.H, D: p.D, R: p.R};
+};
+
+const FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Georgia', 'Didot', 'Snell Roundhand', 'Bradley Hand', 'Marker Felt',
+               'Copperplate', 'Chalkboard SE', 'Zapfino'];
+
+const p = {phone: 'iPhone 16', W: 71.6, H: 147.6, D: 7.8, R: 10, material: 'tpu', fit: 0.2, wall: 1.6, back: 2, lip: 0.9,
+           design: 'honey', cell: 6, bar: 1.4, limit: 4.3, starSize: 100, words: '', wordSize: 8, wordY: 30, qrSize: 30, qrY: 12,
+           ears: 'none', earSize: 26, earThick: 3, cards: 3, leg: 45, res: 0.3,
+           skyD: 58, skyY: 90, camMode: 'one', lensN: 3, lensD: 11, picTile: 'tile', picHow: 'cut', picThick: 0.1, picSize: 14, picBig: 50, picY: 70, threshold: 50,
+           gripY: 60, gripStages: 4, gripCap: 38, coverSize: 7, coverY: 14, coverQrSize: 24, coverQrY: 28,
+           view: '3d', refMode: 'over', refW: 75, refX: 0, refY: 0, refTurn: 0, refSee: 50};
+// The openings: the phone's own (camera, flash, buttons, bottom) moved or resized by adjust[key] = {x, y, w, h, r},
+// and ones added by hand, each {face, shape, x, y, w, h, r}. On the back x and y are the middle from the left and
+// top edges seen from the back; on the sides x is the middle from the top edge, on the bottom and top from the middle
+// seen from the back, and y is the middle's height above the bed. r is the corner radius.
+const adjust = {}, added = [];
+let chosen = 'cam';
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('sizeSliders'), 'W', 'Width mm', 55, 90, 0.1);
+slider($('sizeSliders'), 'H', 'Height mm', 110, 180, 0.1);
+slider($('sizeSliders'), 'D', 'Thickness mm', 5, 13, 0.05);
+slider($('sizeSliders'), 'R', 'Corners mm', 2, 14, 0.5);
+slider($('fitSliders'), 'fit', 'Room round mm', 0, 0.8, 0.05);
+slider($('fitSliders'), 'wall', 'Sides mm', 1.2, 3, 0.1);
+slider($('fitSliders'), 'back', 'Back mm', 1.6, 3, 0.1);
+slider($('fitSliders'), 'lip', 'Lip over screen', 0, 1.6, 0.1);
+const cellRow = slider($('patternSliders'), 'cell', 'Pattern mm', 3, 14, 0.5);
+const barRow = slider($('patternSliders'), 'bar', 'Between mm', 1, 4, 0.1);
+slider($('skySliders'), 'limit', 'Faintest star', 3.5, 5.5, 0.1);
+slider($('skySliders'), 'starSize', 'Star size %', 60, 200, 5);
+slider($('skySliders'), 'skyD', 'Chart mm', 30, 90, 1);
+slider($('skySliders'), 'skyY', 'Chart middle from bottom mm', 20, 150, 1);
+const picTileRow = slider($('pictureSliders'), 'picSize', 'Each one mm', 4, 40, 0.5);
+const picBigRow = slider($('pictureSliders'), 'picBig', 'Picture mm', 20, 90, 1);
+const picYRow = slider($('pictureSliders'), 'picY', 'Middle from bottom mm', 15, 150, 1);
+slider($('pictureSliders'), 'threshold', 'Dark below %', 10, 90, 1);
+slider($('pictureSliders'), 'picThick', 'Thicken mm', 0, 0.6, 0.05);
+slider($('wordSliders'), 'wordSize', 'Letters mm', 4, 20, 0.5);
+slider($('wordSliders'), 'wordY', 'From bottom mm', 8, 120, 1);
+slider($('qrSliders'), 'qrSize', 'Size mm', 18, 50, 1);
+slider($('qrSliders'), 'qrY', 'From bottom mm', 6, 110, 1);
+const lensRows = [slider($('lensSliders'), 'lensN', 'Lenses', 1, 4, 1), slider($('lensSliders'), 'lensD', 'Lens holes mm', 5, 18, 0.1)];
+const earRow = slider($('earSliders'), 'earSize', 'Ear size mm', 14, 45, 1);
+const earThickRow = slider($('earSliders'), 'earThick', 'Ear thickness mm', 1.6, 14, 0.1);
+const cardRow = slider($('extraSliders'), 'cards', 'Cards', 1, 5, 1);
+const legRow = slider($('extraSliders'), 'leg', 'Leg mm', 25, 70, 1);
+const gripRows = [slider($('extraSliders'), 'gripY', 'Grip from bottom mm', 30, 120, 1),
+  slider($('extraSliders'), 'gripStages', 'Grip stages', 2, 5, 1), slider($('extraSliders'), 'gripCap', 'Grip top mm', 28, 46, 1)];
+slider($('coverWordSliders'), 'coverSize', 'Letters mm', 4, 14, 0.5);
+slider($('coverWordSliders'), 'coverY', 'From bottom mm', 5, 80, 1);
+slider($('coverQrSliders'), 'coverQrSize', 'QR size mm', 16, 40, 1);
+slider($('coverQrSliders'), 'coverQrY', 'From bottom mm', 5, 70, 1);
+slider($('printSliders'), 'res', 'Detail mm', 0.2, 0.5, 0.01);
+
+// ---------------------------------------------------------------------------------------------------------------
+// The openings list: the phone's own, then the ones added. Choosing one puts its sliders under the list.
+const FACE = {back: 'back', left: 'left side', right: 'right side', bottom: 'bottom', top: 'top'};
+const SHAPE = {rect: 'Square', circle: 'Circle', round: 'Rounded'};
+function openings() {
+  const ph = phone(), list = [{key: 'cam', name: p.camMode === 'lenses' ? 'Camera lenses' : 'Camera', face: 'back'}];
+  if ($('flash').checked) list.push({key: 'flash', name: 'Flash', face: 'back'});
+  ph.right.forEach((_, n) => list.push({key: 'right' + n, name: `Buttons, right side${ph.right.length > 1 ? ' ' + (n + 1) : ''}`, face: 'right'}));
+  ph.left.forEach((_, n) => list.push({key: 'left' + n, name: `Buttons, left side${ph.left.length > 1 ? ' ' + (n + 1) : ''}`, face: 'left'}));
+  if (ph.bottom) list.push({key: 'bottom', name: 'Port and speakers', face: 'bottom'});
+  added.forEach((o, n) => list.push({key: 'add' + n, name: `${SHAPE[o.shape]} on the ${FACE[o.face]}`, face: o.face, own: o}));
+  return list;
+}
+const isAdded = key => key.startsWith('add');
+// The sliders are only made again when another opening is chosen or it moved some other way, never while one is dragged.
+let slidersFor = '';
+function drawOpenings(fresh = false) {
+  const list = openings();
+  if (!list.some(o => o.key === chosen)) chosen = list[0].key;
+  $('openList').innerHTML = '';
+  for (const o of list) {
+    const moved = adjust[o.key] && Object.values(adjust[o.key]).some(v => v);
+    $('openList').add(new Option(o.name + (moved ? ' (changed)' : ''), o.key, false, o.key === chosen));
+  }
+  $('openDelete').classList.toggle('hidden', !isAdded(chosen));
+  $('openReset').classList.toggle('hidden', isAdded(chosen));
+  // Its sliders: an added one by where it is, the phone's own by how far it is moved.
+  const tag = chosen + '|' + p.phone + '|' + p.camMode;
+  if (!fresh && tag === slidersFor) return;
+  slidersFor = tag;
+  const box = $('openSliders'); box.innerHTML = '';
+  const o = list.find(q => q.key === chosen), d = dims(), side = o.face === 'left' || o.face === 'right', wall = o.face !== 'back';
+  const along = side ? 'Down from top mm' : 'Right of middle mm', across = wall ? along : 'From left mm';
+  if (o.own) {
+    const q = o.own, set = (k, v) => { q[k] = v; };
+    const row = (k, label, min, max, step) => { p['o_' + k] = q[k]; slider(box, 'o_' + k, label, min, max, step).querySelectorAll('input').forEach(i => i.addEventListener('input', () => set(k, p['o_' + k]))); sliders['o_' + k](q[k]); };
+    row('x', across, wall && !side ? -d.a : 0, side ? d.ph.H : d.ph.W + (wall ? -d.a : 0), 0.1);
+    row('y', wall ? 'Middle above bed mm' : 'From top mm', 0, wall ? d.top : d.ph.H, 0.1);
+    row('w', q.shape === 'circle' ? 'Across mm' : wall && side ? 'Length mm' : 'Width mm', 0.5, 80, 0.1);
+    if (q.shape !== 'circle') row('h', 'Height mm', 0.5, wall ? d.top : 80, 0.1);
+    if (q.shape === 'round') row('r', 'Corners mm', 0, 20, 0.1);
+  } else {
+    const a = adj(chosen), set = (k, v) => { adjust[chosen] = {...adj(chosen), [k]: v}; };
+    const row = (k, label, min, max, step, value) => { p['o_' + k] = value; slider(box, 'o_' + k, label, min, max, step).querySelectorAll('input').forEach(i => i.addEventListener('input', () => set(k, p['o_' + k]))); sliders['o_' + k](value); };
+    const back = o.face === 'back', circle = chosen === 'flash' || (chosen === 'cam' && p.camMode === 'lenses');
+    row('x', back ? 'Move right mm' : side ? 'Move down mm' : 'Move right mm', -20, 20, 0.1, a.x);
+    row('y', back ? 'Move down mm' : 'Move up mm', -20, 20, 0.1, a.y);
+    row('w', circle ? 'Bigger across mm' : side ? 'Longer mm' : 'Wider mm', -20, 20, 0.1, a.w);
+    if (!circle) row('h', back ? 'Taller mm' : 'Higher mm', -10, 20, 0.1, a.h);
+    if (!circle) row('r', 'Corners mm', 0, 20, 0.1, a.r !== null ? a.r : chosen === 'cam' ? cameraRect(d).r : chosen === 'bottom' && $('bottomBar').checked ? 20 : 1.5);
+  }
+}
+$('openList').onchange = () => { chosen = $('openList').value; update(); };
+$('openReset').onclick = () => { delete adjust[chosen]; slidersFor = ''; update(); };
+$('openDelete').onclick = () => { added.splice(+chosen.slice(3), 1); chosen = 'cam'; update(); };
+for (const b of document.querySelectorAll('[data-addshape]')) b.onclick = () => {
+  const d = dims(), face = $('addFace').value, wall = face !== 'back', side = face === 'left' || face === 'right', shape = b.dataset.addshape;
+  added.push({face, shape, x: wall ? (side ? d.ph.H / 2 : 0) : d.ph.W / 2, y: wall ? d.B + d.ph.D / 2 : d.ph.H / 2,
+              w: wall ? 8 : 12, h: wall ? 3 : 12, r: shape === 'round' ? (wall ? 1.5 : 4) : 0});
+  chosen = 'add' + (added.length - 1);
+  if (p.view !== 'flat') p.view = 'flat';
+  update();
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// The flat view: the back seen from outside, as in a photo of a case, with the sides folded out flat round it.
+// Openings can be dragged, and a photo of a case shown over it or beside it to compare.
+let refImg = null, refWait = false;
+slider($('refSliders'), 'refW', 'Photo width mm', 20, 1000, 0.5);
+slider($('refSliders'), 'refTurn', 'Turn °', -180, 180, 0.5);
+slider($('refSliders'), 'refSee', 'Show %', 10, 100, 5);
+$('refPick').onclick = () => { refWait = true; post({cmd: 'pick_image'}); };
+$('refClear').onclick = () => { refImg = null; update(); };
+$('refFlip').oninput = update;
+// Plan space: mm, x to the right and y up, seen from the back. Case x runs the other way.
+let flatMap = null;
+function drawFlat() {
+  const cv = $('flat'), g = cv.getContext('2d'), dpr = window.devicePixelRatio || 1;
+  cv.width = cv.clientWidth * dpr; cv.height = cv.clientHeight * dpr;
+  const d = dims(), out = d.a + d.T, up = d.b + d.T, H = d.top, beside = refImg && p.refMode === 'beside';
+  // How much room: the back and its folded-out sides, and the photo beside it.
+  const spanX = 2 * (out + H) + (beside ? p.refW + 12 : 0), spanY = 2 * (up + H);
+  const k = Math.min(cv.width / (spanX + 10), cv.height / (spanY + 10)), cx = cv.width / 2 - (beside ? (p.refW + 12) / 2 * k : 0), cy = cv.height / 2;
+  const X = x => cx + x * k, Y = y => cy - y * k;
+  flatMap = {k, cx, cy, d};
+  g.fillStyle = '#141518'; g.fillRect(0, 0, cv.width, cv.height);
+  // Guides every 10 mm across, from the top of the back, so heights can be read off and compared.
+  g.strokeStyle = 'rgba(255,255,255,0.06)'; g.lineWidth = 1; g.fillStyle = 'rgba(255,255,255,0.35)'; g.font = `${10 * dpr}px -apple-system, sans-serif`;
+  for (let mm = 0; mm <= 2 * d.b; mm += 10) { const y = Y(d.b - mm); g.beginPath(); g.moveTo(0, y); g.lineTo(cv.width, y); g.stroke(); g.fillText(String(mm), 4 * dpr, y - 2 * dpr); }
+  const photo = () => {
+    if (!refImg) return;
+    const w = p.refW * k, h = w * refImg.height / refImg.width, at = beside ? [X(out + H + 12 + p.refW / 2), cy] : [cx, cy];
+    g.save(); g.globalAlpha = beside ? 1 : p.refSee / 100; g.translate(at[0] + p.refX * k, at[1] - p.refY * k); g.rotate(p.refTurn * Math.PI / 180);
+    if ($('refFlip').checked) g.scale(-1, 1);
+    g.drawImage(refImg, -w / 2, -h / 2, w, h); g.restore();
+  };
+  if (!beside) photo();
+  const ink = 'rgba(140,158,200,', fill = beside || !refImg ? 0.35 : 0.12;
+  // The back and the sides folded out from its edge.
+  g.lineWidth = 1.5 * dpr; g.strokeStyle = ink + '0.9)'; g.fillStyle = ink + fill + ')';
+  g.beginPath(); g.roundRect(X(-out), Y(up), 2 * out * k, 2 * up * k, d.r * k); g.fill(); g.stroke();
+  g.fillStyle = ink + fill * 0.6 + ')';
+  for (const [x0, y0, w, h] of [[out, -(up - d.r), H, 2 * (up - d.r)], [-out - H, -(up - d.r), H, 2 * (up - d.r)], [-(out - d.r), up, 2 * (out - d.r), H], [-(out - d.r), -up - H, 2 * (out - d.r), H]]) {
+    g.beginPath(); g.rect(X(x0), Y(y0 + h), w * k, h * k); g.fill(); g.stroke(); }
+  g.fillStyle = 'rgba(255,255,255,0.4)'; g.textAlign = 'center';
+  g.fillText('top', X(0), Y(up + H) - 4 * dpr); g.fillText('bottom', X(0), Y(-up - H) + 12 * dpr);
+  g.save(); g.translate(X(out + H / 2), Y(0)); g.rotate(Math.PI / 2); g.fillText('left side', 0, -H * k / 2 - 4 * dpr); g.restore();
+  g.save(); g.translate(X(-out - H / 2), Y(0)); g.rotate(-Math.PI / 2); g.fillText('right side', 0, -H * k / 2 - 4 * dpr); g.restore();
+  // The openings: on the back where they are (case x reversed); on the sides with height running outwards.
+  const shapes = [];
+  for (const h of cameraHoles(d)) {
+    if (h.circle) { const [x, y, r] = h.circle; shapes.push({key: h.key, x0: -x - r, x1: -x + r, y0: y - r, y1: y + r, r}); }
+    else { const q = h.rect; shapes.push({key: h.key, x0: -q.x1, x1: -q.x0, y0: q.y0, y1: q.y1, r: q.r}); }
+  }
+  for (const h of wallHoles(d)) {
+    const z0 = Math.max(0, h.z0), z1 = Math.min(H, h.z1), rr = Math.min(h.rr, (h.s1 - h.s0) / 2, (z1 - z0) / 2);
+    // On the sides s runs down from the top edge; the phone's right side (seen from the screen) is on the left here.
+    if (h.side === 'right') shapes.push({key: h.key, x0: -out - z1, x1: -out - z0, y0: d.ph.H / 2 - h.s1, y1: d.ph.H / 2 - h.s0, r: rr});
+    else if (h.side === 'left') shapes.push({key: h.key, x0: out + z0, x1: out + z1, y0: d.ph.H / 2 - h.s1, y1: d.ph.H / 2 - h.s0, r: rr});
+    else if (h.side === 'bottom') shapes.push({key: h.key, x0: -h.s1, x1: -h.s0, y0: -up - z1, y1: -up - z0, r: rr});
+    else shapes.push({key: h.key, x0: -h.s1, x1: -h.s0, y0: up + z0, y1: up + z1, r: rr});
+  }
+  for (const q of shapes) {
+    const on = q.key === chosen;
+    g.beginPath(); g.roundRect(X(q.x0), Y(q.y1), (q.x1 - q.x0) * k, (q.y1 - q.y0) * k, Math.max(0, Math.min(q.r, (q.x1 - q.x0) / 2, (q.y1 - q.y0) / 2)) * k);
+    g.fillStyle = refImg && !beside ? 'rgba(10,10,12,0.25)' : '#0c0d0f'; g.fill();
+    g.lineWidth = (on ? 2.5 : 1.5) * dpr; g.strokeStyle = on ? '#f2b84b' : 'rgba(230,235,245,0.9)'; g.stroke();
+  }
+  flatMap.shapes = shapes;
+  if (beside) photo();
+  g.textAlign = 'left';
+}
+// Dragging: an opening moves; anywhere else moves the photo, to line it up with the case. The wheel sizes the photo.
+let drag = null;
+$('flat').onpointerdown = e => {
+  if (!flatMap) return;
+  const dpr = window.devicePixelRatio || 1, r = $('flat').getBoundingClientRect(), {k, cx, cy} = flatMap;
+  const x = ((e.clientX - r.left) * dpr - cx) / k, y = (cy - (e.clientY - r.top) * dpr) / k;
+  const hit = [...flatMap.shapes].reverse().find(q => x >= q.x0 - 1 && x <= q.x1 + 1 && y >= q.y0 - 1 && y <= q.y1 + 1);
+  if (hit) { chosen = hit.key; drawOpenings(); }
+  drag = {x, y, key: hit ? hit.key : null, face: hit ? openings().find(o => o.key === hit.key).face : null, start: hit ? null : [p.refX, p.refY]};
+  if (!hit && !refImg) drag = null;
+  if (drag) $('flat').setPointerCapture(e.pointerId);
+  drawFlat();
+};
+$('flat').onpointermove = e => {
+  if (!drag) return;
+  const dpr = window.devicePixelRatio || 1, r = $('flat').getBoundingClientRect(), {k, cx, cy} = flatMap;
+  const x = ((e.clientX - r.left) * dpr - cx) / k, y = (cy - (e.clientY - r.top) * dpr) / k, dx = x - drag.x, dy = y - drag.y;
+  drag.x = x; drag.y = y;
+  if (!drag.key) { p.refX += dx; p.refY += dy; drawFlat(); return; }
+  // Plan moves into each face's own directions: on the back x right and y down; on the sides along and up.
+  const f = drag.face, step = f === 'back' ? [dx, -dy] : f === 'left' ? [-dy, dx] : f === 'right' ? [-dy, -dx] : f === 'bottom' ? [dx, -dy] : [dx, dy];
+  if (isAdded(drag.key)) { const o = added[+drag.key.slice(3)]; o.x += step[0]; o.y += step[1]; }
+  else { const a = adj(drag.key); adjust[drag.key] = {...a, x: a.x + step[0], y: a.y + step[1]}; }
+  drawOpenings(true); drawFlat();
+};
+ // The wheel scales the photo about the pointer, so a photo with a lot round the case can still be brought to size.
+$('flat').addEventListener('wheel', e => {
+  if (!refImg || !flatMap) return;
+  e.preventDefault();
+  const dpr = window.devicePixelRatio || 1, r = $('flat').getBoundingClientRect(), {k, cx, cy} = flatMap, beside = p.refMode === 'beside';
+  const x = ((e.clientX - r.left) * dpr - cx) / k, y = (cy - (e.clientY - r.top) * dpr) / k;
+  const ox = (beside ? flatMap.d.a + flatMap.d.T + flatMap.d.top + 12 + p.refW / 2 : 0) + p.refX, oy = p.refY;
+  const f = Math.exp(-e.deltaY * 0.0015), w = Math.max(20, Math.min(1000, p.refW * f)), g = w / p.refW;
+  if (!beside) { p.refX += (x - ox) * (1 - g); p.refY += (y - oy) * (1 - g); }
+  sliders.refW(Math.round(w * 2) / 2); drawFlat();
+}, {passive: false});
+$('flat').onpointerup = () => { if (drag && drag.key) update(); drag = null; };
+
+// The phone picker: a section per maker, each folding away, and the phones looked up before at the top.
+const openBrands = new Set(['Apple']);
+const LOOKED = 'Looked up before';
+function drawPicker() {
+  const list = $('phoneList'), sections = {...(Object.keys(SAVED).length ? {[LOOKED]: SAVED} : {}), ...PHONES};
+  $('phoneNow').textContent = phoneName(p.phone);
+  list.innerHTML = '';
+  for (const [brand, phones] of Object.entries(sections)) {
+    const open = openBrands.has(brand), head = document.createElement('button');
+    head.className = 'brand'; head.setAttribute('aria-expanded', open);
+    head.innerHTML = `${open ? '▾' : '▸'} ${brand}<span>${Object.keys(phones).length}</span>`;
+    head.onclick = () => { open ? openBrands.delete(brand) : openBrands.add(brand); drawPicker(); };
+    list.append(head);
+    if (!open) continue;
+    for (const name of Object.keys(phones)) {
+      const key = brand === LOOKED ? 'saved:' + name : name, row = document.createElement('div'), b = document.createElement('button');
+      row.className = 'item'; b.textContent = name; b.classList.toggle('on', key === p.phone);
+      b.onclick = () => { p.phone = key; showList(false); fromPhone(); drawPicker(); update(); };
+      row.append(b);
+      if (brand === LOOKED) {
+        const x = document.createElement('button');
+        x.className = 'forget'; x.textContent = '×'; x.title = `Forget ${name}`;
+        x.onclick = () => { delete SAVED[name]; storePhones(); if (p.phone === key) { p.phone = 'iPhone 16'; fromPhone(); update(); } drawPicker(); };
+        row.append(x);
+      }
+      list.append(row);
+    }
+  }
+}
+const showList = on => { $('phoneList').classList.toggle('hidden', !on); $('phoneNow').setAttribute('aria-expanded', on); };
+$('phoneNow').onclick = () => showList($('phoneList').classList.contains('hidden'));
+drawPicker();
+// A phone from the AI's answer or the saved list, with every figure checked.
+function phoneFrom(q) {
+  const num = (v, dflt) => isFinite(+v) && +v > 0 ? +v : dflt;
+  const runs = list => (Array.isArray(list) ? list : []).filter(r => Array.isArray(r) && r.length >= 2).map(r => [num(r[0], 30), num(r[1], 10)]);
+  const c = Array.isArray(q.cam) ? {x: q.cam[0], y: q.cam[1], w: q.cam[2], h: q.cam[3], r: q.cam[4]} : q.camera || {};
+  return {W: num(q.width ?? q.W, 72), H: num(q.height ?? q.H, 150), D: num(q.depth ?? q.D, 8), R: num(q.corner ?? q.R, 9),
+          cam: [num(c.x, 6), num(c.y, 6), num(c.w, 30), num(c.h, 30), num(c.r, 6)], right: runs(q.right), left: runs(q.left), bottom: num(q.bottom, 40),
+          ...circles(q.lenses).length ? {lenses: circles(q.lenses)} : {}, ...circles([q.flash]).length ? {flash: circles([q.flash])[0]} : {}};
+}
+// Lens or flash circles as [x, y, diameter] from the back's left and top edges; anything else is dropped.
+const circles = list => (Array.isArray(list) ? list : []).filter(c => Array.isArray(c) && c.length >= 3 && c.every(v => isFinite(+v) && +v >= 0) && +c[2] > 0).map(c => c.slice(0, 3).map(Number));
+function fromPhone() {
+  const ph = findPhone(p.phone);
+  if (!ph) return;
+  for (const k of Object.keys(adjust)) delete adjust[k];
+  for (const k of ['W', 'H', 'D', 'R']) sliders[k](ph[k]);
+  // One opening round the lenses; on Galaxy phones the flash sits outside it, so it gets a hole of its own.
+  const galaxy = /galaxy/i.test(phoneName(p.phone)) || Object.keys(PHONES.Samsung).includes(p.phone);
+  p.camMode = 'one';
+  const guess = lensGuess(ph, ph.lenses ? ph.lenses.length : 3);
+  sliders.lensN(ph.lenses ? ph.lenses.length : 3);
+  sliders.lensD(ph.lenses ? Math.round((Math.max(...ph.lenses.map(l => l[2])) + 0.6) * 10) / 10 : guess.d);
+  $('flash').checked = galaxy || !!ph.flash;
+  // The star chart starts just under the camera, as big as fits across.
+  const d = dims(), cam = cameraRect(d), R = Math.min(d.a - 6, 32);
+  sliders.skyD(Math.round(2 * R)); sliders.skyY(Math.round(cam.y0 - 4 - R + d.b));
+}
+for (const c of CITIES) $('city').add(new Option(c.name, c.name));
+$('city').value = 'Luxembourg';
+const today = new Date();
+$('date').value = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+for (const f of FONTS) $('font').add(new Option(f, f));
+for (const id of ['city', 'date', 'time', 'font', 'cut']) $(id).onchange = update;
+window.addEventListener('resize', () => { if (p.view === 'flat') drawFlat(); });
+for (const id of ['bottomBar', 'flash', 'words', 'figures', 'qr', 'invert', 'coverWords', 'coverQr']) $(id).oninput = update;
+const choose = (attr, key, after) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; if (after) after(); update(); }; };
+choose('view', 'view'); choose('refmode', 'refMode');
+choose('design', 'design'); choose('ears', 'ears'); choose('extra', 'extra'); choose('pictile', 'picTile'); choose('cammode', 'camMode'); choose('pichow', 'picHow');
+choose('material', 'material', () => { sliders.fit(p.material === 'tpu' ? 0.2 : 0.4); sliders.lip(p.material === 'tpu' ? 0.9 : 0.4); });
+p.extra = 'none';
+
+// ---------------------------------------------------------------------------------------------------------------
+// The case, with x across and y up the phone, centred on the phone, seen from inside: the back lies on the bed at
+// z = 0 and the screen faces up. Seen from the back, left and right swap, so the camera (top left from the back)
+// is top right here, and anything to be read from the back is drawn mirrored.
+const dims = () => {
+  const ph = phone(), c = p.fit, B = p.back;
+  return {ph, a: ph.W / 2 + c, b: ph.H / 2 + c, r: Math.min(ph.R + c, ph.W / 2), T: p.wall, B, top: B + ph.D + p.lip + 0.4};
+};
+// A rounded rectangle round the origin, half sizes a and b, corner radius r.
+function rrect(g, a, b, r, cx = 0, cy = 0) {
+  r = Math.max(0, Math.min(r, a, b));
+  g.beginPath(); g.roundRect(cx - a, cy - b, 2 * a, 2 * b, r);
+}
+// Points round the same rectangle, anticlockwise from the middle of the right side, about step mm apart, each with
+// its outward normal.
+function around(a, b, r, step) {
+  const pts = [], add = (x, y, nx, ny) => pts.push({x, y, nx, ny});
+  const line = (x0, y0, x1, y1, nx, ny) => { const L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(1, Math.ceil(L / step));
+    for (let s = 0; s < n; ++s) add(x0 + (x1 - x0) * s / n, y0 + (y1 - y0) * s / n, nx, ny); };
+  const arc = (cx, cy, a0) => { const n = Math.max(2, Math.ceil(r * Math.PI / 2 / step));
+    for (let s = 0; s < n; ++s) { const t = a0 + Math.PI / 2 * s / n; add(cx + r * Math.cos(t), cy + r * Math.sin(t), Math.cos(t), Math.sin(t)); } };
+  line(a, 0, a, b - r, 1, 0); arc(a - r, b - r, 0);
+  line(a - r, b, -(a - r), b, 0, 1); arc(-(a - r), b - r, Math.PI / 2);
+  line(-a, b - r, -a, -(b - r), -1, 0); arc(-(a - r), -(b - r), Math.PI);
+  line(-(a - r), -b, a - r, -b, 0, -1); arc(a - r, -(b - r), 1.5 * Math.PI);
+  line(a, -(b - r), a, 0, 1, 0);
+  return pts;
+}
+
+// Where the keyholes for a wallet or stand go: four, two each side, with the pegs sliding down into them.
+const KEY = {stem: 2.0, slot: 2.2, head: 3.2, open: 3.8, rise: 5};
+function keyholes(d) {
+  if (p.extra === 'none') return null;
+  // The grip's four, close round its middle.
+  if (p.extra === 'grip') { const yc = -d.b + p.gripY, s = GRIP.pegs / Math.SQRT2;
+    return {kx: s, yc, grip: true, at: [[s, yc + s], [-s, yc + s], [s, yc - s], [-s, yc - s]]}; }
+  const kx = Math.min(31, d.a - KEY.open - 1.2);
+  const cam = cameraRect(d), camLow = cam ? cam.y0 - 2 : d.b;
+  const yc = Math.min(-6, camLow - 46);
+  return {kx, yc, at: [[kx, yc + 30], [-kx, yc + 30], [kx, yc - 30], [-kx, yc - 30]]};
+}
+// Where the lenses are when only the camera's outline is known: n in a row down its long side, as big as fits with a
+// bar between them, and the flash beside them, towards the middle of the phone, between the first two.
+function lensGuess(ph, n) {
+  const [cx, cy, cw, ch] = ph.cam, s = Math.min(cw, ch), L = Math.max(cw, ch), step = n > 1 ? (L - s) / (n - 1) : 0;
+  const d = Math.round(Math.max(5, Math.min(s - 3, n > 1 ? step - 1.2 : s - 3)) * 10) / 10, along = ch >= cw;
+  const at = k => n > 1 ? s / 2 + k * step : L / 2;
+  const lenses = Array.from({length: n}, (_, k) => along ? [cx + cw / 2, cy + at(k), d] : [cx + at(k), cy + ch / 2, d]);
+  const mid = n > 1 ? (at(0) + at(1)) / 2 : at(0);
+  const inward = cx + cw / 2 < ph.W / 2 ? 1 : -1;
+  const flash = along ? [cx + cw / 2 + inward * (cw / 2 + 4), cy + mid, 4.6] : [cx + mid, cy + ch + 4, 4.6];
+  return {lenses, flash, d};
+}
+// The camera's openings in the case, in its own coordinates: one rounded rectangle, or a circle per lens and the flash.
+const adj = key => ({x: 0, y: 0, w: 0, h: 0, r: null, ...(adjust[key] || {})});
+function cameraHoles(d) {
+  const ph = d.ph, a = adj('cam'), fa = adj('flash');
+  const flash = f => ({key: 'flash', circle: [ph.W / 2 - f[0] - fa.x, ph.H / 2 - f[1] - fa.y, Math.max(0.5, (f[2] + fa.w) / 2)]});
+  const out = [];
+  if (p.camMode !== 'lenses') {
+    out.push({key: 'cam', rect: cameraRect(d)});
+    if ($('flash').checked) out.push(flash(ph.flash ? [ph.flash[0], ph.flash[1], ph.flash[2] + 0.6] : lensGuess(ph, p.lensN).flash));
+  } else {
+    const given = ph.lenses && ph.lenses.length === p.lensN, g = lensGuess(ph, p.lensN);
+    for (const l of given ? ph.lenses : g.lenses)
+      out.push({key: 'cam', circle: [ph.W / 2 - l[0] - a.x, ph.H / 2 - l[1] - a.y, Math.max(0.5, (p.lensD + a.w) / 2)]});
+    if ($('flash').checked) out.push(flash(ph.flash ? [ph.flash[0], ph.flash[1], ph.flash[2] + 0.6] : g.flash));
+  }
+  // Openings added on the back, from the left and top edges seen from the back.
+  added.forEach((o, n) => {
+    if (o.face !== 'back') return;
+    const x = ph.W / 2 - o.x, y = ph.H / 2 - o.y;
+    if (o.shape === 'circle') out.push({key: 'add' + n, circle: [x, y, o.w / 2]});
+    else out.push({key: 'add' + n, rect: {x0: x - o.w / 2, x1: x + o.w / 2, y0: y - o.h / 2, y1: y + o.h / 2, r: o.shape === 'rect' ? 0 : o.r}});
+  });
+  return out;
+}
+// The camera's opening, with a millimetre's room all round, moved and resized as asked. Seen from the back x runs
+// the other way, so moving it right seen from the back is towards -x here.
+function cameraRect(d) {
+  const [cx, cy, cw, ch, cr] = d.ph.cam, m = 1, a = adj('cam');
+  const w = Math.max(2, cw + a.w), h = Math.max(2, ch + a.h), mx = cx + a.x + cw / 2, my = cy + a.y + ch / 2;
+  const x1 = d.ph.W / 2 - mx + w / 2 + m, x0 = d.ph.W / 2 - mx - w / 2 - m, y1 = d.ph.H / 2 - my + h / 2 + m, y0 = d.ph.H / 2 - my - h / 2 - m;
+  return {x0, x1, y0, y1, r: a.r !== null ? a.r : cr + m};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The back: a height field, drawn first as pictures at k pixels per mm. plate: where the back is solid; press:
+// what is pressed into its outside; ear and inner: the ears and the hollow in each.
+function canvasFor(k, x0, x1, y0, y1) {
+  const W = Math.ceil((x1 - x0) * k) + 2, H = Math.ceil((y1 - y0) * k) + 2, ox = -x0 * k + 1, oy = y1 * k + 1;
+  const make = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', {willReadFrequently: true});
+    g.setTransform(k, 0, 0, -k, ox, oy); g.fillStyle = g.strokeStyle = '#fff'; g.lineJoin = g.lineCap = 'round'; return [c, g]; };
+  return {W, H, ox, oy, k, make};
+}
+const rawAlpha = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
+  for (let n = 0; n < out.length; ++n) out[n] = d[4 * n + 3]; return out; };
+const alphaOf = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
+  for (let n = 0; n < out.length; ++n) out[n] = d[4 * n + 3] > 127; return out; };
+
+function earShapes(g, d, inner) {
+  if (p.ears === 'none') return;
+  const s = p.earSize, base = d.b + d.T - 1.5, x = Math.max(s * 0.45, d.a - s * 0.55);
+  for (const side of [1, -1]) {
+    g.save(); g.translate(side * x, base);
+    if (p.ears === 'cat') {
+      g.rotate(-side * 0.12);
+      const w = inner ? s * 0.32 : s * 0.55, h = inner ? s * 0.62 : s * 0.9, y0 = inner ? s * 0.12 : -2;
+      g.beginPath(); g.moveTo(-w, y0); g.quadraticCurveTo(-w * 0.55, y0 + h * 0.6, -w * 0.1, y0 + h); g.quadraticCurveTo(0, y0 + h * 1.06, w * 0.1, y0 + h);
+      g.quadraticCurveTo(w * 0.55, y0 + h * 0.6, w, y0); g.closePath(); g.fill();
+    } else if (p.ears === 'bunny') {
+      g.rotate(-side * 0.16);
+      const w = inner ? s * 0.14 : s * 0.26, h = inner ? s * 0.62 : s * 0.85;
+      g.beginPath(); g.ellipse(0, (inner ? s * 0.26 : 0) + h * 0.85, w, h, 0, 0, 2 * Math.PI); g.fill();
+      if (!inner) { g.beginPath(); g.rect(-w * 0.8, -2, w * 1.6, h * 0.6); g.fill(); }
+    } else {
+      const r = inner ? s * 0.2 : s * 0.34;
+      g.beginPath(); g.arc(0, s * 0.26, r, 0, 2 * Math.PI); g.fill();
+    }
+    g.restore();
+  }
+}
+
+// The pattern cut through the back, as holes inside the area allowed (the clip is already set).
+function pattern(g, area, d) {
+  const {x0, x1, y0, y1} = area, P = p.cell + p.bar, rr = p.cell / 2;
+  if (p.design === 'picture') {
+    const mask = pictureMask();
+    if (!mask) return;
+    // Mirrored, to read from the back: y is up here, so the picture is turned over both ways.
+    // Thickened by drawing it again round a small circle, so hairlines are wide enough to print.
+    const t = p.picThick, offs = [[0, 0], ...(t > 0 ? Array.from({length: 12}, (_, n) => [t * Math.cos(n * Math.PI / 6), t * Math.sin(n * Math.PI / 6)]) : [])];
+    const put = (x, y, w) => { const h = w * mask.height / mask.width;
+      for (const [ox, oy] of offs) { g.save(); g.translate(x + ox, y + oy); g.scale(-1, -1); g.drawImage(mask, -w / 2, -h / 2, w, h); g.restore(); } };
+    if (p.picTile === 'one') put(0, -d.b + p.picY, p.picBig);
+    else {
+      const w = p.picSize, h = w * mask.height / mask.width, sx = w + p.bar, sy = h + p.bar;
+      for (let row = 0, y = y0 - sy; y < y1 + sy; y += sy, ++row)
+        for (let x = x0 - sx + (row % 2) * sx / 2; x < x1 + sx; x += sx) put(x, y, w);
+    }
+    return;
+  }
+  g.beginPath();
+  if (p.design === 'honey') {
+    const R = (P / Math.sqrt(3)), r = R - p.bar / Math.sqrt(3), dx = Math.sqrt(3) * R, dy = 1.5 * R;
+    for (let row = 0, y = y0 - R; y < y1 + R; y += dy, ++row)
+      for (let x = x0 - dx + (row % 2) * dx / 2; x < x1 + dx; x += dx)
+        for (let s = 0; s <= 6; ++s) { const t = Math.PI / 6 + s * Math.PI / 3; s ? g.lineTo(x + r * Math.cos(t), y + r * Math.sin(t)) : g.moveTo(x + r * Math.cos(t), y + r * Math.sin(t)); }
+  } else if (p.design === 'diamond') {
+    for (let row = 0, y = y0 - P; y < y1 + P; y += P / 2, ++row)
+      for (let x = x0 - P + (row % 2) * P / 2; x < x1 + P; x += P) { g.moveTo(x, y + rr); g.lineTo(x + rr * 0.7, y); g.lineTo(x, y - rr); g.lineTo(x - rr * 0.7, y); g.closePath(); }
+  } else if (p.design === 'dots') {
+    for (let row = 0, y = y0 - P; y < y1 + P; y += P * 0.866, ++row)
+      for (let x = x0 - P + (row % 2) * P / 2; x < x1 + P; x += P) { g.moveTo(x + rr, y); g.arc(x, y, rr, 0, 2 * Math.PI); }
+  } else if (p.design === 'hearts' || p.design === 'stars') {
+    const Q = P * 1.15;
+    for (let row = 0, y = y0 - Q; y < y1 + Q; y += Q * 0.87, ++row)
+      for (let x = x0 - Q + (row % 2) * Q / 2; x < x1 + Q; x += Q) {
+        if (p.design === 'stars') {
+          for (let s = 0; s < 10; ++s) { const t = Math.PI / 2 + s * Math.PI / 5, q = s % 2 ? rr * 0.45 : rr * 1.05; s ? g.lineTo(x + q * Math.cos(t), y + q * Math.sin(t)) : g.moveTo(x + q * Math.cos(t), y + q * Math.sin(t)); }
+          g.closePath();
+        } else {
+          const s = rr / 16;
+          for (let n = 0; n <= 40; ++n) { const t = 2 * Math.PI * n / 40, hx = x + 16 * Math.sin(t) ** 3 * s, hy = y + (13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t) + 2.5) * s * 0.95;
+            n ? g.lineTo(hx, hy) : g.moveTo(hx, hy); }
+          g.closePath();
+        }
+      }
+  } else if (p.design === 'waves') {
+    g.lineWidth = p.cell * 0.55;
+    for (let y = y0 - P; y < y1 + P; y += P) { g.moveTo(x0 - 5, y); for (let x = x0 - 5; x < x1 + 5; x += 0.5) g.lineTo(x, y + P * 0.28 * Math.sin(x / P * 1.4)); }
+    g.stroke();
+    return;
+  }
+  g.fill();
+}
+
+// The star chart: stars as holes, the figures pressed in, in a circle, mirrored to read from the back.
+function skyChart(plate, press, cx, cy, R) {
+  const pl = CITIES.find(c => c.name === $('city').value) || CITIES[0];
+  const sky = skyAt(pl, momentAt($('date').value, $('time').value, pl.zone), p.limit);
+  const X = q => cx - q[0] * R, Y = q => cy - q[1] * R;
+  press.save(); press.lineWidth = 0.7;
+  press.beginPath(); press.arc(cx, cy, R + 1.2, 0, 2 * Math.PI); press.stroke();
+  if ($('figures').checked) {
+    press.beginPath(); press.arc(cx, cy, R, 0, 2 * Math.PI); press.clip();
+    press.beginPath();
+    for (const l of sky.lines) l.forEach((q, n) => n ? press.lineTo(X(q), Y(q)) : press.moveTo(X(q), Y(q)));
+    press.stroke();
+  }
+  press.restore();
+  plate.save(); plate.globalCompositeOperation = 'destination-out';
+  plate.beginPath(); plate.arc(cx, cy, R, 0, 2 * Math.PI); plate.clip();
+  plate.beginPath();
+  for (const [x, y, mag] of sky.stars) {
+    const r = Math.max(0.45, Math.min(1.5, 0.35 + 0.22 * (p.limit - mag))) * p.starSize / 100;
+    plate.moveTo(X([x, y]) + r, Y([x, y])); plate.arc(X([x, y]), Y([x, y]), r, 0, 2 * Math.PI);
+  }
+  plate.fill(); plate.restore();
+  return sky.stars.length;
+}
+
+// Solid parts left floating inside holes (the middle of an O, a star cut round) get a thin bar up and down to the
+// rest, the way stencil letters do.
+function tieIslands(solid, W, H, bar, rim = null) {
+  for (let round = 0; round < 3; ++round) {
+    const seen = new Int32Array(W * H).fill(-1), fill = (start, id) => { const stack = [start], cells = []; seen[start] = id;
+      while (stack.length) { const n = stack.pop(); cells.push(n); const i = n % W;
+        for (const m of [n - 1, n + 1, n - W, n + W]) if (m >= 0 && m < W * H && Math.abs((m % W) - i) <= 1 && solid[m] && seen[m] < 0) { seen[m] = id; stack.push(m); } }
+      return cells; };
+    let biggest = null, groups = [];
+    for (let n = 0; n < W * H; ++n) if (solid[n] && seen[n] < 0) { const cells = fill(n, groups.length); groups.push(cells); if (!biggest || cells.length > biggest.length) biggest = cells; }
+    if (groups.length < 2) return;
+    const main = seen[biggest[0]];
+    let tied = 0;
+    groups.forEach((cells, id) => {
+      if (id === main || (rim && cells.some(n => rim[n]))) return;
+      let sx = 0; for (const n of cells) sx += n % W;
+      const ci = Math.round(sx / cells.length);
+      for (const dir of [-1, 1]) {
+        let j = dir < 0 ? Math.min(...cells.filter(n => n % W === ci).map(n => Math.floor(n / W))) : Math.max(...cells.filter(n => n % W === ci).map(n => Math.floor(n / W)));
+        if (!isFinite(j)) continue;
+        const run = [];
+        for (j += dir; j >= 0 && j < H; j += dir) { const n = j * W + ci; if (solid[n] && seen[n] !== id) break; run.push(j); }
+        // Only a run that reaches the rest of the back ties; one that runs off the edge would stick out as a bar.
+        if (j < 0 || j >= H || !run.length || run.length > 6 * bar + 200) continue;
+        for (const jj of run) for (let di = -bar; di <= bar; ++di) { const i = ci + di; if (i >= 0 && i < W) solid[jj * W + i] = 1; }
+        ++tied;
+      }
+    });
+    if (!tied) return;
+  }
+}
+
+// The QR code, inlaid flush in the bed side of the back in a second filament, so it reads from outside: mirrored in
+// x like the words. Its quiet zone is kept solid in the case colour.
+const QR_DEPTH = 0.6, QR_QUIET = 3;
+function qrLayout(d) {
+  const text = $('qr').value.trim();
+  if (!text) return null;
+  const code = QR.make(text);
+  if (!code) return {error: 'That is too long for a QR code.'};
+  const L = Math.min(p.qrSize, 2 * d.a - 2 * (QR_QUIET * p.qrSize / code.size) - 6), m = L / code.size, y0 = -d.b + p.qrY;
+  return {code, m, L, x0: -L / 2, x1: L / 2, y0, y1: y0 + L, q: QR_QUIET * m};
+}
+// The dark modules as boxes, one per run along a row.
+function qrBoxes(qr) {
+  const {code, m, L, y1} = qr, out = [];
+  for (let my = 0; my < code.size; ++my)
+    for (let mx = 0; mx < code.size;) {
+      if (!code.dark(mx, my)) { ++mx; continue; }
+      let end = mx; while (end < code.size && code.dark(end, my)) ++end;
+      out.push(Lamp.box(L / 2 - end * m, L / 2 - mx * m, y1 - (my + 1) * m, y1 - my * m, 0, QR_DEPTH));
+      mx = end;
+    }
+  return out;
+}
+
+function backField(d, k) {
+  const ears = p.ears !== 'none' ? p.earSize * 1.1 : 0;
+  const x0 = -(d.a + d.T + 1), x1 = d.a + d.T + 1, y0 = -(d.b + d.T + 1), y1 = d.b + d.T + 1 + ears;
+  const cv = canvasFor(k, x0, x1, y0, y1);
+  const [plateC, plate] = cv.make(), [pressC, press] = cv.make(), [earC, ear] = cv.make(), [innerC, inner] = cv.make();
+  rrect(plate, d.a + d.T, d.b + d.T, d.r + d.T); plate.fill();
+  earShapes(ear, d, false); earShapes(inner, d, true);
+  const keys = keyholes(d), cam = cameraRect(d), info = {}, qr = qrLayout(d);
+  // Where a pattern may go: in from the sides, clear of the camera and the keyholes.
+  const area = {x0: -d.a + 4, x1: d.a - 4, y0: -d.b + 4, y1: d.b - 4};
+  const keep = g => { g.beginPath(); if (p.camMode !== 'lenses') g.roundRect(cam.x0 - 3, cam.y0 - 3, cam.x1 - cam.x0 + 6, cam.y1 - cam.y0 + 6, cam.r + 3);
+    for (const h of cameraHoles(d)) if (h.circle) { const [x, y, r] = h.circle; g.moveTo(x + r + 3, y); g.arc(x, y, r + 3, 0, 2 * Math.PI); }
+      else if (h.key !== 'cam') { const q = h.rect; g.roundRect(q.x0 - 3, q.y0 - 3, q.x1 - q.x0 + 6, q.y1 - q.y0 + 6, q.r + 3); }
+    if (keys) for (const [x, y] of keys.at) { g.moveTo(x + 8, y + 2); g.arc(x, y + 2, 8, 0, 2 * Math.PI); } };
+  plate.save(); plate.globalCompositeOperation = 'destination-out';
+  if (p.design === 'sky') {
+    plate.restore();
+    info.sky = {y: -d.b + p.skyY, R: Math.min(p.skyD / 2, d.a - 3)};
+    info.stars = skyChart(plate, press, 0, info.sky.y, info.sky.R - 1.5);
+  } else if (p.design === 'picture' && p.picHow === 'inlay') {
+    plate.restore();
+    // In filament 2: the picture on a canvas of its own, kept off the camera and the keyholes.
+    const [picC, pic] = cv.make();
+    pic.save(); rrect(pic, d.a - 4, d.b - 4, Math.max(0, d.r - 4)); pic.clip(); pattern(pic, area, d); pic.restore();
+    pic.save(); pic.globalCompositeOperation = 'destination-out'; keep(pic); pic.fill(); pic.restore();
+    info.picture = picC;
+  } else if (p.design !== 'plain') {
+    rrect(plate, d.a - 4, d.b - 4, Math.max(0, d.r - 4)); plate.clip();
+    // Everything except the kept places: a clip with a hole is drawn as the area, then the kept parts refilled below.
+    pattern(plate, area, d);
+    plate.restore();
+    plate.save(); rrect(plate, d.a + d.T, d.b + d.T, d.r + d.T); plate.clip(); keep(plate); plate.fill(); plate.restore();
+  } else plate.restore();
+  // Words, mirrored to read from the back, on a clear patch so the pattern doesn't cut into them.
+  const words = $('words').value.trim();
+  if (words) {
+    const font = `600 ${p.wordSize}px "${$('font').value}"`, y = -d.b + p.wordY, g = $('cut').value === 'cut' ? plate : press;
+    plate.save(); plate.font = font; const w = Math.min(plate.measureText(words).width, 2 * d.a - 10);
+    plate.beginPath(); plate.roundRect(-w / 2 - 2.5, y - p.wordSize * 0.35, w + 5, p.wordSize * 1.3, 2); plate.fill(); plate.restore();
+    g.save(); g.translate(0, y); g.scale(-1, -1); g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    if (g === plate) g.globalCompositeOperation = 'destination-out';
+    g.fillText(words, 0, 0, 2 * d.a - 10); g.restore();
+  }
+  // The QR code's patch, solid so the pattern stays out of it.
+  if (qr && qr.code) { plate.save(); plate.beginPath(); plate.roundRect(qr.x0 - qr.q, qr.y0 - qr.q, qr.L + 2 * qr.q, qr.L + 2 * qr.q, 1.5); plate.fill(); plate.restore(); }
+  // The camera opening and the keyholes go through everything.
+  plate.save(); plate.globalCompositeOperation = 'destination-out';
+  for (const h of cameraHoles(d)) {
+    plate.beginPath();
+    if (h.rect) plate.roundRect(h.rect.x0, h.rect.y0, h.rect.x1 - h.rect.x0, h.rect.y1 - h.rect.y0, h.rect.r);
+    else plate.arc(h.circle[0], h.circle[1], h.circle[2], 0, 2 * Math.PI);
+    plate.fill();
+  }
+  if (keys) for (const [x, y] of keys.at) {
+    plate.beginPath(); plate.arc(x, y + KEY.rise, KEY.open, 0, 2 * Math.PI); plate.fill();
+    plate.beginPath(); plate.roundRect(x - KEY.slot, y - KEY.slot, 2 * KEY.slot, KEY.rise + 2 * KEY.slot, KEY.slot); plate.fill();
+  }
+  plate.restore();
+
+  const solid = alphaOf(plateC), pressed = alphaOf(pressC), earA = alphaOf(earC), innerA = alphaOf(innerC), raw = rawAlpha(plateC);
+  // The side walls stand on the rim and hold whatever touches it, such as the strip above a camera bar that runs the
+  // whole width of a Pixel: only pieces loose inside the back need tying, not those.
+  const rim = new Uint8Array(cv.W * cv.H);
+  for (let j = 0; j < cv.H; ++j) for (let i = 0; i < cv.W; ++i) rim[j * cv.W + i] = !inRound((i - cv.ox) / k, (cv.oy - j) / k, d.a + 0.3, d.b + 0.3, d.r);
+  tieIslands(solid, cv.W, cv.H, Math.max(1, Math.round(0.45 * k)), rim);
+  return {cv, solid, raw, pressed, earA, innerA, keys, info, qr};
+}
+
+// A height field whose outline on the plate face is the drawing's own, smooth and true to size. lo and hi are each
+// grid point's faces (equal where there is nothing) and raw the drawing's coverage, 0 to 255.
+// Left alone, an empty point beside a solid one would make the faces slope across a whole grid square, so on the plate
+// face every hole came out up to a square smaller all round, thin strokes closed up and the grid's steps showed.
+// Instead each empty point beside an edge slides onto the edge, where the anti-aliased coverage crosses half, and
+// stays down on the plate face; the walls then lean out by at most a square towards the inside, which needs no support.
+function fittedSheet(cv, lo, hi, raw) {
+  const {W, H, ox, oy, k} = cv, N = W * H, X = new Float32Array(N), Y = new Float32Array(N), Z0 = Float32Array.from(lo), Z1 = Float32Array.from(hi);
+  const full = n => hi[n] > lo[n];
+  for (let j = 0; j < H; ++j)
+    for (let i = 0; i < W; ++i) {
+      const n = j * W + i;
+      X[n] = (i - ox) / k; Y[n] = (oy - j) / k;
+      if (full(n)) continue;
+      let sx = 0, sy = 0, count = 0, z = -1;
+      for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const ii = i + di, jj = j + dj, m = jj * W + ii;
+        if (ii < 0 || ii >= W || jj < 0 || jj >= H || !full(m)) continue;
+        // How far towards the solid neighbour the coverage crosses half (half way for a hard edge).
+        const f = raw[m] > raw[n] ? Math.max(0.05, Math.min(0.9, (127.5 - raw[n]) / (raw[m] - raw[n]))) : 0.5;
+        sx += di * f; sy += dj * f; ++count;
+        if (z < 0 || lo[m] < z) z = lo[m];
+      }
+      if (!count) continue;
+      X[n] += sx / count / k; Y[n] -= sy / count / k;
+      Z0[n] = Z1[n] = z;
+    }
+  return Lamp.sheet(W, H, false, (i, j, front) => { const n = j * W + i; return [X[n], Y[n], front ? Z1[n] : Z0[n]]; });
+}
+
+// The heights of the back at each grid point: [bottom, top].
+function backSheet(d, f) {
+  const {cv, solid, raw, pressed, earA, innerA, keys} = f, {W, H, ox, oy, k} = cv, press = 0.5;
+  const neck = Math.max(0.6, d.B - 1.5);
+  const sink = (x, y) => { let z = d.B;
+    if (keys) for (const [kx, ky] of keys.at) { const yy = Math.max(ky, Math.min(ky + KEY.rise, y)), dd = Math.hypot(x - kx, y - yy);
+      z = Math.min(z, neck + Math.max(0, dd - KEY.slot)); }
+    return z; };
+  const N = W * H, LO = new Float32Array(N), HI = new Float32Array(N);
+  for (let j = 0; j < H; ++j)
+    for (let i = 0; i < W; ++i) {
+      const n = j * W + i, x = (i - ox) / k, y = (oy - j) / k;
+      let lo = 0, hi = 0;
+      if (earA[n] && !inRound(x, y, d.a, d.b, d.r)) {
+        // Flat ears as thick as asked, with the inner ear pressed into the outside where there is room.
+        hi = Math.min(p.earThick, d.top);
+        if (innerA[n] && hi >= 1.6) lo = 0.6;
+      }
+      else if (solid[n]) { hi = sink(x, y); lo = pressed[n] ? press : 0; if (lo >= hi - 0.3) lo = hi = 0; }
+      LO[n] = lo; HI[n] = hi;
+    }
+  // Ears and the bars tying islands aren't in the drawing: they count as fully covered.
+  const cover = Uint8Array.from(raw, (v, n) => HI[n] > LO[n] ? Math.max(v, 255 * (earA[n] || solid[n])) : v);
+  return fittedSheet(cv, LO, HI, cover);
+}
+
+// The picture in filament 2, flush in the outside of the back, where the back is solid.
+function pictureSheet(d, f) {
+  const {cv, solid} = f, raw = rawAlpha(f.info.picture), N = cv.W * cv.H, LO = new Float32Array(N), HI = new Float32Array(N);
+  for (let n = 0; n < N; ++n) if (raw[n] > 127 && solid[n]) HI[n] = QR_DEPTH;
+  return fittedSheet(cv, LO, HI, raw);
+}
+
+// The openings in the sides, each {key, side, s0, s1, z0, z1, rr}: s runs from the top edge on the left and right
+// sides, and along x on the bottom and top; z is the height above the bed; rr the corner radius.
+function wallHoles(d) {
+  const {ph, B, top} = d, zLo = B + 1.0, zHi = B + ph.D - 0.5, holes = [];
+  // A button run: moved along (x, down), up (y), longer (w), taller (h).
+  const run = (side, key, from, len) => { const a = adj(key), z0 = zLo + a.y - a.h / 2, z1 = zHi + a.y + a.h / 2;
+    holes.push({key, side, s0: from - 1.5 + a.x - a.w / 2, s1: from + len + 1.5 + a.x + a.w / 2, z0, z1: Math.max(z0 + 0.5, z1), rr: a.r !== null ? a.r : 1.5}); };
+  ph.right.forEach(([from, len], n) => run('right', 'right' + n, from, len));
+  ph.left.forEach(([from, len], n) => run('left', 'left' + n, from, len));
+  if (ph.bottom) {
+    // The bottom window: from just above the back to just under the screen, so a plug's housing fits, with the rim
+    // and its lip carried over it as a bar that holds the phone's bottom edge. Seen from the back x runs the other way.
+    const a = adj('bottom'), bar = $('bottomBar').checked, half = Math.max(1, (ph.bottom + a.w) / 2);
+    const z0 = (bar ? B + 0.5 : B + 1.2) + a.y - a.h / 2, z1 = bar ? B + ph.D - 0.5 + a.y + a.h / 2 : top + 5;
+    holes.push({key: 'bottom', side: 'bottom', s0: -a.x - half, s1: -a.x + half, z0, z1: Math.max(z0 + 0.5, z1), rr: a.r !== null ? a.r : bar ? Infinity : 1.5});
+  }
+  added.forEach((o, n) => {
+    if (o.face === 'back') return;
+    const h = o.shape === 'circle' ? o.w : o.h, rr = o.shape === 'circle' ? Infinity : o.shape === 'rect' ? 0 : o.r;
+    const side = o.face === 'left' || o.face === 'right';
+    const s = side ? o.x : -o.x;
+    holes.push({key: 'add' + n, side: o.face, s0: s - o.w / 2, s1: s + o.w / 2, z0: o.y - h / 2, z1: o.y + h / 2, rr});
+  });
+  return holes;
+}
+
+// The sides: a band round the phone from the bed to over the screen's edge, with openings for the buttons, the
+// port and the speakers. Where an opening is, the band's two faces meet and it has no thickness.
+function wallSheet(d) {
+  const {ph, a, b, r, T, B, top} = d, pts = around(a, b, r, 0.5);
+  const lipFrom = B + ph.D - Math.max(0.01, p.lip), zs = [];
+  for (let z = 0; z < top - 1e-6; z += 0.4) zs.push(z);
+  zs.push(top);
+  // The bottom window: from just above the back to just under the screen, so a plug's housing fits, with the rim
+  // and its lip carried over it as a bar that holds the phone's bottom edge.
+  const holes = wallHoles(d);
+  // Rounded openings get finer rows, so their curves aren't steps.
+  const fine = holes.filter(h => h.rr > 0.4 && h.z1 < top + 1).flatMap(h => Array.from({length: Math.ceil((h.z1 - h.z0) / 0.2) + 1}, (_, n) => Math.min(h.z1, h.z0 + 0.2 * n)));
+  for (const z of [B, lipFrom, B + ph.D, ...fine]) if (z > 0 && z < top && !zs.some(q => Math.abs(q - z) < 0.05)) zs.push(z);
+  zs.sort((u, v) => u - v);
+  const open = (q, z) => {
+    const side = q.nx > 0.7 ? 'right' : q.nx < -0.7 ? 'left' : q.ny < -0.7 ? 'bottom' : q.ny > 0.7 ? 'top' : '';
+    const s = side === 'bottom' || side === 'top' ? q.x : ph.H / 2 - q.y;
+    for (const h of holes) {
+      if (h.side !== side) continue;
+      const rr = Math.min(h.rr, (h.s1 - h.s0) / 2, (h.z1 - h.z0) / 2);
+      const dx = Math.max(h.s0 + rr - s, 0, s - (h.s1 - rr)), dz = Math.max(h.z0 + rr - z, 0, z - (h.z1 - rr));
+      if (Math.hypot(dx, dz) <= rr) return true;
+    }
+    return false;
+  };
+  return Lamp.sheet(pts.length, zs.length, true, (i, j, front) => {
+    const q = pts[i], z = zs[j];
+    const lipIn = z <= lipFrom ? 0 : z >= B + ph.D ? p.lip : p.lip * (z - lipFrom) / (B + ph.D - lipFrom);
+    const inner = -lipIn;
+    // The outside: a small chamfer on the bed and a rounded top edge.
+    const outer = T - Math.max(0, 0.4 - z) - (z > top - 1 ? (1 - Math.sqrt(Math.max(0, 1 - (z - (top - 1)) ** 2))) * 0.8 : 0);
+    const off = front && !open(q, z) ? Math.max(outer, inner + 0.6) : inner;
+    return [q.x + q.nx * off, q.y + q.ny * off, z];
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The clip-on pieces. Each peg is a stem, a 45° cone and a thin cap, turned round its axis, standing on a face.
+function peg(x, y, z0, d) {
+  const neck = Math.max(0.6, d.B - 1.5) + 0.15, prof = [[0, KEY.stem], [neck, KEY.stem], [neck + KEY.head - KEY.stem, KEY.head], [neck + KEY.head - KEY.stem + 0.15, KEY.head]];
+  const segs = 48;
+  return Lamp.sheet(segs, prof.length, true, (i, j, front) => {
+    const t = 2 * Math.PI * i / segs, [h, r] = prof[j], rr = front ? r : 0;
+    return [x + rr * Math.cos(t), y + rr * Math.sin(t), z0 + h];
+  });
+}
+// A flat piece from a height function over a box, at about res mm.
+function slab(x0, x1, y0, y1, res, height) {
+  const nu = Math.ceil((x1 - x0) / res) + 1, nv = Math.ceil((y1 - y0) / res) + 1;
+  return Lamp.sheet(nu, nv, false, (i, j, front) => {
+    const x = x0 + (x1 - x0) * i / (nu - 1), y = y0 + (y1 - y0) * j / (nv - 1), h = height(x, y);
+    return [x, y, front ? h : 0];
+  });
+}
+const inRound = (x, y, a, b, r) => { const dx = Math.max(Math.abs(x) - (a - r), 0), dy = Math.max(Math.abs(y) - (b - r), 0); return Math.hypot(dx, dy) <= r; };
+// The card wallet: a tray printed face down, open on top and at its upper end, that the case back closes. Its side
+// walls carry the pegs. Cards go in from the top.
+function wallet(d, keys, res) {
+  const inW = 28, inTop = 44, inBot = -44, F = 1.2, depth = p.cards * 0.78 + 0.35, Ht = F + depth, ox = keys.kx + 3;
+  const s = slab(-ox, ox, inBot - 2, inTop, res, (x, y) => {
+    if (!inRound(x, y - (inTop + inBot - 2) / 2, ox, (inTop - inBot + 2) / 2, 3)) return 0;
+    if (Math.abs(x) >= inW || y <= inBot) return Ht;
+    if (Math.abs(x) < 12 && y > inTop - 24 && inRound(x, y - (inTop - 10), 12, 14, 10)) return 0;
+    return F;
+  });
+  const pegs = [[keys.kx, 30], [-keys.kx, 30], [keys.kx, -30], [-keys.kx, -30]].map(([x, y]) => peg(x, y, Ht, d));
+  const solidAt = (x, y) => inRound(x, y - (inTop + inBot - 2) / 2, ox, (inTop - inBot + 2) / 2, 3) && !(Math.abs(x) < 12 && y > inTop - 24 && inRound(x, y - (inTop - 10), 12, 14, 10));
+  return {sheets: [s, ...pegs], size: [2 * ox, inTop - inBot + 2, Ht], wide: keys.kx - 3 >= inW,
+          box: {x0: -ox, x1: ox, y0: inBot - 2, y1: inTop, top: inTop - 26, solidAt}};
+}
+// The stand: a plate with the same pegs, and a square hole the leg plugs into.
+function stand(d, keys, res) {
+  const ox = keys.kx + 4, hy = 38, T = 4, hole = 3.1, sy = -14;
+  const s = slab(-ox, ox, -hy, hy, res, (x, y) => !inRound(x, y, ox, hy, 6) || (Math.abs(x) < hole && Math.abs(y - sy) < hole) ? 0 : T);
+  const pegs = [[keys.kx, 30], [-keys.kx, 30], [keys.kx, -30], [-keys.kx, -30]].map(([x, y]) => peg(x, y, T, d));
+  return {plate: [s, ...pegs], leg: [Lamp.box(-2.95, 2.95, 0, p.leg, 0, 5.9)]};
+}
+
+// Your picture's dark (or light) parts as a white-on-clear mask, at most 800 pixels across.
+let picture = null, maskCache = {key: '', canvas: null};
+function pictureMask() {
+  if (!picture) return null;
+  const key = `${picture.name}|${p.threshold}|${$('invert').checked}`;
+  if (maskCache.key === key) return maskCache.canvas;
+  const img = picture.img, s = Math.min(1, 800 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * s)); c.height = Math.max(1, Math.round(img.height * s));
+  const g = c.getContext('2d', {willReadFrequently: true}); g.drawImage(img, 0, 0, c.width, c.height);
+  const data = g.getImageData(0, 0, c.width, c.height), px = data.data, cut = p.threshold / 100 * 255, inv = $('invert').checked;
+  for (let n = 0; n < px.length; n += 4) {
+    const on = (0.299 * px[n] + 0.587 * px[n + 1] + 0.114 * px[n + 2] < cut) !== inv;
+    px[n] = px[n + 1] = px[n + 2] = 255; px[n + 3] = on ? 255 : 0;
+  }
+  g.putImageData(data, 0, 0);
+  maskCache = {key, canvas: c};
+  return c;
+}
+
+// The grip: nested tubes printed in place standing on the plate, the outer one closed at the top by a flange with
+// the pegs. Each tube's top flares out at 45° and the next one's foot turns in, so pulled out they catch and pushed
+// in they nest. The top you hold is a second piece, a disc with a plug glued into the inner tube's foot.
+const GRIP = {wall: 1.2, lip: 1.0, gap: 0.4, height: 8, inner: 5, flange: 2, pegs: 9};
+function grip(d) {
+  const {wall: w, lip, gap, height: L, inner, flange: F} = GRIP, n = p.gripStages, segs = 96, sheets = [];
+  const ring = rows => Lamp.sheet(segs, rows.length, true, (i, j, front) => {
+    const t = 2 * Math.PI * i / segs, [z, rin, rout] = rows[j], r = front ? rout : rin;
+    return [r * Math.cos(t), r * Math.sin(t), z];
+  });
+  // A solid turned round the axis, from [z, r] rows.
+  const solid = rows => Lamp.sheet(segs, rows.length, true, (i, j, front) => {
+    const t = 2 * Math.PI * i / segs, [z, r] = rows[j], rr = front ? r : 0;
+    return [rr * Math.cos(t), rr * Math.sin(t), z];
+  });
+  let a = inner, outer = 0;
+  const rf = Math.max(inner + n * w + (n - 1) * (lip + gap) + 1.2, GRIP.pegs + KEY.head + 0.6);
+  for (let k = 1; k <= n; ++k) {
+    // The inner tubes stop short of the flange, so nothing prints onto them.
+    const top = k === n ? L : L - 1, rows = [];
+    if (k > 1) rows.push([0, a - lip, a + w], [0.8, a - lip, a + w], [0.8 + lip, a, a + w]);
+    else rows.push([0, a, a + w]);
+    if (k < n) rows.push([top - 0.6 - lip, a, a + w], [top - 0.6, a, a + w + lip], [top, a, a + w + lip]);
+    else rows.push([top - (rf - a - w), a, a + w], [top + 0.05, a, rf]);
+    sheets.push(ring(rows));
+    outer = a + w; a = a + w + lip + gap;
+  }
+  sheets.push(solid([[L, rf], [L + F, rf]]));
+  const s = GRIP.pegs / Math.SQRT2;
+  for (const [x, y] of [[s, s], [-s, s], [s, -s], [-s, -s]]) sheets.push(peg(x, y, L + F, d));
+  // The top: a disc with a chamfer on the plate, and a plug for the inner tube.
+  const R = p.gripCap / 2, tc = 2.4, plug = inner - 0.1;
+  const cap = [solid([[0, R - 0.6], [0.6, R], [tc, R], [tc, plug], [tc + 2.6, plug], [tc + 3, plug - 0.4]])];
+  // Each stage but the outer slides out by its length, less its flare and the next one's foot.
+  const reach = (n - 1) * (L - 1 - 0.6 - lip - 0.8), thick = L + F + tc;
+  return {grip: sheets, cap, outer, reach, thick, width: 2 * Math.max(rf, R)};
+}
+
+// Words and a QR code set into the wallet's cover, mirrored to read from outside: [sheets] of filament 2.
+function cover(box, res) {
+  const out = [], {x0, x1, y0, y1, solidAt} = box, words = $('coverWords').value.trim(), text = $('coverQr').value.trim();
+  const problems = [];
+  if (words) {
+    const k = 1 / Math.min(res, 0.15), cv = canvasFor(k, x0, x1, y0, y1), [c, g] = cv.make();
+    const font = `600 ${p.coverSize}px "${$('font').value}"`, y = y0 + p.coverY;
+    g.save(); g.translate(0, y); g.scale(-1, -1); g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(words, 0, 0, x1 - x0 - 8); g.restore();
+    const A = alphaOf(c);
+    out.push(Lamp.sheet(cv.W, cv.H, false, (i, j, front) => {
+      const x = (i - cv.ox) / k, yy = (cv.oy - j) / k;
+      return [x, yy, front && A[j * cv.W + i] && solidAt(x, yy) ? QR_DEPTH : 0];
+    }));
+  }
+  if (text) {
+    const code = QR.make(text);
+    if (!code) problems.push('The wallet\'s QR text is too long.');
+    else {
+      const L = Math.min(p.coverQrSize, x1 - x0 - 8), m = L / code.size, yb = y0 + p.coverQrY;
+      if (m < 0.8) problems.push(`The wallet's QR squares are ${m.toFixed(2)} mm: make it bigger or the text shorter.`);
+      if (yb + L + 3 * m > box.top) problems.push('The wallet\'s QR code runs into the thumb cut-out: move it down or make it smaller.');
+      out.push(...qrBoxes({code, m, L, y1: yb + L}));
+    }
+  }
+  return {sheets: out, problems};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+function build(res) {
+  const d = dims(), f = backField(d, 1 / res);
+  const sheets = [backSheet(d, f), wallSheet(d)], picSheets = f.info.picture ? [pictureSheet(d, f)] : [];
+  const extras = [], problems = [], qr = f.qr, info = f.info;
+  let qrSheets = [];
+  if (qr && qr.error) problems.push(qr.error);
+  else if (qr) {
+    qrSheets = qrBoxes(qr);
+    const cam = cameraRect(d), lo = qr.y0 - qr.q, hi = qr.y1 + qr.q, half = qr.L / 2 + qr.q;
+    if (qr.m < 0.8) problems.push(`The QR code's squares are ${qr.m.toFixed(2)} mm: make it bigger or the text shorter, or it won't print cleanly.`);
+    if (hi > cam.y0 - 1 && half > cam.x0) problems.push('The QR code runs into the camera opening: move it down.');
+    if (f.keys && f.keys.at.some(([x, y]) => Math.abs(x) < half + 4 && y + KEY.rise + 4 > lo && y - 4 < hi)) problems.push('The QR code runs into the keyholes: make it smaller or move it.');
+    if (hi > d.b - 2) problems.push('The QR code goes off the top of the back.');
+    if ($('words').value.trim() && -d.b + p.wordY + p.wordSize > lo && -d.b + p.wordY - p.wordSize * 0.4 < hi) problems.push('The words and the QR code overlap: move one of them.');
+  }
+  if (f.keys) {
+    if (p.extra === 'wallet') {
+      const w = wallet(d, f.keys, res);
+      if (!w.wide) problems.push('This phone is too narrow for a card wallet beside the keyholes.');
+      const c = cover(w.box, res);
+      problems.push(...c.problems);
+      extras.push({name: `Card wallet (${p.cards})`, sheets: w.sheets, inlay: c.sheets});
+    } else if (p.extra === 'grip') {
+      const g = grip(d);
+      extras.push({name: 'Grip', sheets: g.grip}, {name: 'Grip top', sheets: g.cap});
+      info.grip = g;
+      const cam = cameraRect(d), top = f.keys.yc + GRIP.pegs + KEY.rise + KEY.open;
+      if (top > cam.y0 - 1) problems.push('The grip\'s keyholes run into the camera opening: move the grip down.');
+    } else {
+      const s = stand(d, f.keys, res);
+      extras.push({name: 'Stand', sheets: s.plate}, {name: 'Stand leg', sheets: s.leg});
+    }
+    // The keyholes sit lower when the camera is low; they must stay inside the back.
+    const lowest = Math.min(...f.keys.at.map(q => q[1])) - KEY.slot, highest = Math.max(...f.keys.at.map(q => q[1])) + KEY.rise + KEY.open;
+    if (lowest < -d.b + 3 || (!f.keys.grip && highest > cameraRect(d).y0)) problems.push('The keyholes don\'t fit below the camera on this phone.');
+  }
+  // The star chart is placed on its own, so say when it runs into something.
+  const sky = f.info.sky;
+  if (sky) {
+    const top = sky.y + sky.R, bottom = sky.y - sky.R, cam = cameraRect(d), words = $('words').value.trim();
+    if (top > cam.y0 - 1 && sky.R > cam.x0) problems.push('The star chart runs into the camera opening: move it down or make it smaller.');
+    if (bottom < -d.b + 3 || top > d.b - 3) problems.push('The star chart goes off the back.');
+    if (words && Math.abs(-d.b + p.wordY - sky.y) < sky.R + p.wordSize * 0.7) problems.push('The words are on the star chart: move one of them.');
+    if (qr && qr.code && qr.y1 + qr.q > bottom && qr.y0 - qr.q < top) problems.push('The QR code is on the star chart: move one of them.');
+    if (f.keys && f.keys.at.some(([x, y]) => Math.hypot(x, y - sky.y) < sky.R + 8)) problems.push('The keyholes are on the star chart: move one of them.');
+  }
+  if (p.design === 'picture' && !picture) problems.push('Choose a picture for the back.');
+  return {d, sheets, qrSheets, picSheets, qr, extras, problems, info: f.info};
+}
+
+const viewer = new Lamp.Viewer($('canvas'));
+let built = null, timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+function update() {
+  on('view', p.view); on('refmode', p.refMode);
+  $('canvas').classList.toggle('hidden', p.view !== '3d'); $('flat').classList.toggle('hidden', p.view !== 'flat');
+  $('refBox').classList.toggle('hidden', !refImg); $('refPick').textContent = refImg ? 'Another photo…' : 'Compare with a photo…';
+  drawOpenings();
+  if (p.view === 'flat') drawFlat();
+  on('design', p.design); on('ears', p.ears); on('extra', p.extra); on('material', p.material);
+  const patterned = !['plain', 'sky', 'picture'].includes(p.design), pic = p.design === 'picture';
+  cellRow.classList.toggle('hidden', !patterned); barRow.classList.toggle('hidden', !patterned && !(pic && p.picTile === 'tile'));
+  $('skyBox').classList.toggle('hidden', p.design !== 'sky');
+  $('pictureBox').classList.toggle('hidden', !pic); on('pictile', p.picTile); on('cammode', p.camMode);
+  for (const r of lensRows) r.classList.toggle('hidden', p.camMode !== 'lenses'); on('pichow', p.picHow);
+  picTileRow.classList.toggle('hidden', p.picTile !== 'tile');
+  picBigRow.classList.toggle('hidden', p.picTile !== 'one'); picYRow.classList.toggle('hidden', p.picTile !== 'one');
+  for (const r of gripRows) r.classList.toggle('hidden', p.extra !== 'grip');
+  $('coverBox').classList.toggle('hidden', p.extra !== 'wallet');
+  earRow.classList.toggle('hidden', p.ears === 'none'); earThickRow.classList.toggle('hidden', p.ears === 'none');
+  cardRow.classList.toggle('hidden', p.extra !== 'wallet'); legRow.classList.toggle('hidden', p.extra !== 'stand');
+  clearTimeout(timer);
+  timer = setTimeout(render, 150);
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+function render() {
+  // The preview is coarser than what is added, to stay quick.
+  built = build(Math.max(0.5, p.res));
+  const {d} = built, problems = [...built.problems];
+  const [lo, hi] = Lamp.bounds(built.sheets), size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+  if (size[0] > printer.bed[0] || size[1] > printer.bed[1]) problems.push(`It is ${f1(size[0])} × ${f1(size[1])} mm, more than your plate.`);
+  if (p.lip > 0.6 && p.material === 'rigid') problems.push('A lip over 0.6 mm makes a rigid case hard to get the phone into.');
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  const parts = [{sheets: built.sheets, colour: [0.55, 0.62, 0.78]}];
+  if (built.qrSheets.length) parts.push({sheets: built.qrSheets, colour: [0.1, 0.1, 0.12]});
+  // A hair outside the back's face it shares, so the preview doesn't flicker.
+  if (built.picSheets.length) parts.push({sheets: Lamp.moved(built.picSheets, 0, 0, -0.03), colour: [0.1, 0.1, 0.12]});
+  let x = size[0] / 2 + 12;
+  for (const e of built.extras) {
+    const [elo, ehi] = Lamp.bounds(e.sheets);
+    parts.push({sheets: Lamp.moved(e.sheets, x - elo[0], 0), colour: [0.86, 0.84, 0.78]});
+    if (e.inlay && e.inlay.length) parts.push({sheets: Lamp.moved(e.inlay, x - elo[0], 0, -0.05), colour: [0.1, 0.1, 0.12]});
+    x += ehi[0] - elo[0] + 10;
+  }
+  viewer.show(parts, false, false);
+  if (p.view === 'flat') drawFlat();
+  const extra = {none: '', wallet: ` The card wallet holds ${p.cards} card${p.cards > 1 ? 's' : ''}: its pegs go into the keyholes from outside and it slides down to lock; the cards go in from the top.`,
+    stand: ' The stand clips into the keyholes and slides down to lock; push the leg into its square hole to stand the phone up, sideways.',
+    grip: built.info.grip ? ` The grip prints standing up with its ${p.gripStages} tubes inside each other: before using it, pull it out and push it in a few times to free them. Glue the top onto the inner tube's foot with a drop of superglue. Its four pegs go into the keyholes and it slides down to lock. Flat it stands ${f1(built.info.grip.thick)} mm off the back, and pulls out about ${f1(built.info.grip.reach)} mm more.` : ''}[p.extra];
+  const coverText = p.extra === 'wallet' && built.extras[0] && built.extras[0].inlay.length ? ' The wallet\'s words and QR code are filament 2.' : '';
+  const qrText = built.qr && built.qr.code ? ` The QR code is ${f1(built.qr.L)} mm (version ${built.qr.code.version}, ${f1(built.qr.m)} mm squares), inlaid ${QR_DEPTH} mm deep as its own part on filament 2: print the case in a light colour and the code in a dark one.` : '';
+  const sky = built.info.stars ? ` The star chart has ${built.info.stars} stars as holes.` : '';
+  const picText = built.picSheets.length ? ' Your picture is set 0.6 mm into the outside as its own part on filament 2.' : p.design === 'picture' ? ' Strokes thinner than about two "Detail mm" steps don\'t cut through: thicken them, or use filament 2.' : '';
+  $('facts').textContent = `${f1(size[0])} × ${f1(size[1])} × ${f1(size[2])} mm. Prints back down with no supports; ${p.material === 'tpu' ? 'in TPU, slowly (20–30 mm/s)' : 'in PLA or PETG'}.${sky}${picText}${qrText}${extra}${coverText} Check the button and camera openings against your phone before a long print.`;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+$('lookupGo').onclick = () => {
+  const model = $('lookup').value.trim();
+  if (!model) return;
+  $('lookupGo').disabled = true; $('lookupNote').textContent = 'Looking it up…'; $('lookupNote').className = 'muted';
+  post({cmd: 'ai', id: 'phone', model_task: 'setup', max_tokens: 2000, system: LOOKUP_SYSTEM, prompt: 'Phone: ' + model,
+        name: 'phone_size', description: "The phone's body and where its openings are.", schema: LOOKUP_SCHEMA});
+};
+// What the AI is asked for a phone that isn't listed: the outside of the body and where its openings are.
+const LOOKUP_SYSTEM = "You know the exact outside dimensions of phones from their makers' spec sheets and from case makers' drawings. " +
+  "Give the best figures you know for the phone asked about, by calling phone_size. If you don't know the phone, say so in note and give your nearest estimate.";
+const LOOKUP_SCHEMA = (() => {
+  const mm = {type: 'number', description: 'millimetres'};
+  const runs = {type: 'array', description: 'Buttons on this side, seen from the front: each [distance from the top edge, length], mm. Neighbouring buttons may share one run.',
+                items: {type: 'array', items: mm}};
+  return {type: 'object', required: ['name', 'width', 'height', 'depth', 'corner', 'camera', 'right', 'left', 'bottom'], properties: {
+    name: {type: 'string', description: "The phone's full name"}, width: mm, height: mm,
+    depth: {type: 'number', description: 'body thickness without the camera bump, mm'},
+    corner: {type: 'number', description: "radius of the body's corners seen from the front, mm"},
+    camera: {type: 'object', description: 'The camera island or cut-out needed, seen from the back with the phone upright: from the left and top edges of the back, its width and height, and its corner radius.',
+             properties: {x: mm, y: mm, w: mm, h: mm, r: mm}, required: ['x', 'y', 'w', 'h', 'r']},
+    right: runs, left: runs,
+    bottom: {type: 'number', description: 'width of the opening needed at the bottom for the port and speakers, mm'},
+    lenses: {type: 'array', description: 'Only if the lenses stand out from the back one by one (no camera island), as on most Galaxy phones: each lens ring seen from the back as [centre from the left edge, centre from the top edge, outside diameter], mm.',
+             items: {type: 'array', items: mm}},
+    flash: {type: 'array', description: 'Only if the flash is outside the camera outline given in camera (as on most Galaxy phones): [centre from the left edge, centre from the top edge, diameter], mm.', items: mm},
+    note: {type: 'string', description: 'How sure the figures are, in one sentence'}}};
+})();
+// Looked-up phones are kept in this maker's own storage in Elslicer, so they need no second look-up.
+const storePhones = () => post({cmd: 'store_set', key: 'phones', value: Object.entries(SAVED).map(([name, q]) => ({name, ...q}))});
+$('lookup').onkeydown = e => { if (e.key === 'Enter') $('lookupGo').click(); };
+function gotPhone(message) {
+  $('lookupGo').disabled = false;
+  if (message.error) { $('lookupNote').textContent = message.error; $('lookupNote').className = 'note warn'; return; }
+  const q = message.answer, looked = phoneFrom(q), name = String(q.name || $('lookup').value.trim()).slice(0, 80);
+  SAVED[name] = looked;
+  storePhones();
+  p.phone = 'saved:' + name; openBrands.add(LOOKED);
+  drawPicker();
+  fromPhone();
+  $('lookupNote').textContent = `${q.name || 'Found'}: ${looked.W} × ${looked.H} × ${looked.D} mm, from ${message.provider || 'the AI'}.${q.note ? ' ' + q.note : ''} Check them with a ruler.`;
+  $('lookupNote').className = 'muted';
+  update();
+}
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'ai' && message.id === 'phone') gotPhone(message);
+  else if (message.type === 'store') {
+    SAVED = {};
+    for (const q of (message.data && message.data.phones) || []) if (q && q.name) SAVED[String(q.name)] = phoneFrom(q);
+    drawPicker();
+  }
+  else if (message.type === 'image' && refWait) {
+    refWait = false;
+    if (message.error || !message.data) return;
+    const img = new Image();
+    img.onload = () => { refImg = img; p.view = 'flat'; p.refX = p.refY = p.refTurn = 0; sliders.refW(Math.round(2 * (dims().a + dims().T) * 2) / 2); sliders.refTurn(0); update(); };
+    img.src = message.data;
+  }
+  else if (message.type === 'image') {
+    if (message.error) { $('pictureName').textContent = message.error; return; }
+    const img = new Image();
+    img.onload = () => { picture = {img, name: message.name}; maskCache.key = ''; $('pictureName').textContent = message.name; p.design = 'picture'; update(); };
+    img.src = message.data;
+  }
+};
+$('pick').onclick = () => post({cmd: 'pick_image'});
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  const full = build(p.res), name = `${phoneName(p.phone)} case`;
+  post(Lamp.addMessage(name, [{name: 'Case', sheets: full.sheets}, ...(full.qrSheets.length ? [{name: 'QR code', sheets: full.qrSheets, extruder: 2}] : []), ...(full.picSheets.length ? [{name: 'Picture', sheets: full.picSheets, extruder: 2}] : [])], full.extras.map(e => ({name: e.name, parts: [{name: e.name, sheets: e.sheets}, ...(e.inlay && e.inlay.length ? [{name: 'Cover words and QR', sheets: e.inlay, extruder: 2}] : [])]}))));
+};
+fromPhone();
+for (const [k, set] of Object.entries(sliders)) set(p[k]);
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

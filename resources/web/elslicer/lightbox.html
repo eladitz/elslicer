@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Lightbox</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 112px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  textarea, select { width: 100%; box-sizing: border-box; }
+  textarea { font: inherit; color: var(--text); background: #16171a; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; resize: vertical; }
+  .field { margin: 6px 0; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  #thumb { width: 44px; height: 44px; object-fit: contain; border: 1px solid var(--line); border-radius: 6px; background: #16171a; }
+  input[type=color] { width: 44px; height: 30px; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: none; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Lightbox</h1>
+  <p class="sub">A box with your picture or words on the front, lit from inside. It prints front down with no supports; the back presses in.</p>
+
+  <h3>Start from</h3>
+  <div class="grid">
+    <button data-start="open">Open<small>round, lit letters</small></button>
+    <button data-start="air">On air<small>red letters</small></button>
+    <button data-start="coffee">Coffee<small>follows the words</small></button>
+    <button data-start="night">Sweet dreams<small>night light</small></button>
+    <button data-start="name">A name<small>follows the words</small></button>
+    <button data-start="blank">Blank</button>
+  </div>
+
+  <h3>Words</h3>
+  <div class="field"><textarea id="text" rows="2" placeholder="Words on the front, a line each"></textarea></div>
+  <div class="two">
+    <div class="field"><label for="font">Font</label><select id="font"></select></div>
+    <div class="field"><label for="weight">Weight</label><select id="weight"><option value="400">Regular</option><option value="700">Bold</option><option value="900">Heavy</option></select></div>
+  </div>
+  <div id="textSliders"></div>
+
+  <h3>Picture</h3>
+  <div class="row"><img id="thumb" alt=""><button id="pick">Choose a picture…</button><button id="unpick">Remove</button></div>
+  <p class="muted" id="pictureName" style="font-size:12px">PNG or JPG. Its dark parts become the design; best with a logo or line drawing.</p>
+  <label class="check"><input type="checkbox" id="invert"> Use the light parts instead</label>
+  <div id="pictureSliders"></div>
+
+  <h3>Shape</h3>
+  <div class="seg">
+    <button data-shape="rect">Rectangle</button>
+    <button data-shape="circle">Circle</button>
+    <button data-shape="contour" title="An outline round the words and picture">Follows the design</button>
+  </div>
+  <div id="shapeSliders"></div>
+
+  <h3>Light</h3>
+  <div class="grid">
+    <button data-mode="lit">Lit design<small>dark around it</small></button>
+    <button data-mode="dark">Coloured design<small>on a lit front</small></button>
+    <button data-mode="one">One colour<small>thin where lit</small></button>
+  </div>
+  <div class="row field"><input type="color" id="ink" value="#2f8f4e"><label for="ink" class="muted" style="font-size:13px">Second colour (filament 2), for the preview</label></div>
+  <label class="check"><input type="checkbox" id="darkSides"> Sides in the second colour too</label>
+  <label class="check"><input type="checkbox" id="glow" checked> Show it lit</label>
+
+  <h3>Back and stand</h3>
+  <div id="backSliders"></div>
+  <div class="seg">
+    <button data-base="none">No stand</button>
+    <button data-base="stand" title="A foot with a slot the box stands in">Stand</button>
+  </div>
+
+  <h3>Printing</h3>
+  <div id="printSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+let picture = null;   // {img, name}
+
+const FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Arial Black', 'Impact', 'Georgia', 'Didot', 'Copperplate', 'Snell Roundhand',
+               'Bradley Hand', 'Marker Felt', 'Chalkboard SE', 'Noteworthy', 'Zapfino'];
+
+const p = {shape: 'circle', W: 120, H: 120, corner: 10, margin: 6, depth: 40, wall: 2, front: 1.2, mode: 'lit',
+           textSize: 26, lineGap: 1.1, picW: 60, picY: 0, threshold: 50, hole: 6, fit: 0.15, base: 'none', res: 0.35};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set;
+  return row;
+}
+slider($('textSliders'), 'textSize', 'Letters mm', 6, 80, 1);
+slider($('textSliders'), 'lineGap', 'Line spacing', 0.8, 1.6, 0.05);
+slider($('pictureSliders'), 'picW', 'Width mm', 15, 200, 1);
+slider($('pictureSliders'), 'threshold', 'Dark below %', 10, 90, 1);
+slider($('pictureSliders'), 'picY', 'Up or down mm', -60, 60, 1);
+const wRow = slider($('shapeSliders'), 'W', 'Width mm', 50, 250, 1);
+const hRow = slider($('shapeSliders'), 'H', 'Height mm', 40, 250, 1);
+const cornerRow = slider($('shapeSliders'), 'corner', 'Corners mm', 0, 40, 1);
+const marginRow = slider($('shapeSliders'), 'margin', 'Border mm', 3, 20, 0.5);
+slider($('shapeSliders'), 'depth', 'Depth mm', 20, 80, 1);
+slider($('shapeSliders'), 'wall', 'Sides mm', 1.2, 4, 0.1);
+slider($('shapeSliders'), 'front', 'Front mm', 0.8, 2.4, 0.1);
+slider($('backSliders'), 'hole', 'Cable hole mm', 0, 14, 0.5);
+slider($('backSliders'), 'fit', 'Back fit mm', 0, 0.5, 0.05);
+slider($('printSliders'), 'res', 'Detail mm', 0.2, 0.6, 0.01);
+
+for (const f of FONTS) $('font').add(new Option(f, f));
+$('font').value = 'Futura'; $('weight').value = '700';
+for (const id of ['font', 'weight', 'ink']) $(id).onchange = update;
+for (const id of ['text', 'invert', 'darkSides', 'glow']) $(id).oninput = update;
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('shape', 'shape'); choose('mode', 'mode'); choose('base', 'base');
+
+// Starting points: words, shape, font and colours to change from.
+const STARTS = {
+  open:   {text: 'Yes!\nOPEN', shape: 'circle', W: 130, font: 'Futura', weight: '900', textSize: 30, mode: 'lit', ink: '#2f8f4e', base: 'stand'},
+  air:    {text: 'ON AIR', shape: 'rect', W: 170, H: 70, corner: 6, font: 'Impact', weight: '400', textSize: 40, mode: 'dark', ink: '#d0302a', base: 'stand'},
+  coffee: {text: 'Life begins\nafter coffee', shape: 'contour', font: 'Snell Roundhand', weight: '700', textSize: 24, margin: 7, mode: 'dark', ink: '#7a4a2a', base: 'stand'},
+  night:  {text: 'Sweet\ndreams', shape: 'rect', W: 140, H: 100, corner: 20, font: 'Bradley Hand', weight: '700', textSize: 28, mode: 'lit', ink: '#1d2a55', base: 'stand'},
+  name:   {text: 'Elad', shape: 'contour', font: 'Marker Felt', weight: '700', textSize: 50, margin: 6, mode: 'one', base: 'stand'},
+  blank:  {text: '', shape: 'rect', W: 120, H: 90, corner: 8, mode: 'lit', base: 'none'},
+};
+for (const b of document.querySelectorAll('[data-start]')) b.onclick = () => {
+  const s = STARTS[b.dataset.start];
+  for (const [k, v] of Object.entries(s)) {
+    if (k === 'text') $('text').value = v;
+    else if (k === 'font' || k === 'weight' || k === 'ink') $(k).value = v;
+    else if (sliders[k]) sliders[k](v);
+    else p[k] = v;
+  }
+  if (s.shape === 'circle') sliders.H(p.W);
+  update();
+};
+
+// ---------------------------------------------------------------------------------------------------------------
+// Everything is laid out as seen from the front, x right and y up, in mm, centred on the middle of the design.
+// The box prints front down, so its geometry is mirrored in x; the back plate prints outside down, which is the
+// front view again.
+const font = size => `${$('weight').value} ${size}px "${$('font').value}"`;
+const lines = () => $('text').value.split('\n').map(l => l.trim()).filter(Boolean);
+
+// The picture's dark (or light) parts as a white-on-clear mask, at most 800 pixels across.
+let maskCache = {key: '', canvas: null};
+function pictureMask() {
+  if (!picture) return null;
+  const key = `${picture.name}|${p.threshold}|${$('invert').checked}`;
+  if (maskCache.key === key) return maskCache.canvas;
+  const img = picture.img, s = Math.min(1, 800 / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(img.width * s)); c.height = Math.max(1, Math.round(img.height * s));
+  const g = c.getContext('2d', {willReadFrequently: true}); g.drawImage(img, 0, 0, c.width, c.height);
+  const data = g.getImageData(0, 0, c.width, c.height), px = data.data, cut = p.threshold / 100 * 255, inv = $('invert').checked;
+  for (let n = 0; n < px.length; n += 4) {
+    const lum = 0.299 * px[n] + 0.587 * px[n + 1] + 0.114 * px[n + 2];
+    const on = (lum < cut) !== inv && px[n + 3] > 127;
+    px[n] = px[n + 1] = px[n + 2] = 255; px[n + 3] = on ? 255 : 0;
+  }
+  g.putImageData(data, 0, 0);
+  maskCache = {key, canvas: c};
+  return c;
+}
+
+// The design's blocks, picture above words, at scale s: {w, h, draw(g)}.
+function designBlock(s) {
+  const measure = document.createElement('canvas').getContext('2d'), ls = lines(), size = p.textSize * s;
+  measure.font = font(size);
+  const widths = ls.map(l => measure.measureText(l).width), lh = size * p.lineGap, textH = ls.length ? lh * (ls.length - 1) + size : 0;
+  const mask = pictureMask(), pw = mask ? p.picW * s : 0, ph = mask ? pw * mask.height / mask.width : 0, gap = mask && ls.length ? 4 * s : 0;
+  const w = Math.max(pw, ...widths, 0), h = ph + gap + textH;
+  const draw = (g, dy = 0) => {
+    const top = h / 2 + dy;
+    if (mask) { g.save(); g.translate(-pw / 2, top + p.picY * s); g.scale(1, -1); g.drawImage(mask, 0, 0, pw, ph); g.restore(); }
+    g.save(); g.font = font(size); g.textAlign = 'center'; g.textBaseline = 'middle';
+    ls.forEach((l, k) => { const y = top - ph - gap - size / 2 - k * lh; g.save(); g.translate(0, y); g.scale(1, -1); g.fillText(l, 0, 0); g.restore(); });
+    g.restore();
+  };
+  return {w, h, draw, empty: !mask && !ls.length};
+}
+
+// A picture at k pixels per mm over [x0, x1] × [y0, y1], y up.
+function canvasFor(k, x0, x1, y0, y1) {
+  const W = Math.ceil((x1 - x0) * k) + 2, H = Math.ceil((y1 - y0) * k) + 2, ox = -x0 * k + 1, oy = y1 * k + 1;
+  const make = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', {willReadFrequently: true});
+    g.setTransform(k, 0, 0, -k, ox, oy); g.fillStyle = '#fff'; return [c, g]; };
+  return {W, H, ox, oy, k, make};
+}
+const alphaOf = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
+  for (let n = 0; n < out.length; ++n) out[n] = d[4 * n + 3] > 127; return out; };
+// Distance in pixels from each pixel inside to the nearest one outside (a chamfer distance, near enough).
+function distance(inside, W, H) {
+  const f = new Float32Array(W * H), D = Math.SQRT2;
+  for (let n = 0; n < f.length; ++n) f[n] = inside[n] ? 1e9 : 0;
+  for (let j = 0; j < H; ++j) for (let i = 0; i < W; ++i) { const n = j * W + i; if (!f[n]) continue; let v = f[n];
+    if (i > 0) v = Math.min(v, f[n - 1] + 1);
+    if (j > 0) { v = Math.min(v, f[n - W] + 1); if (i > 0) v = Math.min(v, f[n - W - 1] + D); if (i < W - 1) v = Math.min(v, f[n - W + 1] + D); }
+    f[n] = v; }
+  for (let j = H - 1; j >= 0; --j) for (let i = W - 1; i >= 0; --i) { const n = j * W + i; if (!f[n]) continue; let v = f[n];
+    if (i < W - 1) v = Math.min(v, f[n + 1] + 1);
+    if (j < H - 1) { v = Math.min(v, f[n + W] + 1); if (i > 0) v = Math.min(v, f[n + W - 1] + D); if (i < W - 1) v = Math.min(v, f[n + W + 1] + D); }
+    f[n] = v; }
+  return f;
+}
+
+// The front's outline and design as masks, and how far in from the edge each pixel is.
+function layout(k) {
+  const shaped = p.shape !== 'contour', W = p.W, H = p.shape === 'circle' ? p.W : p.H;
+  let block;
+  if (shaped) {
+    // Fit the design inside, shrinking it if it is bigger than the front.
+    const room = p.shape === 'circle' ? [W * 0.7 - 2 * p.wall, W * 0.7 - 2 * p.wall] : [W - 2 * p.wall - 12, H - 2 * p.wall - 12];
+    block = designBlock(1);
+    const s = Math.min(1, room[0] / Math.max(1e-6, block.w), room[1] / Math.max(1e-6, block.h));
+    if (s < 1) block = designBlock(s);
+  } else block = designBlock(1);
+  const half = shaped ? [W / 2, H / 2] : [block.w / 2 + p.margin + p.wall + 3, block.h / 2 + p.margin + p.wall + 3];
+  const cv = canvasFor(k, -half[0] - 2, half[0] + 2, -half[1] - 2, half[1] + 2);
+  const [designC, dg] = cv.make();
+  block.draw(dg);
+  const design = alphaOf(designC);
+  let outline;
+  if (shaped) {
+    const [oc, og] = cv.make();
+    og.beginPath();
+    if (p.shape === 'circle') og.arc(0, 0, W / 2, 0, 2 * Math.PI); else og.roundRect(-W / 2, -H / 2, W, H, Math.min(p.corner, W / 2, H / 2));
+    og.fill();
+    outline = alphaOf(oc);
+  } else {
+    // Round the design: everything within the border, smoothed by growing a little further and shrinking back,
+    // with any holes filled.
+    const smooth = p.margin * 0.8, grow = (p.margin + p.wall + smooth) * k, out = new Uint8Array(design.length);
+    const far = distance(design.map(v => 1 - v), cv.W, cv.H);
+    const big = far.map(v => v <= grow ? 1 : 0), back = distance(big, cv.W, cv.H);
+    for (let n = 0; n < out.length; ++n) out[n] = back[n] > smooth * k ? 1 : 0;
+    const seen = new Uint8Array(out.length), stack = [];
+    for (let i = 0; i < cv.W; ++i) stack.push(i, (cv.H - 1) * cv.W + i);
+    for (let j = 0; j < cv.H; ++j) stack.push(j * cv.W, j * cv.W + cv.W - 1);
+    while (stack.length) { const n = stack.pop(); if (seen[n] || out[n]) continue; seen[n] = 1; const i = n % cv.W;
+      if (i > 0) stack.push(n - 1); if (i < cv.W - 1) stack.push(n + 1); if (n >= cv.W) stack.push(n - cv.W); if (n + cv.W < out.length) stack.push(n + cv.W); }
+    for (let n = 0; n < out.length; ++n) if (!seen[n]) out[n] = 1;
+    outline = out;
+  }
+  const inward = distance(outline, cv.W, cv.H);
+  for (let n = 0; n < design.length; ++n) if (!outline[n] || inward[n] < p.wall * k) design[n] = 0;
+  return {cv, outline, design, inward, block};
+}
+
+// A height field over the layout's grid: z(n) gives [bottom, top] or null where there is nothing. mirror: as seen
+// from behind.
+function field(L, mirror, z) {
+  const {W, H, ox, oy, k} = L.cv;
+  return Lamp.sheet(W, H, false, (i, j, front) => {
+    const n = j * W + i, x = (i - ox) / k, y = (oy - j) / k, h = z(n) || [0, 0];
+    return [mirror ? -x : x, y, front ? h[1] : h[0]];
+  });
+}
+
+function build(res) {
+  const k = 1 / res, L = layout(k), {outline, design, inward, cv} = L, problems = [];
+  const D = p.depth, wallPx = p.wall * k, one = p.mode === 'one', thin = 0.6, ink = 0.6;
+  const front = one ? Math.max(p.front, 1.8) : p.front;
+  // The box: front and sides in one, printed front down.
+  const box = field(L, true, n => !outline[n] ? null : inward[n] < wallPx ? [0, D] : one && design[n] ? [0, thin] : [0, front]);
+  // The second colour: inlaid in the front's outside, the design or everything round it, and the sides if asked.
+  const sides = $('darkSides').checked, colourAt = n => outline[n] && ((sides && inward[n] < wallPx) ? [0, D] :
+    !one && (p.mode === 'dark' ? design[n] : !design[n]) ? [0, ink] : null);
+  let any = false; for (let n = 0; n < outline.length && !any; ++n) if (colourAt(n)) any = true;
+  const colour = any ? field(L, true, colourAt) : null;
+  // The back: a plate over the whole outline with a ring that presses inside the sides, and a hole for the cable
+  // low in the middle.
+  const ring0 = (p.wall + p.fit) * k, ring1 = ring0 + 1.6 * k, plate = 1.2, plug = 4;
+  let hole = null;
+  if (p.hole > 0) {
+    const ic = Math.round(cv.ox);
+    let jb = -1; for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + ic]) { jb = j; break; }
+    if (jb >= 0) hole = {x: 0, y: (cv.oy - jb) / k + p.wall + p.fit + 1.6 + p.hole / 2 + 2, r: p.hole / 2};
+  }
+  const back = field(L, false, n => {
+    if (!outline[n]) return null;
+    if (hole) { const x = (n % cv.W - cv.ox) / k, y = (cv.oy - Math.floor(n / cv.W)) / k; if (Math.hypot(x - hole.x, y - hole.y) < hole.r) return null; }
+    return inward[n] >= ring0 && inward[n] < ring1 ? [0, plate + plug] : [0, plate];
+  });
+  // The stand: a foot with a slot as wide as the box is 6 mm up from its lowest point.
+  let stand = null;
+  if (p.base === 'stand') {
+    let jb = -1; for (let j = cv.H - 1; j >= 0 && jb < 0; --j) for (let i = 0; i < cv.W; ++i) if (outline[j * cv.W + i]) { jb = j; break; }
+    const up = 6, rows = Math.round(up * k);
+    let i0 = Infinity, i1 = -Infinity;
+    for (let j = jb; j > jb - rows && j >= 0; --j) for (let i = 0; i < cv.W; ++i) if (outline[j * cv.W + i]) { i0 = Math.min(i0, i); i1 = Math.max(i1, i); }
+    const sx0 = (i0 - cv.ox) / k - 0.3, sx1 = (i1 - cv.ox) / k + 0.3, sd = D + plate + 0.6, floor = 3, Hs = floor + up;
+    const ax = (sx1 - sx0) / 2 + 10, ay = sd / 2 + 10, cx = (sx0 + sx1) / 2;
+    const nu = Math.ceil(2 * ax * k) + 1, nv = Math.ceil(2 * ay * k) + 1;
+    stand = Lamp.sheet(nu, nv, false, (i, j, frontFace) => {
+      const x = cx - ax + 2 * ax * i / (nu - 1), y = -ay + 2 * ay * j / (nv - 1);
+      const dx = Math.max(Math.abs(x - cx) - (ax - 8), 0), dy = Math.max(Math.abs(y) - (ay - 8), 0);
+      let h = Math.hypot(dx, dy) > 8 ? 0 : Hs;
+      if (h && x > sx0 && x < sx1 && Math.abs(y) < sd / 2) h = floor;
+      // A notch at the back for the cable.
+      if (h && p.hole > 0 && Math.abs(x - cx) < p.hole / 2 + 1 && y > sd / 2 - 1) h = floor;
+      return [x, y, frontFace ? h : 0];
+    });
+    if (i1 - i0 < 30 * k) problems.push('The box is narrow where it stands; it may tip in its stand.');
+  }
+  if (L.block.empty) problems.push('Add words or a picture for the front.');
+  if (p.mode !== 'one' && !any && !L.block.empty) problems.push('The design is too small to show.');
+  return {box, colour, back, stand, problems, hole, size: [cv.W / k, cv.H / k, D], front};
+}
+
+const viewer = new Lamp.Viewer($('canvas'));
+viewer.pitch = -0.8; viewer.yaw = 1.25;   // from below and in front, where the front faces
+let built = null, timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+function update() {
+  on('shape', p.shape); on('mode', p.mode); on('base', p.base);
+  wRow.classList.toggle('hidden', p.shape === 'contour'); hRow.classList.toggle('hidden', p.shape !== 'rect');
+  cornerRow.classList.toggle('hidden', p.shape !== 'rect'); marginRow.classList.toggle('hidden', p.shape !== 'contour');
+  $('unpick').classList.toggle('hidden', !picture);
+  clearTimeout(timer);
+  timer = setTimeout(render, 150);
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+const rgb = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+function render() {
+  built = build(Math.max(0.5, p.res));
+  const problems = [...built.problems];
+  const [lo, hi] = Lamp.bounds([built.box]), size = [hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]];
+  if (size[0] > printer.bed[0] || size[1] > printer.bed[1]) problems.push(`It is ${f1(size[0])} × ${f1(size[1])} mm, more than your plate.`);
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  const parts = [{sheets: [built.box], colour: [0.93, 0.92, 0.88]}];
+  // The inlay shares the front's face, so the preview lifts it a hair to keep it from flickering.
+  if (built.colour) parts.push({sheets: Lamp.moved([built.colour], 0, 0, -0.05), colour: rgb($('ink').value), glow: false});
+  let x = hi[0] + 12;
+  for (const s of [built.back, built.stand]) if (s) {
+    const [blo, bhi] = Lamp.bounds([s]);
+    parts.push({sheets: Lamp.moved([s], x - blo[0], 0), colour: [0.6, 0.62, 0.68], glow: false});
+    x += bhi[0] - blo[0] + 10;
+  }
+  viewer.show(parts, $('glow').checked, false);
+  const how = {lit: 'The design shows as light through the white front, with the second colour round it.',
+               dark: 'The design is in the second colour on a lit white front.',
+               one: `One filament: the front is ${f1(built.front)} mm and 0.6 mm where the design is, so the design glows brighter.`}[p.mode];
+  const two = built.colour ? ' The second colour is its own part on filament 2, inlaid 0.6 mm in the front' + ($('darkSides').checked ? ' and making up the sides.' : '.') : '';
+  $('facts').textContent = `${f1(size[0])} × ${f1(size[1])} × ${f1(size[2] + 1.2)} mm. Print the box front down in white PLA with no supports, and the back flat. ${how}${two}` +
+    ` Light it with a USB LED puck or strip inside${built.hole ? `, its cable out through the ${f1(p.hole)} mm hole in the back` : ''}, then press the back in.`;
+}
+
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'image') {
+    if (message.error) { $('pictureName').textContent = message.error; return; }
+    const img = new Image();
+    img.onload = () => { picture = {img, name: message.name}; maskCache.key = ''; $('thumb').src = message.data; $('pictureName').textContent = message.name; update(); };
+    img.src = message.data;
+  }
+};
+$('pick').onclick = () => post({cmd: 'pick_image'});
+$('unpick').onclick = () => { picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'No picture.'; update(); };
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  const full = build(p.res), first = lines()[0], name = first ? `${first} lightbox` : 'Lightbox';
+  const more = [{name: `${name} back`, parts: [{name: 'Back', sheets: [full.back]}]}];
+  if (full.stand) more.push({name: `${name} stand`, parts: [{name: 'Stand', sheets: [full.stand]}]});
+  post(Lamp.addMessage(name, [{name: 'Box', sheets: [full.box]}, ...(full.colour ? [{name: 'Colour', sheets: [full.colour], extruder: 2}] : [])], more));
+};
+$('text').value = 'Yes!\nOPEN';
+for (const [k, set] of Object.entries(sliders)) set(p[k]);
+document.querySelector('[data-start="open"]').click();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

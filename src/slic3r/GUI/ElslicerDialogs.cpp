@@ -2824,15 +2824,25 @@ indexed_triangle_set sheet_mesh(int nu, int nv, bool wrap, const float *points)
         }
     }
     // Where the sheet has no thickness (the empty parts of a lace or a design laid over a heightfield) its front
-    // and back would lie on each other as a skin of no volume. Share those points, then drop the faces that fold
-    // onto one another, so only the solid parts are left, closed where they thin to nothing.
+    // and back would lie on each other as a skin of no volume, and a solid turned about its axis has a whole row of
+    // points on that axis. Share points in the same place, then drop the faces that collapse or fold onto one
+    // another, so only the solid parts are left, closed where they thin to nothing.
     const size_t half = size_t(nu) * nv;
     std::vector<int> same(2 * half);
-    for (size_t k = 0; k < 2 * half; ++k)
-        same[k] = int(k);
     bool flat = false;
-    for (size_t k = 0; k < half; ++k)
-        if (its.vertices[k] == its.vertices[half + k]) { same[half + k] = int(k); flat = true; }
+    {
+        std::unordered_map<uint64_t, int> first;
+        first.reserve(2 * half);
+        const auto bits = [](float f) { f += 0.f; uint32_t u; std::memcpy(&u, &f, 4); return uint64_t(u); }; // -0 is 0
+        for (size_t k = 0; k < 2 * half; ++k) {
+            const Vec3f &v = its.vertices[k];
+            const uint64_t h = bits(v.x()) * 0x9E3779B97F4A7C15ull ^ bits(v.y()) * 0xC2B2AE3D27D4EB4Full ^ bits(v.z());
+            auto [it, inserted] = first.emplace(h, int(k));
+            // A hash shared by different points keeps them apart; only the same place is shared.
+            same[k] = !inserted && its.vertices[it->second] == v ? it->second : int(k);
+            flat |= same[k] != int(k);
+        }
+    }
     if (flat && 2 * half < (size_t(1) << 21)) {
         std::vector<stl_triangle_vertex_indices> kept;
         kept.reserve(its.indices.size());
@@ -2859,7 +2869,7 @@ indexed_triangle_set sheet_mesh(int nu, int nv, bool wrap, const float *points)
     return its;
 }
 
-// A page that makes a model from closed sheets and adds it to the plate: the lampshade, lithophane, box, stamp, bag, star map, frame and mask makers.
+// A page that makes a model from closed sheets and adds it to the plate: the lampshade, lithophane, box, stamp, bag, star map, frame, mask, card embosser and tulle card makers.
 class SheetMakerDialog : public WebPageDialog
 {
 public:
@@ -2926,6 +2936,7 @@ private:
         for (const json &object : data.value("objects", json::array())) {
             std::vector<TriangleMesh> meshes;
             std::vector<wxString>     names;
+            std::vector<int>          extruders;
             for (const json &part : object.value("parts", json::array())) {
                 indexed_triangle_set its;
                 for (const json &sheet : part.value("sheets", json::array())) {
@@ -2942,6 +2953,7 @@ private:
                     continue;
                 meshes.emplace_back(std::move(its));
                 names.push_back(from_u8(part.value("name", std::string())));
+                extruders.push_back(part.value("extruder", 0));
             }
             if (meshes.empty())
                 continue;
@@ -2949,6 +2961,13 @@ private:
             for (size_t k = 0; k < meshes.size(); ++k)
                 parts.emplace_back(&meshes[k], names[k]);
             wxGetApp().obj_list()->load_mesh_object(parts, from_u8(object.value("name", std::string("Model"))));
+            // A part may ask for its own filament, such as a QR code inlaid in a second colour.
+            if (ModelObject *loaded = wxGetApp().plater()->model().objects.back(); loaded && loaded->volumes.size() == meshes.size())
+                for (size_t k = 0; k < meshes.size(); ++k)
+                    if (extruders[k] > 0)
+                        for (ModelVolume *volume : loaded->volumes)
+                            if (volume->name == into_u8(names[k]))
+                                volume->config.set("extruder", extruders[k]);
             // The next object looks for an empty place on the plate, so this one must be in the scene first.
             wxGetApp().plater()->update();
             added = true;

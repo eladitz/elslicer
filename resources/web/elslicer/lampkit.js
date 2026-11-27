@@ -126,12 +126,18 @@ const Lamp = (() => {
     });
   }
 
-  // How far the sheets reach: [[min x, y, z], [max x, y, z]].
+  // How far the solid parts of the sheets reach: [[min x, y, z], [max x, y, z]].
   function bounds(sheets) {
     const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
-    for (const s of sheets)
-      for (let k = 0; k < s.pos.length; k += 3)
+    for (const s of sheets) {
+      const half = 3 * s.nu * s.nv;
+      for (let k = 0; k < s.pos.length; k += 3) {
+        // Points with no thickness under them aren't part of the solid.
+        const w = k < half ? k + half : k - half;
+        if (s.pos[k] === s.pos[w] && s.pos[k + 1] === s.pos[w + 1] && s.pos[k + 2] === s.pos[w + 2]) continue;
         for (let a = 0; a < 3; ++a) { lo[a] = Math.min(lo[a], s.pos[k + a]); hi[a] = Math.max(hi[a], s.pos[k + a]); }
+      }
+    }
     return [lo, hi];
   }
 
@@ -144,7 +150,7 @@ const Lamp = (() => {
     return btoa(text);
   }
   const partsJson = parts => parts.filter(p => p.sheets.length).map(p => ({
-    name: p.name, sheets: p.sheets.map(s => ({nu: s.nu, nv: s.nv, wrap: s.wrap, pos: base64(s.pos)}))}));
+    name: p.name, ...(p.extruder ? {extruder: p.extruder} : {}), sheets: p.sheets.map(s => ({nu: s.nu, nv: s.nv, wrap: s.wrap, pos: base64(s.pos)}))}));
   // One object of parts, and any more objects as [{name, parts}], each added beside the last.
   function addMessage(name, parts, more = []) {
     return {cmd: 'add', objects: [{name, parts: partsJson(parts)}, ...more.map(o => ({name: o.name, parts: partsJson(o.parts)}))]};
@@ -195,7 +201,15 @@ const Lamp = (() => {
       let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
       for (const part of parts)
         for (const s of part.sheets) {
-          const idx = sheetIndices(s.nu, s.nv, s.wrap), n = s.pos.length / 3;
+          const n = s.pos.length / 3, half0 = s.nu * s.nv;
+          // Where a sheet has no thickness (the empty parts of a height field) the app adds nothing, so neither does
+          // the preview: faces whose every corner sits on its twin on the other face are left out.
+          const flat = v => { const w = v < half0 ? v + half0 : v - half0;
+            return s.pos[3 * v] === s.pos[3 * w] && s.pos[3 * v + 1] === s.pos[3 * w + 1] && s.pos[3 * v + 2] === s.pos[3 * w + 2]; };
+          let idx = sheetIndices(s.nu, s.nv, s.wrap);
+          const kept = [];
+          for (let k = 0; k < idx.length; k += 3) if (!(flat(idx[k]) && flat(idx[k + 1]) && flat(idx[k + 2]))) kept.push(idx[k], idx[k + 1], idx[k + 2]);
+          if (kept.length < idx.length) idx = new Uint32Array(kept);
           let pos = s.pos;
           if (flip) {
             pos = new Float32Array(s.pos);
@@ -220,7 +234,7 @@ const Lamp = (() => {
               r = 1.0 * light + 0.05; g = 0.78 * light + 0.04; b = 0.45 * light + 0.03;
             }
             col[3 * v] = r; col[3 * v + 1] = g; col[3 * v + 2] = b;
-            for (let a = 0; a < 3; ++a) { lo[a] = Math.min(lo[a], pos[3 * v + a]); hi[a] = Math.max(hi[a], pos[3 * v + a]); }
+            if (!flat(v)) for (let a = 0; a < 3; ++a) { lo[a] = Math.min(lo[a], pos[3 * v + a]); hi[a] = Math.max(hi[a], pos[3 * v + a]); }
           }
           const vao = gl.createVertexArray();
           gl.bindVertexArray(vao);
