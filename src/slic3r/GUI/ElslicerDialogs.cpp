@@ -3071,13 +3071,17 @@ indexed_triangle_set sheet_mesh(int nu, int nv, bool wrap, const float *points)
             flat |= same[k] != int(k);
         }
     }
-    if (flat && 2 * half < (size_t(1) << 21)) {
+    if (flat) {
         std::vector<stl_triangle_vertex_indices> kept;
         kept.reserve(its.indices.size());
-        std::unordered_map<uint64_t, int> count;
+        // A triangle by its corners in order, so one and its mirror image are the same key, at any grid size.
+        struct Key { int a, b, c; bool operator==(const Key &o) const { return a == o.a && b == o.b && c == o.c; } };
+        struct Hash { size_t operator()(const Key &k) const { return (size_t(k.a) * 0x9E3779B97F4A7C15ull) ^ (size_t(k.b) * 0xC2B2AE3D27D4EB4Full) ^ size_t(k.c); } };
+        std::unordered_map<Key, int, Hash> count;
+        count.reserve(its.indices.size());
         const auto key = [](stl_triangle_vertex_indices t) {
             std::sort(t.data(), t.data() + 3);
-            return (uint64_t(t[0]) << 42) | (uint64_t(t[1]) << 21) | uint64_t(t[2]);
+            return Key{t[0], t[1], t[2]};
         };
         for (auto &t : its.indices) {
             for (int c = 0; c < 3; ++c)
@@ -3114,7 +3118,9 @@ protected:
                   {"bed", {bed.size().x(), bed.size().y()}},
                   {"height", config.opt_float("printable_height")},
                   {"layer", config.opt_float("layer_height")},
-                  {"api", Makers::API}});
+                  {"api", Makers::API},
+                  // Sheets of any size have their flat parts removed; before, only those under a million points did.
+                  {"large_sheets", true}});
         } else if (cmd == "pick_image")
             pick_image();
         else if (cmd == "add")

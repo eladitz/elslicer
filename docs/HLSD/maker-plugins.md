@@ -38,12 +38,16 @@ The page posts JSON to `window.wx.postMessage` and receives messages through `wi
 
 | Page sends | Elslicer answers |
 |---|---|
-| `ready` | `{type: "printer", bed, height, layer, api}`, `{type: "maker", id, version, api}`, `{type: "store", data}` |
+| `ready` | `{type: "printer", bed, height, layer, api, large_sheets}`, `{type: "maker", id, version, api}`, `{type: "store", data}` |
 | `pick_image` | `{type: "image", name, data}` (a JPEG data URL, at most 2000 px), or an error |
 | `add` `{objects: [{name, parts: [{name, extruder?, sheets: [{nu, nv, wrap, pos}]}]}]}` | adds the objects and closes; `pos` is base64 float32, front then back grid |
 | `close` | closes |
 | `store_set` `{key, value}` | keeps it (`null` forgets it) |
 | `ai` `{id, system, prompt, schema, name?, description?, max_tokens?}` | `{type: "ai", id, answer, provider}` or `{…, error}` |
+
+Where a sheet's front and back meet (no thickness), Elslicer drops those faces, so a design laid over a grid keeps
+only its solid parts. Elslicers that answer without `large_sheets` do this only for sheets under about a million
+points, so a page that may send bigger ones makes them coarser there.
 
 `ai` needs `"ai"` in `permissions`. It asks the AI service chosen in AI Setup, through `AI::chat`, with the schema
 as the input schema of one tool, and returns the tool call's input. A maker that didn't ship with Elslicer asks the

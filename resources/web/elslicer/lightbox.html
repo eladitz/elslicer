@@ -887,8 +887,22 @@ window.fromApp = message => {
 $('pick').onclick = () => post({cmd: 'pick_image'});
 $('unpick').onclick = () => { if (window.makerPictureGone) makerPictureGone(); picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'No picture.'; update(); };
 $('cancel').onclick = () => post({cmd: 'close'});
+// An older Elslicer leaves in the flat empty parts of a sheet over about a million points, as a skin over the whole
+// rectangle; for it, a big design is added a little coarser.
+const mostPoints = b => Math.max(...[b.box, b.back, b.stand, ...b.inlays.map(s => s.sheet), ...b.pieces.map(s => s.sheet)].filter(Boolean).map(s => s.nu * s.nv));
+function buildToAdd() {
+  let res = p.res;
+  if (!printer.large_sheets) {
+    // From the preview's coarser build: points grow with the square of the detail.
+    const r0 = Math.max(0.5, p.res), b0 = built && !built.problem && built.box ? built : build(r0), at = mostPoints(b0) * (r0 / res) ** 2;
+    if (at > 950000) res *= Math.sqrt(at / 950000);
+  }
+  let full = build(res);
+  for (let tries = 0; !printer.large_sheets && mostPoints(full) > 1000000 && tries < 3; ++tries) { res *= Math.sqrt(mostPoints(full) / 950000); full = build(res); }
+  return full;
+}
 $('add').onclick = () => {
-  const full = build(p.res), first = lines()[0], name = first ? `${first} lightbox` : picture ? `${picture.name.replace(/\.[^.]+$/, '')} lightbox` : 'Lightbox';
+  const full = buildToAdd(), first = lines()[0], name = first ? `${first} lightbox` : picture ? `${picture.name.replace(/\.[^.]+$/, '')} lightbox` : 'Lightbox';
   const fil = filaments(full), more = [{name: `${name} back`, parts: [{name: 'Back', sheets: [full.back]}]}];
   for (const s of full.pieces) more.push({name: `${name} ${s.name.toLowerCase()}`, parts: [{name: s.name, sheets: [s.sheet]}]});
   if (full.stand) more.push({name: `${name} stand`, parts: [{name: 'Stand', sheets: [full.stand]}]});
