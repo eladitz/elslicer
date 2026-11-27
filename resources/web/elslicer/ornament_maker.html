@@ -1,0 +1,1034 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ornaments</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: grid; grid-template-columns: 340px 1fr; gap: 18px; height: 100vh; }
+  .side { overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 16px 0 6px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+  .grid button { padding: 6px 4px; font-size: 12px; }
+  .grid button small { display: block; color: var(--muted); font-size: 11px; }
+  .grid button.on, .seg button.on { border-color: var(--accent); color: var(--accent); }
+  .slider { display: grid; grid-template-columns: 118px 1fr 58px; align-items: center; gap: 8px; margin: 4px 0; font-size: 13px; }
+  .slider label { color: var(--muted); }
+  .slider input[type=range] { min-width: 0; }
+  .slider input[type=number] { width: 58px; padding: 4px 6px; }
+  .seg { display: flex; gap: 6px; margin: 6px 0; }
+  .seg button { flex: 1; padding: 6px; font-size: 13px; }
+  input[type=text], select { width: 100%; }
+  .field { margin: 6px 0; }
+  .field label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 2px; }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .view { display: flex; flex-direction: column; min-width: 0; min-height: 0; gap: 8px; }
+  canvas { flex: 1; min-height: 0; width: 100%; border: 1px solid var(--line); border-radius: 8px; cursor: grab; }
+  #facts { font-size: 13px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="side">
+  <h1>Ornaments</h1>
+  <p class="sub" style="margin-bottom:8px">Tree ornaments that print without supports: flat pictures, puffed baubles, snowflakes and a star for the top.</p>
+  <div class="grid two" id="kinds">
+    <button data-kind="flat">Flat picture<small>layered scenes, yours too</small></button>
+    <button data-kind="ball">Bauble<small>puffed, round or long</small></button>
+    <button data-kind="flake">Snowflake<small>design your own</small></button>
+    <button data-kind="star">Tree-top star<small>slips onto the tip</small></button>
+    <button data-kind="puff">Puffed shape<small>deer, Santa, lantern</small></button>
+  </div>
+
+  <!-- Flat picture ornaments -->
+  <div id="flatBox">
+    <h3>Shape</h3>
+    <div class="grid" id="shapes">
+      <button data-shape="bauble">Bauble</button><button data-shape="round">Round</button><button data-shape="star">Star</button>
+      <button data-shape="tree">Tree</button><button data-shape="heart">Heart</button><button data-shape="bell">Bell</button>
+    </div>
+    <div id="flatSize"></div>
+    <h3>Inside</h3>
+    <div class="grid" id="scenes">
+      <button data-scene="deer">Deer in the forest</button><button data-scene="pines">Moonlit pines</button><button data-scene="village">Snowy village</button>
+      <button data-scene="snowman">Snowman</button><button data-scene="bear">Bear and mountains</button><button data-scene="bunnies">Bunnies</button>
+      <button data-scene="reindeer">Reindeer under the moon</button><button data-scene="picture">Your picture<small>a PNG or photo</small></button><button data-scene="none">Just words</button>
+    </div>
+    <div id="pictureBox" class="hidden">
+      <div class="row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
+        <button id="pick">Choose a picture…</button><span class="muted" id="pictureName" style="font-size:12px">None yet</span>
+      </div>
+      <label class="check"><input type="checkbox" id="invert"> Use the light parts instead of the dark</label>
+      <div id="pictureSliders"></div>
+    </div>
+    <h3>Words</h3>
+    <div class="field"><input type="text" id="words" placeholder="e.g. Merry Christmas, a name, or leave empty"></div>
+    <div class="two">
+      <div class="field"><label for="font">Font</label><select id="font"></select></div>
+      <div class="field"><label for="wordHow">How</label><select id="wordHow"><option value="cut">Cut to the back</option><option value="raised">Raised</option></select></div>
+    </div>
+    <div id="wordSliders"></div>
+    <h3>Layers</h3>
+    <div id="layerSliders"></div>
+    <label class="check"><input type="checkbox" id="backTwo" checked> The back in filament 2, so the picture shows in two colours</label>
+  </div>
+
+  <!-- 3D baubles -->
+  <div id="ballBox">
+    <h3>Shape</h3>
+    <div class="grid" id="forms">
+      <button data-form="ball">Ball</button><button data-form="drop">Drop</button><button data-form="onion">Onion</button>
+      <button data-form="finial">Finial</button><button data-form="icicle">Icicle</button><button data-form="lantern">Lantern</button>
+    </div>
+    <div id="ballSize"></div>
+    <h3>Surface</h3>
+    <div class="grid" id="patterns">
+      <button data-pattern="plain">Plain</button><button data-pattern="ribs">Ribs</button><button data-pattern="twist">Twist</button>
+      <button data-pattern="diamonds">Diamonds</button><button data-pattern="dots">Dots</button><button data-pattern="bands">Bands</button>
+      <button data-pattern="litho" title="A hollow bauble, thicker where your picture is dark, so the picture shows when a light inside shines through">Lithophane</button>
+    </div>
+    <div id="lithoBox">
+      <div class="row" style="display:flex;gap:8px;align-items:center;margin:6px 0">
+        <button id="lithoPick">Choose a picture…</button><span class="muted lithoName" style="font-size:12px">None yet</span>
+      </div>
+      <div id="lithoSliders"></div>
+      <p class="muted" style="font-size:12px">Print it in white with 100% infill, so only the thickness changes the light. Put a small LED (a fairy light or a battery LED) inside through the opening underneath.</p>
+    </div>
+    <div id="patternSliders"></div>
+    <label class="check" id="stripeRow"><input type="checkbox" id="stripes"> Raised parts in filament 2, like a candy cane</label>
+    <div id="printBox">
+    <h3>Printing</h3>
+    <div class="seg">
+      <button data-print="halves" title="Two halves, each standing on its cut face, so it stays round and needs no supports; a pin lines them up when you glue them">Two halves, round</button>
+      <button data-print="whole" title="Upright in one piece; underneath it narrows at 45° to a small foot, so it needs no supports">Whole, pointed below</button>
+    </div>
+    <div id="printSliders"></div>
+    </div>
+  </div>
+
+  <!-- Snowflakes -->
+  <div id="flakeBox">
+    <h3>Snowflake</h3>
+    <div class="row" style="display:flex;gap:8px;margin:4px 0 8px"><button id="surprise">Surprise me</button><span class="muted" style="font-size:12px">a new one each time</span></div>
+    <div id="flakeSliders"></div>
+    <div class="field"><label for="branchStyle">Branches</label>
+      <select id="branchStyle"><option value="straight">Straight</option><option value="fork">Forked ends</option><option value="leaf">Leaves</option><option value="dot">Dotted ends</option><option value="feather">Feathered</option></select></div>
+    <div class="two">
+      <div class="field"><label for="tip">Tips</label>
+        <select id="tip"><option value="point">Point</option><option value="round">Round</option><option value="diamond">Diamond</option><option value="arrow">Arrow</option><option value="ring">Ring</option><option value="star">Star</option></select></div>
+      <div class="field"><label for="centre">Middle</label>
+        <select id="centre"><option value="hexagon">Hexagon</option><option value="star">Star</option><option value="ring">Ring</option><option value="flower">Flower</option><option value="disc">Disc</option><option value="none">Just the arms</option></select></div>
+    </div>
+    <div class="field"><label for="rings">Rings joining the arms</label>
+      <select id="rings"><option value="0">None</option><option value="1">One</option><option value="2">Two</option></select></div>
+    <label class="check"><input type="checkbox" id="flakeRaise" checked> The middle raised a layer higher</label>
+    <label class="check"><input type="checkbox" id="flakeTwo"> The middle in filament 2</label>
+  </div>
+
+  <!-- Puffed shapes -->
+  <div id="puffBox">
+    <h3>Shape</h3>
+    <div class="grid" id="puffs">
+      <button data-puff="deer">Reindeer</button><button data-puff="santa">Santa</button><button data-puff="lantern">Candle lantern</button>
+    </div>
+    <div id="puffSliders"></div>
+    <label class="check"><input type="checkbox" id="puffTwo" checked> Colour in filament 2 (Rudolph's nose and collar, Santa's hat, the flame)</label>
+    <label class="check"><input type="checkbox" id="puffBoth" checked> Puffed both sides: two halves, glued back to back</label>
+  </div>
+
+  <!-- Tree-top star -->
+  <div id="starBox">
+    <h3>Star</h3>
+    <div class="grid" id="starStyles">
+      <button data-starstyle="facet">Faceted</button><button data-starstyle="puff">Puffed</button><button data-starstyle="flat">Flat</button>
+    </div>
+    <label class="check"><input type="checkbox" id="burst"> Long and short points, like a starburst</label>
+    <div id="starSliders"></div>
+    <p class="muted" style="font-size:12px">It prints as two halves, back down. Glue them back to back: the grooves in their backs make a socket that slides onto the tip of the tree.</p>
+  </div>
+
+  <div id="hangerBox">
+    <h3>Loop for the string</h3>
+    <div id="hangerSliders"></div>
+  </div>
+
+  <h3>How many</h3>
+  <div id="countSliders"></div>
+
+  <p class="note warn hidden" id="problem" style="margin-top:14px"></p>
+  <div class="footer">
+    <button id="cancel">Cancel</button>
+    <button id="add" class="primary">Add to plate</button>
+  </div>
+</div>
+<div class="view">
+  <canvas id="canvas"></canvas>
+  <div id="facts"></div>
+</div>
+
+<script src="lampkit.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => { if (window.wx && window.wx.postMessage) window.wx.postMessage(JSON.stringify(message)); };
+let printer = {bed: [256, 256], height: 256, layer: 0.2};
+
+const FONTS = ['Snell Roundhand', 'Georgia', 'Avenir Next', 'Futura', 'Didot', 'Bradley Hand', 'Marker Felt', 'Copperplate', 'Chalkboard SE', 'Zapfino'];
+const p = {kind: 'flat',
+  // flat
+  shape: 'bauble', D: 80, frame: 4, scene: 'deer', picSize: 90, picX: 0, picY: 0, threshold: 50,
+  wordSize: 9, wordY: 18, back: 1.2, mid: 1.0, front: 1.2,
+  // ball
+  form: 'ball', bD: 70, bLong: 100, pattern: 'twist', depth: 1.2, count: 12, turns: 0.6, print: 'halves', foot: 8,
+  // flake
+  fD: 90, arm: 2.4, branches: 3, bLen: 55, bAngle: 55, centreSize: 22, fT: 2.4,
+  // star
+  starStyle: 'facet', points: 5, sD: 150, inner: 45, sDepth: 15, tipD: 16, sockL: 45,
+  // puffed
+  puff: 'deer', pH: 80, pT: 6, pRound: 8, pGroove: 0.8,
+  lithoBand: 60, lithoRepeat: 1, lithoThin: 0.8, lithoThick: 3, lithoHole: 14,
+  loopD: 9, loopW: 2.4, copies: 1, res: 0.25};
+
+const sliders = {};
+function slider(parent, key, label, min, max, step) {
+  const row = document.createElement('div');
+  row.className = 'slider';
+  row.innerHTML = `<label>${label}</label><input type="range" min="${min}" max="${max}" step="${step}"><input type="number" min="${min}" max="${max}" step="${step}">`;
+  const [range, box] = row.querySelectorAll('input');
+  const set = v => { p[key] = v; range.value = v; box.value = v; };
+  range.oninput = () => { set(+range.value); update(); };
+  box.onchange = () => { const v = parseFloat(box.value); if (isFinite(v)) { set(v); update(); } };
+  parent.appendChild(row);
+  sliders[key] = set; set(p[key]);
+  return row;
+}
+slider($('flatSize'), 'D', 'Size mm', 50, 140, 1);
+slider($('flatSize'), 'frame', 'Frame mm', 2.5, 10, 0.5);
+slider($('pictureSliders'), 'picSize', 'Picture size %', 30, 200, 1);
+slider($('pictureSliders'), 'picX', 'Move right mm', -40, 40, 0.5);
+slider($('pictureSliders'), 'picY', 'Move up mm', -40, 40, 0.5);
+slider($('pictureSliders'), 'threshold', 'Dark below %', 10, 90, 1);
+slider($('wordSliders'), 'wordSize', 'Letters mm', 4, 20, 0.5);
+slider($('wordSliders'), 'wordY', 'From bottom mm', 4, 120, 1);
+slider($('layerSliders'), 'back', 'Back mm', 0.8, 3, 0.1);
+slider($('layerSliders'), 'mid', 'Scene mm', 0.4, 3, 0.1);
+slider($('layerSliders'), 'front', 'Front mm', 0.6, 3, 0.1);
+const ballDRow = slider($('ballSize'), 'bD', 'Across mm', 25, 120, 1);
+const longRow = slider($('ballSize'), 'bLong', 'Length %', 60, 160, 1);
+const depthRow = slider($('patternSliders'), 'depth', 'Depth mm', 0.4, 3, 0.1);
+const countRow = slider($('patternSliders'), 'count', 'How many round', 4, 32, 1);
+const turnsRow = slider($('patternSliders'), 'turns', 'Turns', -2, 2, 0.05);
+slider($('lithoSliders'), 'lithoBand', 'Picture height %', 20, 95, 1);
+slider($('lithoSliders'), 'lithoRepeat', 'Times round', 1, 4, 1);
+slider($('lithoSliders'), 'lithoThin', 'Thinnest mm', 0.4, 2, 0.05);
+slider($('lithoSliders'), 'lithoThick', 'Thickest mm', 1.5, 5, 0.1);
+slider($('lithoSliders'), 'lithoHole', 'Light opening mm', 0, 40, 1);
+const footRow = slider($('printSliders'), 'foot', 'Foot mm', 2, 12, 0.5);
+slider($('flakeSliders'), 'fD', 'Size mm', 40, 160, 1);
+slider($('flakeSliders'), 'arm', 'Arm width mm', 1.2, 5, 0.1);
+slider($('flakeSliders'), 'branches', 'Branches', 0, 6, 1);
+slider($('flakeSliders'), 'bLen', 'Branch length %', 15, 100, 1);
+slider($('flakeSliders'), 'bAngle', 'Branch angle °', 25, 80, 1);
+slider($('flakeSliders'), 'centreSize', 'Middle size %', 8, 45, 1);
+slider($('flakeSliders'), 'fT', 'Thickness mm', 1.2, 5, 0.1);
+slider($('starSliders'), 'points', 'Points', 4, 10, 1);
+slider($('starSliders'), 'sD', 'Across mm', 60, 240, 1);
+slider($('starSliders'), 'inner', 'Inner corners %', 25, 70, 1);
+slider($('starSliders'), 'sDepth', 'Half thickness mm', 3, 25, 0.5);
+slider($('starSliders'), 'tipD', 'Tree tip mm', 6, 30, 0.5);
+slider($('starSliders'), 'sockL', 'Socket depth mm', 15, 90, 1);
+slider($('hangerSliders'), 'loopD', 'Across mm', 5, 24, 0.5);
+slider($('hangerSliders'), 'loopW', 'Wire mm', 1.2, 5, 0.1);
+slider($('puffSliders'), 'pH', 'Height mm', 40, 160, 1);
+slider($('puffSliders'), 'pT', 'Half thickness mm', 2, 15, 0.5);
+slider($('puffSliders'), 'pRound', 'Roundness mm', 2, 20, 0.5);
+slider($('puffSliders'), 'pGroove', 'Lines deep mm', 0, 2, 0.1);
+slider($('countSliders'), 'copies', 'Copies', 1, 12, 1);
+slider($('countSliders'), 'res', 'Detail mm', 0.15, 0.5, 0.01);
+for (const f of FONTS) $('font').add(new Option(f, f));
+for (const id of ['words', 'invert', 'backTwo', 'stripes', 'flakeRaise', 'flakeTwo', 'burst', 'puffTwo', 'puffBoth']) $(id).oninput = update;
+for (const id of ['font', 'wordHow', 'branchStyle', 'tip', 'centre', 'rings']) $(id).onchange = update;
+const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
+choose('kind', 'kind'); choose('shape', 'shape'); choose('scene', 'scene'); choose('pattern', 'pattern');
+// Each shape starts at a size that suits it: an icicle is long and thin, a finial between.
+const FORM_SIZE = {ball: 70, drop: 60, onion: 60, finial: 45, icicle: 28, lantern: 60};
+for (const b of document.querySelectorAll('[data-form]')) b.onclick = () => { p.form = b.dataset.form; sliders.bD(FORM_SIZE[p.form]); sliders.bLong(100);
+  p.print = ['finial', 'icicle'].includes(p.form) ? 'whole' : 'halves'; update(); };  // pointed ones already end in a point
+choose('print', 'print'); choose('starstyle', 'starStyle'); choose('puff', 'puff');
+
+// ---------------------------------------------------------------------------------------------------------------
+// Flat parts are height fields: pictures drawn at k pixels per mm, x right and y up, then turned into a sheet whose
+// outline follows the drawing's anti-aliased edge rather than the grid's steps.
+function canvasFor(k, x0, x1, y0, y1) {
+  const W = Math.ceil((x1 - x0) * k) + 2, H = Math.ceil((y1 - y0) * k) + 2, ox = -x0 * k + 1, oy = y1 * k + 1;
+  const make = () => { const c = document.createElement('canvas'); c.width = W; c.height = H; const g = c.getContext('2d', {willReadFrequently: true});
+    g.setTransform(k, 0, 0, -k, ox, oy); g.fillStyle = g.strokeStyle = '#fff'; g.lineJoin = g.lineCap = 'round'; return [c, g]; };
+  return {W, H, ox, oy, k, make};
+}
+const rawAlpha = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
+  for (let n = 0; n < out.length; ++n) out[n] = d[4 * n + 3]; return out; };
+// lo and hi: each grid point's bottom and top (equal where there is nothing); raw: the drawing's coverage, 0 to 255.
+// Empty points beside an edge slide onto it, where the coverage crosses half, and stay at the neighbour's bottom.
+function fittedSheet(cv, lo, hi, raw) {
+  const {W, H, ox, oy, k} = cv, N = W * H, X = new Float32Array(N), Y = new Float32Array(N), Z0 = Float32Array.from(lo), Z1 = Float32Array.from(hi);
+  const full = n => hi[n] > lo[n];
+  for (let j = 0; j < H; ++j)
+    for (let i = 0; i < W; ++i) {
+      const n = j * W + i;
+      X[n] = (i - ox) / k; Y[n] = (oy - j) / k;
+      if (full(n)) continue;
+      let sx = 0, sy = 0, count = 0, z = -1;
+      for (const [di, dj] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+        const ii = i + di, jj = j + dj, m = jj * W + ii;
+        if (ii < 0 || ii >= W || jj < 0 || jj >= H || !full(m)) continue;
+        const f = raw[m] > raw[n] ? Math.max(0.05, Math.min(0.9, (127.5 - raw[n]) / (raw[m] - raw[n]))) : 0.5;
+        sx += di * f; sy += dj * f; ++count;
+        if (z < 0 || lo[m] < z) z = lo[m];
+      }
+      if (!count) continue;
+      X[n] += sx / count / k; Y[n] -= sy / count / k;
+      Z0[n] = Z1[n] = z;
+    }
+  return Lamp.sheet(W, H, false, (i, j, front) => { const n = j * W + i; return [X[n], Y[n], front ? Z1[n] : Z0[n]]; });
+}
+
+// The loop for the string: outer and inner radius from the sliders, at least 0.8 mm of hole.
+const loopSize = () => { const ro = p.loopD / 2; return {ro, ri: Math.max(0.8, ro - p.loopW)}; };
+// Polygons are lists of [x, y] points.
+const poly = (g, pts) => { g.moveTo(pts[0][0], pts[0][1]); for (const q of pts.slice(1)) g.lineTo(q[0], q[1]); g.closePath(); };
+const circlePts = (r, cx = 0, cy = 0, n = 180) => Array.from({length: n}, (_, i) => [cx + r * Math.cos(2 * Math.PI * i / n), cy + r * Math.sin(2 * Math.PI * i / n)]);
+// A star of n points, outer radius R and inner r, a point straight up; long/short alternate when burst.
+function starPts(n, R, r, burst = false) {
+  const out = [];
+  for (let i = 0; i < 2 * n; ++i) { const a = Math.PI / 2 + Math.PI * i / n, rr = i % 2 ? r : burst && (i / 2) % 2 ? R * 0.72 : R; out.push([rr * Math.cos(a), rr * Math.sin(a)]); }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Flat picture ornaments: a whole back, a scene layer on it, and a front of the frame and the near silhouettes.
+function flatShape() {
+  const R = p.D / 2;
+  let outline, top;
+  if (p.shape === 'round' || p.shape === 'bauble') { outline = circlePts(R); top = R; }
+  else if (p.shape === 'star') { outline = starPts(5, R, R * 0.5); top = R; }
+  else if (p.shape === 'tree') {
+    const w = R * 0.95, t = [[0, R], [w * 0.45, R * 0.42], [w * 0.28, R * 0.42], [w * 0.72, -R * 0.15], [w * 0.48, -R * 0.15], [w, -R * 0.72],
+      [R * 0.16, -R * 0.72], [R * 0.16, -R], [-R * 0.16, -R], [-R * 0.16, -R * 0.72]];
+    outline = [...t, ...t.slice(1, 6).reverse().map(([x, y]) => [-x, y])]; top = R;
+  } else if (p.shape === 'heart') {
+    outline = Array.from({length: 200}, (_, i) => { const t = 2 * Math.PI * i / 200, x = 16 * Math.sin(t) ** 3, y = 13 * Math.cos(t) - 5 * Math.cos(2 * t) - 2 * Math.cos(3 * t) - Math.cos(4 * t);
+      return [x * R / 17, (y + 2.5) * R / 17]; });
+    top = Math.max(...outline.map(q => q[1]));
+  } else { // bell
+    const pts = [];
+    for (let i = 0; i <= 60; ++i) { const u = i / 60, y = R * (0.85 - 1.7 * u), w = R * (0.32 + 0.45 * u ** 2.2 + (u > 0.9 ? (u - 0.9) * 2.5 : 0)); pts.push([w, y]); }
+    const cap = circlePts(R * 0.32, 0, R * 0.85, 60).filter(q => q[1] >= R * 0.85);
+    outline = [...pts.slice().reverse(), ...cap.sort((a, b) => b[0] - a[0]), ...pts.map(([x, y]) => [-x, y])];
+    top = R * 1.17;
+  }
+  // The hanger: a cap on a bauble, a loop on the rest, overlapping the top of the outline along the middle.
+  const cap = p.shape === 'bauble' ? {w: p.D * 0.28, h: p.D * 0.12} : null;
+  const topMid = Math.max(...outline.filter(q => Math.abs(q[0]) < R * 0.05).map(q => q[1]));
+  const lp = loopSize();
+  return {R, outline, top, cap, loop: {x: 0, y: (cap ? top + cap.h : topMid) + lp.ri + 0.3, ro: lp.ro, ri: lp.ri}};
+}
+
+// Silhouettes, each standing on yb and h tall.
+const S = {
+  pine(g, x, yb, h) {
+    g.beginPath(); g.rect(x - h * 0.045, yb, h * 0.09, h * 0.16); g.fill();
+    for (let k = 0; k < 4; ++k) { const b = yb + h * (0.1 + 0.19 * k), w = h * 0.36 * (1 - k * 0.2);
+      g.beginPath(); g.moveTo(x - w, b); g.lineTo(x + w, b); g.lineTo(x, b + h * 0.33); g.closePath(); g.fill(); }
+  },
+  deer(g, x, yb, h, dir = 1) {
+    g.save(); g.translate(x, yb); g.scale(dir * h, h); g.lineCap = 'round'; g.lineJoin = 'round';
+    g.beginPath(); g.ellipse(0, 0.55, 0.3, 0.12, 0, 0, 2 * Math.PI); g.fill();
+    g.lineWidth = 0.05;
+    for (const [x0, x1] of [[-0.22, -0.25], [-0.13, -0.1], [0.14, 0.16], [0.22, 0.25]]) { g.beginPath(); g.moveTo(x0, 0.52); g.lineTo(x1, 0.02); g.stroke(); }
+    g.lineWidth = 0.1; g.beginPath(); g.moveTo(0.2, 0.6); g.lineTo(0.34, 0.84); g.stroke();
+    g.beginPath(); g.ellipse(0.4, 0.86, 0.09, 0.05, -0.35, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.31, 0.93, 0.045, 0.02, 0.6, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.moveTo(-0.29, 0.6); g.lineTo(-0.35, 0.66); g.lineTo(-0.3, 0.58); g.fill();
+    g.lineWidth = 0.028;
+    const beam = [[0.36, 0.9], [0.3, 1.02], [0.26, 1.12], [0.2, 1.2]];
+    g.beginPath(); g.moveTo(...beam[0]); for (const q of beam.slice(1)) g.lineTo(...q); g.stroke();
+    for (const [a, b] of [[[0.31, 1.0], [0.38, 1.08]], [[0.27, 1.1], [0.33, 1.18]], [[0.28, 1.06], [0.18, 1.1]]]) { g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); }
+    const b2 = [[0.39, 0.91], [0.43, 1.02], [0.45, 1.12], [0.42, 1.2]];
+    g.beginPath(); g.moveTo(...b2[0]); for (const q of b2.slice(1)) g.lineTo(...q); g.stroke();
+    for (const [a, b] of [[[0.43, 1.02], [0.51, 1.07]], [[0.45, 1.11], [0.52, 1.17]]]) { g.beginPath(); g.moveTo(...a); g.lineTo(...b); g.stroke(); }
+    g.restore();
+  },
+  fawn(g, x, yb, h, dir = 1) {
+    g.save(); g.translate(x, yb); g.scale(dir * h, h); g.lineCap = 'round';
+    g.beginPath(); g.ellipse(0, 0.5, 0.26, 0.13, 0, 0, 2 * Math.PI); g.fill();
+    g.lineWidth = 0.05;
+    for (const [x0, x1] of [[-0.18, -0.2], [-0.1, -0.08], [0.12, 0.13], [0.19, 0.22]]) { g.beginPath(); g.moveTo(x0, 0.47); g.lineTo(x1, 0.02); g.stroke(); }
+    g.lineWidth = 0.09; g.beginPath(); g.moveTo(0.17, 0.55); g.lineTo(0.27, 0.78); g.stroke();
+    g.beginPath(); g.ellipse(0.32, 0.8, 0.08, 0.05, -0.3, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.24, 0.9, 0.05, 0.022, 1.0, 0, 2 * Math.PI); g.fill();
+    g.restore();
+  },
+  bear(g, x, yb, h, dir = 1) {
+    g.save(); g.translate(x, yb); g.scale(dir * h, h);
+    g.beginPath(); g.ellipse(0, 0.48, 0.5, 0.26, 0, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(-0.05, 0.62, 0.32, 0.18, 0, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(0.52, 0.52, 0.15, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.66, 0.47, 0.09, 0.06, -0.2, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(0.47, 0.66, 0.05, 0, 2 * Math.PI); g.fill();
+    for (const x0 of [-0.38, -0.18, 0.2, 0.36]) { g.beginPath(); g.roundRect(x0 - 0.07, 0, 0.14, 0.4, 0.05); g.fill(); }
+    g.restore();
+  },
+  bunny(g, x, yb, h, dir = 1) {
+    g.save(); g.translate(x, yb); g.scale(dir * h, h);
+    g.beginPath(); g.ellipse(0, 0.27, 0.3, 0.26, 0, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(0.22, 0.58, 0.16, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.16, 0.86, 0.05, 0.2, -0.15, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.28, 0.86, 0.05, 0.2, 0.2, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(-0.31, 0.24, 0.08, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.ellipse(0.18, 0.02, 0.12, 0.04, 0, 0, 2 * Math.PI); g.fill();
+    g.restore();
+  },
+  snowman(g, x, yb, h) {
+    g.beginPath(); g.arc(x, yb + h * 0.21, h * 0.21, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(x, yb + h * 0.53, h * 0.15, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.arc(x, yb + h * 0.77, h * 0.11, 0, 2 * Math.PI); g.fill();
+    g.beginPath(); g.rect(x - h * 0.13, yb + h * 0.86, h * 0.26, h * 0.03); g.fill();
+    g.beginPath(); g.rect(x - h * 0.08, yb + h * 0.86, h * 0.16, h * 0.14); g.fill();
+    g.lineWidth = h * 0.03;
+    for (const s of [1, -1]) { g.beginPath(); g.moveTo(x + s * h * 0.12, yb + h * 0.56); g.lineTo(x + s * h * 0.32, yb + h * 0.7); g.lineTo(x + s * h * 0.36, yb + h * 0.78); g.stroke(); }
+  },
+  house(g, x, yb, w) {
+    g.beginPath(); g.rect(x - w / 2, yb, w, w * 0.62); g.fill();
+    g.beginPath(); g.moveTo(x - w * 0.62, yb + w * 0.58); g.lineTo(x, yb + w * 1.05); g.lineTo(x + w * 0.62, yb + w * 0.58); g.closePath(); g.fill();
+    g.beginPath(); g.rect(x + w * 0.2, yb + w * 0.8, w * 0.13, w * 0.3); g.fill();
+    g.save(); g.globalCompositeOperation = 'destination-out';
+    g.beginPath(); g.rect(x - w * 0.36, yb + w * 0.28, w * 0.2, w * 0.18); g.rect(x + w * 0.12, yb + w * 0.28, w * 0.2, w * 0.18); g.rect(x - w * 0.08, yb, w * 0.16, w * 0.3); g.fill();
+    g.restore();
+  },
+  bareTree(g, x, yb, h, seed = 1) {
+    let s = seed;
+    const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+    const branch = (x0, y0, a, len, w, depth) => {
+      const x1 = x0 + len * Math.cos(a), y1 = y0 + len * Math.sin(a);
+      g.lineWidth = w; g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke();
+      if (depth <= 0 || w < 0.35) return;
+      branch(x1, y1, a + 0.35 + rnd() * 0.3, len * 0.68, w * 0.62, depth - 1);
+      branch(x1, y1, a - 0.35 - rnd() * 0.3, len * 0.68, w * 0.62, depth - 1);
+    };
+    branch(x, yb, Math.PI / 2, h * 0.42, Math.max(1.2, h * 0.05), 4);
+  },
+  mountains(g, B, top, seed = 3) {
+    let s = seed; const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+    g.beginPath(); g.moveTo(B.x0 - 5, B.y0 - 5); g.lineTo(B.x0 - 5, top - 10);
+    let x = B.x0 - 5;
+    while (x < B.x1 + 5) { const w = B.w * (0.15 + rnd() * 0.15); g.lineTo(x + w / 2, top - rnd() * B.h * 0.12); g.lineTo(x + w, top - B.h * 0.12 - rnd() * B.h * 0.06); x += w; }
+    g.lineTo(B.x1 + 5, B.y0 - 5); g.closePath(); g.fill();
+  },
+  ground(g, B, level, wave = 0.04) {
+    g.beginPath(); g.moveTo(B.x0 - 5, B.y0 - 5);
+    for (let x = B.x0 - 5; x <= B.x1 + 5; x += 1) g.lineTo(x, level + B.h * wave * Math.sin((x - B.x0) / B.w * Math.PI * 2.2));
+    g.lineTo(B.x1 + 5, B.y0 - 5); g.closePath(); g.fill();
+  },
+  moon(g, x, y, r) { g.beginPath(); g.arc(x, y, r, 0, 2 * Math.PI); g.arc(x + r * 0.45, y + r * 0.22, r * 0.85, 0, 2 * Math.PI, true); g.fill('evenodd'); },
+  star(g, x, y, r) { g.beginPath(); poly(g, starPts(5, r, r * 0.45).map(([a, b]) => [x + a, y + b])); g.fill(); },
+  flake(g, x, y, r) { g.lineWidth = Math.max(0.8, r * 0.18); for (let k = 0; k < 3; ++k) { const a = Math.PI * k / 3; g.beginPath(); g.moveTo(x - r * Math.cos(a), y - r * Math.sin(a)); g.lineTo(x + r * Math.cos(a), y + r * Math.sin(a)); g.stroke(); } },
+};
+// The scenes: what is far (the middle layer) and what is near (the front), inside the box B of the window.
+const SCENES = {
+  deer(mid, front, B) {
+    for (let k = 0; k < 7; ++k) S.pine(mid, B.x0 + B.w * (0.05 + 0.15 * k), B.y0 + B.h * 0.25, B.h * (0.38 + 0.12 * ((k * 7) % 3)));
+    S.ground(front, B, B.y0 + B.h * 0.2);
+    S.bareTree(front, B.x0 + B.w * 0.14, B.y0 + B.h * 0.15, B.h * 0.95, 4);
+    S.pine(front, B.x1 - B.w * 0.14, B.y0 + B.h * 0.17, B.h * 0.55);
+    S.deer(front, B.cx - B.w * 0.08, B.y0 + B.h * 0.17, B.h * 0.5, 1);
+    S.fawn(front, B.cx + B.w * 0.2, B.y0 + B.h * 0.17, B.h * 0.28, -1);
+  },
+  pines(mid, front, B) {
+    S.mountains(mid, B, B.y0 + B.h * 0.62);
+    S.moon(front, B.cx + B.w * 0.12, B.y0 + B.h * 0.8, B.h * 0.08);
+    for (const [x, y] of [[-0.25, 0.85], [-0.05, 0.92], [0.3, 0.7], [-0.32, 0.68]]) S.star(front, B.cx + B.w * x, B.y0 + B.h * y, B.h * 0.025);
+    S.ground(front, B, B.y0 + B.h * 0.18);
+    [[-0.3, 0.6], [-0.12, 0.42], [0.08, 0.52], [0.28, 0.38], [0.4, 0.55]].forEach(([x, h]) => S.pine(front, B.cx + B.w * x, B.y0 + B.h * 0.15, B.h * h));
+  },
+  village(mid, front, B) {
+    for (let k = 0; k < 8; ++k) S.pine(mid, B.x0 + B.w * (0.04 + 0.13 * k), B.y0 + B.h * 0.25, B.h * (0.35 + 0.1 * (k % 3)));
+    S.ground(front, B, B.y0 + B.h * 0.22, 0.02);
+    S.house(front, B.cx - B.w * 0.12, B.y0 + B.h * 0.2, B.w * 0.3);
+    S.house(front, B.cx + B.w * 0.2, B.y0 + B.h * 0.2, B.w * 0.2);
+    S.pine(front, B.x0 + B.w * 0.12, B.y0 + B.h * 0.18, B.h * 0.4);
+    for (const [x, y] of [[-0.3, 0.85], [0.1, 0.9], [0.32, 0.75]]) S.flake(front, B.cx + B.w * x, B.y0 + B.h * y, B.h * 0.035);
+  },
+  snowman(mid, front, B) {
+    for (let k = 0; k < 6; ++k) S.pine(mid, B.x0 + B.w * (0.05 + 0.18 * k), B.y0 + B.h * 0.22, B.h * (0.4 + 0.12 * (k % 2)));
+    S.ground(front, B, B.y0 + B.h * 0.2);
+    S.snowman(front, B.cx, B.y0 + B.h * 0.16, B.h * 0.6);
+    S.pine(front, B.x1 - B.w * 0.12, B.y0 + B.h * 0.16, B.h * 0.36);
+    for (const [x, y] of [[-0.32, 0.8], [-0.2, 0.6], [0.25, 0.85], [0.33, 0.62]]) S.flake(front, B.cx + B.w * x, B.y0 + B.h * y, B.h * 0.035);
+  },
+  bear(mid, front, B) {
+    S.mountains(mid, B, B.y0 + B.h * 0.7, 7);
+    S.ground(front, B, B.y0 + B.h * 0.2);
+    S.bear(front, B.cx - B.w * 0.08, B.y0 + B.h * 0.18, B.h * 0.36);
+    S.pine(front, B.x1 - B.w * 0.14, B.y0 + B.h * 0.16, B.h * 0.5);
+    S.pine(front, B.x0 + B.w * 0.12, B.y0 + B.h * 0.16, B.h * 0.36);
+  },
+  bunnies(mid, front, B) {
+    for (let k = 0; k < 7; ++k) S.pine(mid, B.x0 + B.w * (0.05 + 0.15 * k), B.y0 + B.h * 0.22, B.h * (0.35 + 0.1 * (k % 3)));
+    S.moon(front, B.cx, B.y0 + B.h * 0.82, B.h * 0.07);
+    S.ground(front, B, B.y0 + B.h * 0.2);
+    S.bunny(front, B.cx - B.w * 0.18, B.y0 + B.h * 0.18, B.h * 0.32, 1);
+    S.bunny(front, B.cx + B.w * 0.18, B.y0 + B.h * 0.18, B.h * 0.32, -1);
+  },
+  reindeer(mid, front, B) {
+    S.mountains(mid, B, B.y0 + B.h * 0.5, 11);
+    S.moon(front, B.cx - B.w * 0.18, B.y0 + B.h * 0.82, B.h * 0.09);
+    for (const [x, y] of [[0.1, 0.9], [0.3, 0.78], [-0.35, 0.65]]) S.star(front, B.cx + B.w * x, B.y0 + B.h * y, B.h * 0.025);
+    S.ground(front, B, B.y0 + B.h * 0.22, 0.06);
+    S.deer(front, B.cx + B.w * 0.05, B.y0 + B.h * 0.2, B.h * 0.55, -1);
+    S.pine(front, B.x0 + B.w * 0.15, B.y0 + B.h * 0.17, B.h * 0.42);
+  },
+  picture(mid, front, B) {
+    const m = pictureMask();
+    if (!m) return;
+    const s = Math.min(B.w, B.h) * p.picSize / 100, w = m.width >= m.height ? s : s * m.width / m.height, h = w * m.height / m.width;
+    front.save(); front.translate(B.cx + p.picX, B.y0 + B.h / 2 + p.picY); front.scale(1, -1); front.drawImage(m, -w / 2, -h / 2, w, h); front.restore();
+  },
+  none() {},
+};
+
+// The picture as a mask: its dark parts (or light ones) solid, the rest clear.
+let picture = null, maskCache = {key: '', canvas: null};
+function pictureMask() {
+  if (!picture) return null;
+  const key = `${picture.name}|${p.threshold}|${$('invert').checked}`;
+  if (maskCache.key === key) return maskCache.canvas;
+  const img = picture.img, most = 1400, sc = Math.min(1, most / Math.max(img.width, img.height));
+  const c = document.createElement('canvas'); c.width = Math.round(img.width * sc); c.height = Math.round(img.height * sc);
+  const g = c.getContext('2d', {willReadFrequently: true}); g.drawImage(img, 0, 0, c.width, c.height);
+  const d = g.getImageData(0, 0, c.width, c.height), t = p.threshold / 100 * 255, inv = $('invert').checked;
+  for (let n = 0; n < d.data.length; n += 4) { const v = 0.3 * d.data[n] + 0.59 * d.data[n + 1] + 0.11 * d.data[n + 2], on = inv ? v > t : v < t;
+    d.data[n] = d.data[n + 1] = d.data[n + 2] = 255; d.data[n + 3] = on ? 255 : 0; }
+  g.putImageData(d, 0, 0);
+  maskCache = {key, canvas: c};
+  return c;
+}
+
+function flatOrnament(res) {
+  const sh = flatShape(), {outline, cap, loop} = sh, problems = [];
+  const all = [...outline, ...(cap ? [[-cap.w / 2, sh.top + cap.h], [cap.w / 2, sh.top + cap.h]] : []), [0, loop.y + loop.ro]];
+  const x0 = Math.min(...all.map(q => q[0])) - 1, x1 = Math.max(...all.map(q => q[0])) + 1, y0 = Math.min(...all.map(q => q[1])) - 1, y1 = Math.max(...all.map(q => q[1])) + 1;
+  const cv = canvasFor(1 / res, x0, x1, y0, y1);
+  const [backC, back] = cv.make(), [midC, mid] = cv.make(), [frontC, front] = cv.make();
+  // Filled one piece at a time, so the pieces' windings never cancel where they overlap.
+  const fillOutline = g => { g.beginPath(); poly(g, outline); g.fill();
+    if (cap) { g.beginPath(); g.roundRect(-cap.w / 2, sh.top - 3, cap.w, cap.h + 3, 1); g.fill(); }
+    g.beginPath(); g.arc(loop.x, loop.y, loop.ro, 0, 2 * Math.PI); g.fill(); };
+  fillOutline(back);
+  // The window: the outline with a band as wide as the frame taken off all round, so any shape works.
+  const [winC, win] = cv.make();
+  win.beginPath(); poly(win, outline); win.fill();
+  win.globalCompositeOperation = 'destination-out'; win.lineWidth = 2 * p.frame; win.beginPath(); poly(win, outline); win.stroke();
+  const ox = outline.map(q => q[0]), oy = outline.map(q => q[1]);
+  const B = {x0: Math.min(...ox) + p.frame, x1: Math.max(...ox) - p.frame, y0: Math.min(...oy) + p.frame, y1: Math.max(...oy) - p.frame};
+  B.w = B.x1 - B.x0; B.h = B.y1 - B.y0; B.cx = (B.x0 + B.x1) / 2;
+  (SCENES[p.scene] || SCENES.none)(mid, front, B);
+  // Words: on a band of snow when they are cut through to the back, so they show.
+  const words = $('words').value.trim();
+  if (words) {
+    const y = B.y0 + p.wordY, font = `600 ${p.wordSize}px "${$('font').value}"`;
+    front.font = font; const w = Math.min(front.measureText(words).width, B.w * 0.9);
+    if ($('wordHow').value === 'cut') {
+      front.beginPath(); front.rect(B.x0 - 2, y - p.wordSize * 0.75, B.w + 4, p.wordSize * 1.5); front.fill();
+      for (const g of [front, mid]) { g.save(); g.globalCompositeOperation = 'destination-out'; g.translate(0, y); g.scale(1, -1); g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(words, 0, 0, B.w * 0.9); g.restore(); }
+    } else { front.save(); front.translate(0, y); front.scale(1, -1); front.font = font; front.textAlign = 'center'; front.textBaseline = 'middle'; front.fillText(words, 0, 0, B.w * 0.9); front.restore(); }
+    if (w > B.w * 0.9 - 0.5) problems.push('The words are squeezed to fit: make the letters smaller or the ornament bigger.');
+  }
+  // Only the window holds the scene; round it, the frame, the cap and the loop.
+  const [frameC, frame] = cv.make();
+  fillOutline(frame);
+  frame.setTransform(1, 0, 0, 1, 0, 0); frame.globalCompositeOperation = 'destination-out'; frame.drawImage(winC, 0, 0);
+  for (const g of [mid, front]) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(winC, 0, 0); g.restore(); }
+  front.save(); front.setTransform(1, 0, 0, 1, 0, 0); front.drawImage(frameC, 0, 0); front.restore();
+  // Little squares in the cap, down to the back, and the hole for the string through everything.
+  if (cap) for (const g of [front, mid]) { g.save(); g.globalCompositeOperation = 'destination-out'; const s = cap.h * 0.32;
+    g.beginPath(); for (const k of [-1, 0, 1]) g.rect(k * cap.w * 0.28 - s / 2, sh.top + cap.h * 0.32, s, s); g.fill(); g.restore(); }
+  for (const g of [back, mid, front]) { g.save(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(loop.x, loop.y, loop.ri, 0, 2 * Math.PI); g.fill(); g.restore(); }
+  // Nothing outside the outline.
+  for (const g of [mid, front]) { g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalCompositeOperation = 'destination-in'; g.drawImage(backC, 0, 0); g.restore(); }
+  const N = cv.W * cv.H, rb = rawAlpha(backC), rm = rawAlpha(midC), rf = rawAlpha(frontC);
+  // Three height fields: the back; the scene layer on it (under the front too); the front on top.
+  const L0 = new Float32Array(N), H0 = new Float32Array(N), L1 = new Float32Array(N), H1 = new Float32Array(N), L2 = new Float32Array(N), H2 = new Float32Array(N), raw1 = new Uint8Array(N);
+  const b = p.back, m = p.mid, f = p.front;
+  for (let n = 0; n < N; ++n) {
+    if (rb[n] <= 127) continue;
+    H0[n] = b;
+    if (rm[n] > 127 || rf[n] > 127) { L1[n] = b; H1[n] = b + m; }
+    if (rf[n] > 127) { L2[n] = b + m; H2[n] = b + m + f; }
+    raw1[n] = Math.max(rf[n], rm[n]);
+  }
+  if (p.scene === 'picture' && !picture) problems.push('Choose a picture for the inside.');
+  const backTwo = $('backTwo').checked;
+  const parts = [{name: 'Front', sheets: [fittedSheet(cv, L2, H2, rf)]}, {name: 'Scene', sheets: [fittedSheet(cv, L1, H1, raw1)]}, {name: 'Back', sheets: [fittedSheet(cv, L0, H0, rb)], ...(backTwo ? {extruder: 2} : {})}];
+  return {parts, problems, colours: [[0.95, 0.94, 0.9], [0.8, 0.78, 0.72], backTwo ? [0.62, 0.48, 0.34] : [0.88, 0.86, 0.8]], size: [x1 - x0, y1 - y0, b + m + f],
+    note: `${(x1 - x0).toFixed(0)} × ${(y1 - y0).toFixed(0)} × ${(b + m + f).toFixed(1)} mm. Prints face up, flat, with no supports.${backTwo ? ' The back is filament 2: print the front light and the back darker, or the other way round.' : ''}`};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Baubles: turned shapes with a raised surface pattern, a cap and a loop. Shapes are given as radius against height,
+// both as fractions; the height is the across size times the shape's own stretch and the Length slider.
+const FORMS = {
+  ball:    {long: 1.0, pts: null},
+  drop:    {long: 1.45, pts: [[0, 0], [0.06, 0.5], [0.18, 0.88], [0.32, 1], [0.5, 0.9], [0.68, 0.62], [0.84, 0.32], [0.95, 0.17], [1, 0.15]]},
+  onion:   {long: 1.25, pts: [[0, 0], [0.05, 0.45], [0.16, 0.85], [0.32, 1], [0.48, 0.92], [0.64, 0.66], [0.78, 0.38], [0.9, 0.2], [1, 0.16]]},
+  finial:  {long: 2.2, pts: [[0, 0], [0.15, 0.12], [0.32, 0.35], [0.5, 0.78], [0.62, 1], [0.72, 0.92], [0.84, 0.55], [0.94, 0.26], [1, 0.22]]},
+  icicle:  {long: 4.2, pts: [[0, 0], [0.25, 0.22], [0.5, 0.48], [0.72, 0.75], [0.88, 0.95], [0.95, 1], [1, 0.82]]},
+  lantern: {long: 1.3, pts: [[0, 0.3], [0.04, 0.55], [0.12, 0.9], [0.22, 1], [0.78, 1], [0.88, 0.9], [0.96, 0.55], [1, 0.3]]},
+};
+// Smooth through the points (Catmull–Rom), radius at fraction u of the height.
+function profileAt(pts, u) {
+  if (u <= pts[0][0]) return pts[0][1];
+  if (u >= pts[pts.length - 1][0]) return pts[pts.length - 1][1];
+  let i = 0; while (pts[i + 1][0] < u) ++i;
+  const P = k => pts[Math.max(0, Math.min(pts.length - 1, k))], [x1, y1] = P(i), [x2, y2] = P(i + 1), y0 = P(i - 1)[1], y3 = P(i + 2)[1];
+  const t = (u - x1) / (x2 - x1);
+  return 0.5 * (2 * y1 + (-y0 + y2) * t + (2 * y0 - 5 * y1 + 4 * y2 - y3) * t * t + (-y0 + 3 * y1 - 3 * y2 + y3) * t * t * t);
+}
+// The pattern's height, 0 to 1, at angle a round and fraction u up.
+function patternAt(a, u) {
+  const n = p.count, tri = x => 1 - 2 * Math.abs(x - Math.floor(x) - 0.5);
+  switch (p.pattern) {
+    case 'ribs': return Math.pow(0.5 + 0.5 * Math.cos(n * a), 2);
+    case 'twist': return Math.pow(0.5 + 0.5 * Math.cos(n * (a + 2 * Math.PI * p.turns * u)), 2);
+    case 'bands': return Math.pow(0.5 + 0.5 * Math.cos(2 * Math.PI * (n / 2) * u), 2);
+    case 'diamonds': { const s = n * a / (2 * Math.PI), t = u * n * 0.5; return Math.min(tri(s + t), tri(s - t)); }
+    case 'dots': { const s = n * a / (2 * Math.PI), t = u * n * 0.55, row = Math.floor(t), shift = row % 2 ? 0.5 : 0;
+      const dx = s + shift - Math.round(s + shift), dy = t - row - 0.5, d = Math.hypot(dx, dy * 1.1); return Math.max(0, 1 - d / 0.33) ** 1.5; }
+    default: return 0;
+  }
+}
+function bauble(res) {
+  const F = FORMS[p.form], R = p.bD / 2, H = p.bD * F.long * p.bLong / 100, problems = [];
+  const rows = Math.max(40, Math.ceil(H / Math.max(0.25, res))), segs = Math.max(72, Math.min(360, Math.round(2 * Math.PI * R / Math.max(0.6, res * 2))));
+  const zs = [], prof = [];
+  for (let j = 0; j <= rows; ++j) {
+    const u = j / rows; zs.push(H * u);
+    if (F.pts) prof.push(R * profileAt(F.pts, u));
+    else { const zz = H * u - R, top = R * 0.16; prof.push(Math.max(u > 0.5 ? top : 0, Math.sqrt(Math.max(0, R * R - zz * zz)))); }
+  }
+  // Upright: underneath it may widen no faster than 45°, from a foot, so it needs no supports.
+  const litho = p.pattern === 'litho', halves = p.print === 'halves' || litho, used = prof.slice();
+  if (!halves) { used[0] = Math.max(Math.min(prof[0] || p.foot, R), p.foot); const dz = H / rows;
+    for (let j = 1; j <= rows; ++j) used[j] = Math.min(Math.max(prof[j], p.foot), used[j - 1] + dz); }
+  const fade = j => Math.max(0, Math.min(1, (used[j] - 1.5) / (0.25 * R))) * (used[j] < prof[j] - 0.05 ? 0 : 1);
+  const surf = (i, j) => { const a = 2 * Math.PI * i / segs, u = j / rows; return used[j] + p.depth * patternAt(a, u) * fade(j); };
+  // The body, and the raised parts as their own part when they are a second colour.
+  const turned = (j0, j1, flip, outer, inner) => Lamp.sheet(segs, j1 - j0 + 1, true, (i, jj, front) => {
+    const j = j0 + jj, a = 2 * Math.PI * i / segs, z = flip ? zs[j1] - zs[j] : zs[j] - zs[j0], r = front ? outer(i, j) : inner(i, j);
+    return [r * Math.cos(a), r * Math.sin(a), z];
+  });
+  const stripesOn = $('stripes').checked && ['ribs', 'twist', 'bands', 'diamonds', 'dots'].includes(p.pattern);
+  const band = (i, j) => patternAt(2 * Math.PI * i / segs, j / rows) * fade(j) > 0.5;
+  const capR = Math.max(used[rows] + 0.6, 3.5), capH = Math.max(4, p.bD * 0.09);
+  const capSheets = z0 => {
+    const top = z0 + capH, out = [Lamp.sheet(96, 2, true, (i, j, front) => { const a = 2 * Math.PI * i / 96, r = front ? capR : 0; return [r * Math.cos(a), r * Math.sin(a), j ? top : z0 - 0.6]; })];
+    out.push(Lamp.sheet(96, 2, true, (i, j, front) => { const a = 2 * Math.PI * i / 96, r = front ? capR + 0.8 : 0; return [r * Math.cos(a), r * Math.sin(a), j ? z0 + 1.2 : z0 - 0.6]; }));
+    // The loop for the string, standing up on the cap.
+    const {ro, ri} = loopSize(), t = Math.max(1.2, Math.min(p.loopW, capR * 2)), zc = top + ri + 0.3;
+    out.push(Lamp.sheet(72, 2, true, (i, j, front) => { const a = 2 * Math.PI * i / 72, r = j ? ro : ri; return [r * Math.cos(a), front ? t / 2 : -t / 2, zc + r * Math.sin(a)]; }));
+    return {sheets: out, top: zc + ro};
+  };
+  if (litho) return lithoBauble({F, R, H, rows, zs, prof, capSheets, problems});
+  const objects = [];
+  if (!halves) {
+    const cap = capSheets(H);
+    const body = [turned(0, rows, false, surf, () => 0), ...cap.sheets];
+    const parts = [{name: 'Bauble', sheets: body}];
+    if (stripesOn) parts.push({name: 'Stripes', extruder: 2, sheets: [turned(0, rows, false, (i, j) => surf(i, j), (i, j) => band(i, j) ? surf(i, j) - 1.0 : surf(i, j))]});
+    objects.push({name: `${p.form[0].toUpperCase() + p.form.slice(1)} bauble`, parts});
+    if (prof[0] < p.foot && p.foot < 6) problems.push('A small foot: use a brim, or the bauble may tip over while it prints.');
+    var height = cap.top;
+  } else {
+    // Cut where it is widest; each half stands on its cut face.
+    let jm = 0; for (let j = 0; j <= rows; ++j) if (prof[j] > prof[jm]) jm = j;
+    const cap = capSheets(zs[rows] - zs[jm]);
+    // A hole in the middle of each cut face, and a pin for them, so the halves line up when glued.
+    const pin = prof[jm] > 12 ? {r: 3, deep: 6} : null, hole = pin ? pin.r + 0.2 : 0;
+    const topHole = (i, j) => pin && zs[j] - zs[jm] < pin.deep ? hole : 0, bottomHole = (i, j) => pin && zs[jm] - zs[j] < pin.deep ? hole : 0;
+    const top = [{name: 'Top half', sheets: [turned(jm, rows, false, surf, topHole), ...cap.sheets]}];
+    const bottom = [{name: 'Bottom half', sheets: [turned(0, jm, true, surf, bottomHole)]}];
+    if (stripesOn) { top.push({name: 'Stripes', extruder: 2, sheets: [turned(jm, rows, false, surf, (i, j) => band(i, j) ? surf(i, j) - 1.0 : surf(i, j))]});
+      bottom.push({name: 'Stripes', extruder: 2, sheets: [turned(0, jm, true, surf, (i, j) => band(i, j) ? surf(i, j) - 1.0 : surf(i, j))]}); }
+    objects.push({name: 'Bauble top half', parts: top}, {name: 'Bauble bottom half', parts: bottom});
+    if (pin) objects.push({name: 'Bauble pin', parts: [{name: 'Pin', sheets: [Lamp.sheet(48, 2, true, (i, j, front) => {
+      const a = 2 * Math.PI * i / 48, r = front ? pin.r - 0.1 : 0; return [r * Math.cos(a), r * Math.sin(a), j ? 2 * pin.deep - 0.8 : 0]; })]}]});
+    // The preview shows it glued together.
+    const whole = capSheets(H);
+    var look = [{name: 'Bauble', parts: [{name: 'Bauble', sheets: [turned(0, rows, false, surf, () => 0), ...whole.sheets]},
+      ...(stripesOn ? [{name: 'Stripes', extruder: 2, sheets: [turned(0, rows, false, surf, (i, j) => band(i, j) ? surf(i, j) - 1.0 : surf(i, j))]}] : [])]}];
+    var height = Math.max(cap.top, zs[jm]);
+  }
+  const wide = 2 * (Math.max(...used) + p.depth);
+  if (height > printer.height) problems.push(`It is ${height.toFixed(0)} mm tall, more than your printer's ${printer.height} mm.`);
+  return {objects, look, problems, colours: [[0.75, 0.2, 0.22], [0.95, 0.94, 0.92]], note: `${wide.toFixed(0)} mm across. ${halves ? 'Shown glued together; it prints as two halves, each on its cut face, and a pin that lines them up. Glue them matching the pattern.' : height.toFixed(0) + ' mm tall. Prints upright in one piece; it is solid, so the slicer\'s infill fills it (10–15% is plenty).'}${stripesOn ? ' The raised parts are filament 2.' : ''}`};
+}
+
+// A lithophane bauble: a hollow shell, smooth outside, thicker inside where the picture is dark. It prints as two
+// halves on their cut rims. Away from the rim the hollow may close in no faster than 45°, so its ceiling never
+// overhangs; the bottom half has an opening for a small light.
+function lithoBauble({R, H, rows, zs, prof, capSheets, problems}) {
+  let jm = 0; for (let j = 0; j <= rows; ++j) if (prof[j] > prof[jm]) jm = j;
+  const rep = p.lithoRepeat, Wc = Math.max(60, Math.round(Math.min(900, Math.max(180, 2 * Math.PI * prof[jm] / Math.max(0.3, p.res))) / rep)), segs = Wc * rep;
+  const lo = Math.min(p.lithoThin, p.lithoThick - 0.2), hi = p.lithoThick, N = segs * (rows + 1);
+  // The picture's brightness on the band round the widest part; above and below it the shell is at its thickest.
+  const light = new Float32Array(N).fill(-1);
+  const bandH = H * p.lithoBand / 100, z0 = Math.max(0, zs[jm] - bandH / 2), z1 = Math.min(H, zs[jm] + bandH / 2);
+  let jA = 0; while (zs[jA] < z0) ++jA; let jB = rows; while (zs[jB] > z1) --jB;
+  if (!picture) problems.push('Choose a picture for the lithophane.');
+  else if (jB > jA) {
+    const nb = jB - jA + 1, c = document.createElement('canvas'); c.width = Wc; c.height = nb;
+    const g = c.getContext('2d', {willReadFrequently: true}), img = picture.img, Wmm = 2 * Math.PI * prof[jm] / rep, Hmm = zs[jB] - zs[jA];
+    // The whole picture fits on the band; round it the band is thin and glows.
+    const mm = Math.min(Wmm / img.width, Hmm / img.height), w = img.width * mm * Wc / Wmm, h = img.height * mm * nb / Hmm;
+    g.fillStyle = '#fff'; g.fillRect(0, 0, Wc, nb); g.drawImage(img, (Wc - w) / 2, (nb - h) / 2, w, h);
+    const d = g.getImageData(0, 0, Wc, nb).data;
+    for (let j = jA; j <= jB; ++j) for (let i = 0; i < segs; ++i) {
+      const q = 4 * ((jB - j) * Wc + i % Wc); light[j * segs + i] = (0.3 * d[q] + 0.59 * d[q + 1] + 0.11 * d[q + 2]) / 255;
+    }
+  }
+  const rIn = new Float32Array(N), hole = p.lithoHole / 2;
+  for (let j = 0; j <= rows; ++j) for (let i = 0; i < segs; ++i) { const v = light[j * segs + i]; rIn[j * segs + i] = Math.max(0, prof[j] - (v < 0 ? hi : hi - (hi - lo) * v)); }
+  // Outward from the cut, each ring of the hollow is at least the last one less the rise (45°), never thinner than the thinnest.
+  for (const [from, to, step] of [[jm + 1, rows, 1], [jm - 1, 0, -1]])
+    for (let j = from; step > 0 ? j <= to : j >= to; j += step) {
+      const dz = Math.abs(zs[j] - zs[j - step]);
+      for (let i = 0; i < segs; ++i) { const n = j * segs + i; rIn[n] = Math.max(0, Math.min(prof[j] - lo, Math.max(rIn[n], rIn[n - step * segs] - dz))); }
+    }
+  // The opening for the light, at the bottom.
+  for (let j = 0; j < jm; ++j) for (let i = 0; i < segs; ++i) { const n = j * segs + i; rIn[n] = Math.min(prof[j], Math.max(rIn[n], hole)); }
+  const shell = (j0, j1, flip) => Lamp.sheet(segs, j1 - j0 + 1, true, (i, jj, front) => {
+    const j = j0 + jj, a = 2 * Math.PI * i / segs, z = flip ? zs[j1] - zs[j] : zs[j] - zs[j0], r = front ? prof[j] : rIn[j * segs + i];
+    return [r * Math.cos(a), r * Math.sin(a), z];
+  });
+  const cap = capSheets(zs[rows] - zs[jm]), whole = capSheets(H);
+  const objects = [{name: 'Lithophane top half', parts: [{name: 'Shell', sheets: [shell(jm, rows, false)]}, {name: 'Cap', sheets: cap.sheets}]},
+                   {name: 'Lithophane bottom half', parts: [{name: 'Shell', sheets: [shell(0, jm, true)]}]}];
+  const look = [{name: 'Bauble', parts: [{name: 'Shell', sheets: [shell(0, rows, false)]}, {name: 'Cap', sheets: whole.sheets, glow: false}]}];
+  const height = Math.max(cap.top, zs[jm]);
+  if (height > printer.height) problems.push(`It is ${height.toFixed(0)} mm tall, more than your printer's ${printer.height} mm.`);
+  return {objects, look, glow: true, problems, colours: [[0.95, 0.93, 0.88], [0.95, 0.93, 0.88]],
+    note: `${(2 * prof[jm]).toFixed(0)} mm across. Shown lit from inside; it prints as two halves standing on their rims: glue them, lining up the picture. Print in white with 100% infill.`};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Snowflakes: one arm drawn and turned round six times, with branches, a tip and a middle.
+function flakeDraw(g, R, accent) {
+  const w = p.arm, nb = p.branches, style = $('branchStyle').value, tip = $('tip').value, cs = R * p.centreSize / 100;
+  g.lineWidth = w;
+  for (let k = 0; k < 6; ++k) {
+    g.save(); g.rotate(Math.PI / 2 + k * Math.PI / 3);
+    // The arm along +x.
+    g.beginPath(); g.moveTo(0, 0); g.lineTo(R - w, 0); g.stroke();
+    for (let b = 0; b < nb; ++b) {
+      const t = cs + (R - cs) * (0.22 + 0.62 * (nb > 1 ? b / (nb - 1) : 0.5)), len = (R - t) * p.bLen / 100 * (style === 'feather' ? 0.6 : 1) + w;
+      const a = p.bAngle * Math.PI / 180;
+      for (const s of [1, -1]) {
+        const ex = t + len * Math.cos(a), ey = s * len * Math.sin(a);
+        g.lineWidth = w * 0.85; g.beginPath(); g.moveTo(t, 0); g.lineTo(ex, ey); g.stroke();
+        if (style === 'fork') { const f = len * 0.35; for (const d of [0.5, -0.5]) { g.beginPath(); g.moveTo(ex, ey); g.lineTo(ex + f * Math.cos(a * s * 0 + d + (s > 0 ? a : -a)), ey + f * Math.sin(d + (s > 0 ? a : -a))); g.stroke(); } }
+        else if (style === 'leaf') { g.save(); g.translate((t + ex) / 2 + len * 0.1, ey * 0.55); g.rotate(s * a); g.beginPath(); g.ellipse(0, 0, len * 0.28, w * 1.1, 0, 0, 2 * Math.PI); g.fill(); g.restore(); }
+        else if (style === 'dot') { g.beginPath(); g.arc(ex, ey, w * 1.1, 0, 2 * Math.PI); g.fill(); }
+        else if (style === 'feather') for (let q = 1; q <= 3; ++q) { const fx = t + len * q / 4 * Math.cos(a), fy = s * len * q / 4 * Math.sin(a), fl = len * 0.3;
+          g.lineWidth = w * 0.6; g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx + fl * Math.cos(a * 0.3), fy + s * fl * Math.sin(a * 0.3) * 2.2); g.stroke(); }
+      }
+    }
+    // The tip.
+    g.lineWidth = w;
+    const tx = R - w;
+    if (tip === 'round') { g.beginPath(); g.arc(tx, 0, w * 1.4, 0, 2 * Math.PI); g.fill(); }
+    else if (tip === 'diamond') { g.beginPath(); g.moveTo(tx - w * 3, 0); g.lineTo(tx - w * 1.2, w * 1.6); g.lineTo(R, 0); g.lineTo(tx - w * 1.2, -w * 1.6); g.closePath(); g.fill(); }
+    else if (tip === 'arrow') { g.beginPath(); g.moveTo(tx - w * 2.5, w * 2); g.lineTo(R - w * 0.3, 0); g.lineTo(tx - w * 2.5, -w * 2); g.stroke(); }
+    else if (tip === 'ring') { g.lineWidth = w * 0.8; g.beginPath(); g.arc(tx - w * 1.6, 0, w * 1.8, 0, 2 * Math.PI); g.stroke(); }
+    else if (tip === 'star') { g.beginPath(); poly(g, starPts(5, w * 2.2, w * 1).map(([x, y]) => [x + tx - w * 1.2, y])); g.fill(); }
+    g.restore();
+  }
+  // Rings joining the arms, as hexagons.
+  const rings = +$('rings').value;
+  g.lineWidth = w * 0.8;
+  for (let r = 1; r <= rings; ++r) { const rr = cs + (R - cs) * (rings === 1 ? 0.45 : 0.3 + 0.35 * (r - 1)); g.beginPath(); poly(g, Array.from({length: 6}, (_, k) => [rr * Math.cos(Math.PI / 2 + k * Math.PI / 3), rr * Math.sin(Math.PI / 2 + k * Math.PI / 3)])); g.stroke(); }
+  // The middle.
+  const mid = (gg) => {
+    const c = $('centre').value;
+    gg.lineWidth = w;
+    if (c === 'hexagon') { gg.beginPath(); poly(gg, Array.from({length: 6}, (_, k) => [cs * Math.cos(k * Math.PI / 3), cs * Math.sin(k * Math.PI / 3)])); gg.fill(); }
+    else if (c === 'star') { gg.beginPath(); poly(gg, starPts(6, cs * 1.25, cs * 0.55)); gg.fill(); }
+    else if (c === 'ring') { gg.lineWidth = w * 1.1; gg.beginPath(); gg.arc(0, 0, cs * 0.8, 0, 2 * Math.PI); gg.stroke(); gg.beginPath(); gg.arc(0, 0, cs * 0.25, 0, 2 * Math.PI); gg.fill(); }
+    else if (c === 'flower') { for (let k = 0; k < 6; ++k) { gg.beginPath(); gg.ellipse(cs * 0.55 * Math.cos(Math.PI / 2 + k * Math.PI / 3), cs * 0.55 * Math.sin(Math.PI / 2 + k * Math.PI / 3), cs * 0.5, cs * 0.26, Math.PI / 2 + k * Math.PI / 3, 0, 2 * Math.PI); gg.fill(); } gg.beginPath(); gg.arc(0, 0, cs * 0.3, 0, 2 * Math.PI); gg.fill(); }
+    else if (c === 'disc') { gg.beginPath(); gg.arc(0, 0, cs, 0, 2 * Math.PI); gg.fill(); }
+  };
+  mid(g); if (accent) mid(accent);
+}
+function snowflake(res) {
+  const R = p.fD / 2, problems = [], lp = loopSize(), loop = {y: R - p.arm / 2 + lp.ri + 0.3, ...lp};
+  const cv = canvasFor(1 / res, -R - 3, R + 3, -R - 3, loop.y + loop.ro + 1);
+  const [baseC, base] = cv.make(), [accC, acc] = cv.make();
+  flakeDraw(base, R, acc);
+  base.lineWidth = loop.ro - loop.ri; base.beginPath(); base.arc(0, loop.y, (loop.ro + loop.ri) / 2, 0, 2 * Math.PI); base.stroke();
+  const N = cv.W * cv.H, rb = rawAlpha(baseC), ra = rawAlpha(accC), raise = $('flakeRaise').checked ? Math.min(1.2, p.fT * 0.5) : 0, two = $('flakeTwo').checked;
+  const L = new Float32Array(N), Hh = new Float32Array(N), LA = new Float32Array(N), HA = new Float32Array(N);
+  for (let n = 0; n < N; ++n) { if (rb[n] > 127) Hh[n] = p.fT; if (ra[n] > 127 && rb[n] > 127) { if (raise) Hh[n] = p.fT + raise; if (two) HA[n] = p.fT + raise; } }
+  const parts = [{name: 'Snowflake', sheets: [fittedSheet(cv, L, Hh, rb)]}];
+  if (two && $('centre').value !== 'none') parts.push({name: 'Middle', extruder: 2, sheets: [fittedSheet(cv, LA, HA, ra)]});
+  if (p.arm < 1.6 && p.fD > 100) problems.push('Thin arms on a big snowflake bend easily: make them wider or it thicker.');
+  return {parts, problems, colours: [[0.86, 0.92, 1.0], [0.35, 0.55, 0.95]], note: `${p.fD} mm across, ${(p.fT + raise).toFixed(1)} mm thick. Prints flat with no supports; glitter or silk filament suits it.`};
+}
+function surprise() {
+  const pick = a => a[Math.floor(Math.random() * a.length)], r = (a, b, s = 1) => Math.round((a + Math.random() * (b - a)) / s) * s;
+  sliders.branches(r(1, 5)); sliders.bLen(r(25, 85)); sliders.bAngle(r(35, 70)); sliders.centreSize(r(10, 35)); sliders.arm(r(1.8, 3.2, 0.1));
+  $('branchStyle').value = pick(['straight', 'fork', 'leaf', 'dot', 'feather']); $('tip').value = pick(['point', 'round', 'diamond', 'arrow', 'ring', 'star']);
+  $('centre').value = pick(['hexagon', 'star', 'ring', 'flower', 'disc']); $('rings').value = pick(['0', '0', '1', '2']);
+  update();
+}
+$('surprise').onclick = surprise;
+
+// ---------------------------------------------------------------------------------------------------------------
+// Puffed shapes: a silhouette blown up like a cushion, its height rising from the outline in a rounded edge to the
+// half thickness, with lines pressed in for the details. Each half lies on its flat back, so nothing overhangs; two
+// mirrored halves glued back to back make it round both sides. Shapes are drawn 1 unit tall, x centred, y up.
+const PUFFS = {
+  deer: {
+    hang: [-0.02, 0.6],
+    body(g) {
+      g.beginPath(); g.ellipse(0, 0.45, 0.3, 0.15, 0, 0, 2 * Math.PI); g.fill();
+      for (const x of [-0.22, -0.11, 0.1, 0.21]) { g.beginPath(); g.roundRect(x - 0.042, 0, 0.084, 0.46, 0.035); g.fill(); }
+      g.lineCap = 'round'; g.lineWidth = 0.13; g.beginPath(); g.moveTo(0.19, 0.5); g.lineTo(0.31, 0.72); g.stroke();
+      g.beginPath(); g.ellipse(0.36, 0.76, 0.1, 0.075, -0.3, 0, 2 * Math.PI); g.fill();
+      g.beginPath(); g.ellipse(0.45, 0.72, 0.065, 0.05, -0.2, 0, 2 * Math.PI); g.fill();
+      g.beginPath(); g.ellipse(0.27, 0.84, 0.055, 0.024, 0.6, 0, 2 * Math.PI); g.fill();
+      g.beginPath(); g.ellipse(-0.3, 0.55, 0.055, 0.032, 0.5, 0, 2 * Math.PI); g.fill();
+      g.lineWidth = 0.045; g.lineJoin = 'round';
+      for (const line of [[[0.33, 0.8], [0.3, 0.9], [0.23, 0.98]], [[0.3, 0.9], [0.36, 0.98]], [[0.285, 0.94], [0.19, 0.93]],
+                          [[0.39, 0.81], [0.43, 0.92], [0.4, 1.0]], [[0.43, 0.92], [0.5, 0.97]]]) {
+        g.beginPath(); g.moveTo(...line[0]); for (const q of line.slice(1)) g.lineTo(...q); g.stroke(); }
+    },
+    colour(g) {
+      g.beginPath(); g.arc(0.505, 0.73, 0.035, 0, 2 * Math.PI); g.fill();
+      g.lineCap = 'butt'; g.lineWidth = 0.045; g.beginPath(); g.moveTo(0.16, 0.57); g.lineTo(0.35, 0.62); g.stroke();
+      g.beginPath(); g.arc(0.27, 0.56, 0.035, 0, 2 * Math.PI); g.fill();
+    },
+    lines(g, w) {
+      g.beginPath(); g.arc(0.375, 0.78, 0.018, 0, 2 * Math.PI); g.fill();
+      g.lineWidth = w; g.lineCap = 'round';
+      g.beginPath(); g.moveTo(0.2, 0.48); g.quadraticCurveTo(0.26, 0.42, 0.29, 0.33); g.stroke();
+    },
+  },
+  santa: {
+    hang: [-0.02, 0.91],
+    hat(g) { g.beginPath(); g.moveTo(-0.3, 0.56); g.bezierCurveTo(-0.28, 0.92, 0.1, 1.04, 0.37, 0.8); g.lineTo(0.33, 0.76);
+      g.bezierCurveTo(0.22, 0.85, 0.3, 0.62, 0.3, 0.56); g.closePath(); g.fill(); },
+    trim(g) { g.beginPath(); g.roundRect(-0.36, 0.5, 0.72, 0.11, 0.055); g.fill(); g.beginPath(); g.arc(0.39, 0.76, 0.075, 0, 2 * Math.PI); g.fill(); },
+    beard(g) { g.beginPath(); g.moveTo(-0.31, 0.46); g.bezierCurveTo(-0.35, 0.15, -0.15, 0, 0, 0); g.bezierCurveTo(0.15, 0, 0.35, 0.15, 0.31, 0.46);
+      g.bezierCurveTo(0.15, 0.3, -0.15, 0.3, -0.31, 0.46); g.closePath(); g.fill(); },
+    body(g) { this.hat(g); this.trim(g); this.beard(g); g.beginPath(); g.ellipse(0, 0.42, 0.27, 0.15, 0, 0, 2 * Math.PI); g.fill(); },
+    colour(g) {
+      this.hat(g); g.save(); g.globalCompositeOperation = 'destination-out'; this.trim(g); g.restore();
+      g.beginPath(); g.arc(0, 0.37, 0.038, 0, 2 * Math.PI); g.fill();
+    },
+    lines(g, w) {
+      g.lineWidth = w;
+      g.beginPath(); g.roundRect(-0.36, 0.5, 0.72, 0.11, 0.055); g.stroke();
+      g.beginPath(); g.arc(0.39, 0.76, 0.075, 0, 2 * Math.PI); g.stroke();
+      g.beginPath(); g.moveTo(-0.31, 0.46); g.bezierCurveTo(-0.15, 0.3, 0.15, 0.3, 0.31, 0.46); g.stroke();
+      for (const s of [1, -1]) { g.beginPath(); g.ellipse(s * 0.085, 0.33, 0.085, 0.035, -s * 0.3, 0, 2 * Math.PI); g.stroke();
+        g.beginPath(); g.arc(s * 0.1, 0.45, 0.02, 0, 2 * Math.PI); g.fill(); }
+      g.beginPath(); g.arc(0, 0.37, 0.038, 0, 2 * Math.PI); g.stroke();
+      for (const [x0, y0, x1, y1] of [[-0.15, 0.22, -0.1, 0.08], [0, 0.26, 0, 0.06], [0.15, 0.22, 0.1, 0.08]]) { g.beginPath(); g.moveTo(x0, y0); g.lineTo(x1, y1); g.stroke(); }
+    },
+  },
+  lantern: {
+    hang: [0, 0.97],
+    body(g) {
+      g.beginPath(); g.moveTo(-0.3, 0.72); g.lineTo(0.3, 0.72); g.lineTo(0.12, 0.9); g.lineTo(-0.12, 0.9); g.closePath(); g.fill();
+      g.beginPath(); g.arc(0, 0.92, 0.055, 0, 2 * Math.PI); g.fill();
+      g.beginPath(); g.roundRect(-0.33, 0.65, 0.66, 0.08, 0.025); g.fill();
+      g.beginPath(); g.rect(-0.27, 0.12, 0.54, 0.55); g.fill();
+      g.beginPath(); g.roundRect(-0.34, 0.04, 0.68, 0.09, 0.025); g.fill();
+      g.beginPath(); g.rect(-0.3, 0, 0.1, 0.06); g.rect(0.2, 0, 0.1, 0.06); g.fill();
+    },
+    recess(g) { g.beginPath(); g.roundRect(-0.21, 0.18, 0.42, 0.42, [0.2, 0.2, 0.02, 0.02]); g.fill(); },
+    inner(g) { g.beginPath(); g.roundRect(-0.065, 0.18, 0.13, 0.2, 0.02); g.fill(); this.flame(g); },
+    flame(g) { g.beginPath(); g.moveTo(0, 0.53); g.bezierCurveTo(0.07, 0.46, 0.055, 0.41, 0, 0.4); g.bezierCurveTo(-0.055, 0.41, -0.07, 0.46, 0, 0.53); g.fill(); },
+    colour(g) { this.flame(g); },
+    lines(g, w) {
+      g.lineWidth = w;
+      for (const y of [0.725, 0.65, 0.125, 0.045]) { g.beginPath(); g.moveTo(-0.4, y); g.lineTo(0.4, y); g.stroke(); }
+      g.beginPath(); g.moveTo(-0.2, 0.69); g.lineTo(0.2, 0.69); g.stroke();
+      for (const x of [-0.25, 0.25]) { g.beginPath(); g.moveTo(x, 0.16); g.lineTo(x, 0.62); g.stroke(); }
+    },
+  },
+};
+// How far each point inside is from the outline, in mm (a two-pass chamfer distance).
+function distanceIn(raw, W, H, k) {
+  const d = new Float32Array(W * H), big = 1e9, D = 1.4142;
+  for (let n = 0; n < d.length; ++n) d[n] = raw[n] > 127 ? big : 0;
+  for (let j = 0; j < H; ++j) for (let i = 0; i < W; ++i) { const n = j * W + i; if (!d[n]) continue;
+    let v = d[n];
+    if (i > 0) v = Math.min(v, d[n - 1] + 1); else v = Math.min(v, 1);
+    if (j > 0) { v = Math.min(v, d[n - W] + 1); if (i > 0) v = Math.min(v, d[n - W - 1] + D); if (i < W - 1) v = Math.min(v, d[n - W + 1] + D); } else v = Math.min(v, 1);
+    d[n] = v; }
+  for (let j = H - 1; j >= 0; --j) for (let i = W - 1; i >= 0; --i) { const n = j * W + i; if (!d[n]) continue;
+    let v = d[n];
+    if (i < W - 1) v = Math.min(v, d[n + 1] + 1); else v = Math.min(v, 1);
+    if (j < H - 1) { v = Math.min(v, d[n + W] + 1); if (i < W - 1) v = Math.min(v, d[n + W + 1] + D); if (i > 0) v = Math.min(v, d[n + W - 1] + D); } else v = Math.min(v, 1);
+    d[n] = v; }
+  for (let n = 0; n < d.length; ++n) d[n] = d[n] ? (d[n] - 0.5) / k : 0;
+  return d;
+}
+// A cushion's height at distance d in from its edge: a rounded edge of the given radius, then flat at top.
+const cushion = (d, round, top) => { const t = Math.min(1, Math.max(0, d) / round); return 0.6 + (top - 0.6) * Math.sqrt(t * (2 - t)); };
+function puffHalf(res, mirror) {
+  const P = PUFFS[p.puff], Hs = p.pH, w = 0.7 / Hs, lp = loopSize();
+  const hx = P.hang[0] * Hs, hy = P.hang[1] * Hs - Hs / 2, ly = hy + lp.ri + 0.3;
+  const cv = canvasFor(1 / res, -Hs * 0.62, Hs * 0.62, -Hs / 2 - 1, Math.max(Hs / 2, ly + lp.ro) + 1);
+  const unit = g => { g.translate(0, -Hs / 2); if (mirror) g.scale(-1, 1); g.scale(Hs, Hs); };
+  const layer = (fn, ...args) => { const [c, g] = cv.make(); if (fn) { g.save(); unit(g); fn.call(P, g, ...args); g.restore(); } return rawAlpha(c); };
+  const body = layer(P.body), colour = layer(P.colour), lines = layer(P.lines, w), recess = layer(P.recess), inner = layer(P.inner);
+  // The loop: a flat ring standing on the shape where it balances, its hole kept clear of everything.
+  const [lc, lg] = cv.make(), x = mirror ? -hx : hx;
+  lg.lineWidth = lp.ro - lp.ri; lg.beginPath(); lg.arc(x, ly, (lp.ro + lp.ri) / 2, 0, 2 * Math.PI); lg.stroke();
+  lg.beginPath(); lg.rect(x - (lp.ro - lp.ri) / 2, hy - 2, lp.ro - lp.ri, ly - lp.ri - hy + 2.5); lg.fill();
+  const ring = rawAlpha(lc);
+  const [hc, hg] = cv.make(); hg.beginPath(); hg.arc(x, ly, lp.ri, 0, 2 * Math.PI); hg.fill(); const hole = rawAlpha(hc);
+  const N = cv.W * cv.H, k = cv.k, top = p.pT, round = p.pRound;
+  const dBody = distanceIn(body, cv.W, cv.H, k), dInner = distanceIn(inner, cv.W, cv.H, k), low = top * 0.4;
+  const Z = new Float32Array(N), Hc = new Float32Array(N), Hm = new Float32Array(N), rawM = new Uint8Array(N), rawC = new Uint8Array(N), all = new Uint8Array(N);
+  const two = $('puffTwo').checked, ringT = Math.max(1, Math.min(top, p.loopW / 2));
+  for (let n = 0; n < N; ++n) {
+    let h = body[n] > 127 ? cushion(dBody[n], round, top) : 0;
+    if (h && recess[n] > 127) h = Math.min(h, low);
+    if (inner[n] > 127) h = Math.max(h, low + cushion(dInner[n], round * 0.5, top * 0.55) - 0.6);
+    if (h && lines[n] > 127) h = Math.max(0.6, h - p.pGroove);
+    if (ring[n] > 127) h = Math.max(h, ringT);
+    if (hole[n] > 127) h = 0;
+    all[n] = hole[n] > 127 ? 0 : Math.max(body[n], ring[n]);
+    const c = two && colour[n] > 127;
+    if (c) Hc[n] = h; else Hm[n] = h;
+    rawC[n] = two ? Math.min(all[n], colour[n]) : 0; rawM[n] = two ? Math.min(all[n], 255 - colour[n]) : all[n];
+  }
+  const parts = [{name: 'Body', sheets: [fittedSheet(cv, Z, Hm, rawM)]}];
+  if (two && Hc.some(v => v > 0)) parts.push({name: 'Colour', extruder: 2, sheets: [fittedSheet(cv, Z, Hc, rawC)]});
+  return parts;
+}
+function puffed(res) {
+  const names = {deer: 'Reindeer', santa: 'Santa', lantern: 'Candle lantern'}, name = names[p.puff], both = $('puffBoth').checked, problems = [];
+  const objects = [{name: both ? `${name} front` : name, parts: puffHalf(res, false)}];
+  if (both) objects.push({name: `${name} back`, parts: puffHalf(res, true)});
+  if (p.pRound > p.pH * 0.12) problems.push('Very round for its size: thin parts like legs and antlers come out flat.');
+  return {objects, problems, colours: [[0.93, 0.9, 0.85], [0.8, 0.12, 0.15]],
+    note: `${p.pH} mm tall, ${(both ? 2 : 1) * p.pT} mm thick. ${both ? 'Two halves, each flat on its back: glue them back to back.' : 'One piece with a flat back.'} No supports needed.`};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The tree-top star: two halves, each flat on its back and rising to the middle. A groove with a 45° roof runs up
+// from the bottom of each back, so the two glued back to back make a square socket for the tree's tip.
+function treeStar(res) {
+  const R = p.sD / 2, r = R * p.inner / 100, pts = starPts(p.points, R, r, $('burst').checked), e = 1.2, problems = [];
+  // Where the edge is along each direction from the middle.
+  const edgeAt = a => { const dx = Math.cos(a), dy = Math.sin(a); let best = 0;
+    for (let i = 0; i < pts.length; ++i) { const [x1, y1] = pts[i], [x2, y2] = pts[(i + 1) % pts.length], ex = x2 - x1, ey = y2 - y1, den = dx * ey - dy * ex;
+      if (Math.abs(den) < 1e-12) continue; const t = (x1 * ey - y1 * ex) / den, s = (x1 * dy - y1 * dx) / den;
+      if (t > 0 && s >= -1e-9 && s <= 1 + 1e-9) best = Math.max(best, t); }
+    return best; };
+  const bottom = edgeAt(-Math.PI / 2), s = p.tipD * Math.SQRT2 + 0.6, collar = s / 2 + 2, stem = 10;
+  const yb = -bottom - stem, ytop = -bottom + p.sockL;
+  const cv = canvasFor(1 / res, -R - 1, R + 1, Math.min(-R, yb) - 1, R + 1);
+  const [c, g] = cv.make();
+  g.beginPath(); poly(g, pts); g.fill(); g.beginPath(); g.rect(-(s / 2 + 2), yb, s + 4, stem + bottom * 0.5); g.fill();
+  const raw = rawAlpha(c), N = cv.W * cv.H, LO = new Float32Array(N), HI = new Float32Array(N), Hc = p.sDepth;
+  for (let j = 0; j < cv.H; ++j)
+    for (let i = 0; i < cv.W; ++i) {
+      const n = j * cv.W + i;
+      if (raw[n] <= 127) continue;
+      const x = (i - cv.ox) / cv.k, y = (cv.oy - j) / cv.k, rr = Math.hypot(x, y), q = Math.min(1, rr / Math.max(1e-6, edgeAt(Math.atan2(y, x))));
+      let h = p.starStyle === 'facet' ? e + (Hc - e) * (1 - q) : p.starStyle === 'puff' ? e + (Hc - e) * Math.sqrt(Math.max(0, 1 - q * q)) : Math.min(Hc, 4);
+      // The groove under it, its roof at 45°, with at least 2 mm over the roof: a ridge where the star is thinner.
+      if (Math.abs(x) < s / 2 && y < ytop) LO[n] = s / 2 - Math.abs(x);
+      if (Math.abs(x) < s / 2 + 2 && y < ytop + 2) h = Math.max(h, s / 2 + 2 - Math.abs(x) - Math.max(0, y - ytop));
+      HI[n] = h;
+    }
+  if (p.sockL > bottom + R * 0.6) problems.push('The socket runs past the middle of the star: make it shorter.');
+  const half = fittedSheet(cv, LO, HI, raw);
+  return {objects: [{name: 'Star front', parts: [{name: 'Star front', sheets: [half]}]}, {name: 'Star back', parts: [{name: 'Star back', sheets: [half]}]}],
+    problems, colours: [[0.95, 0.8, 0.3]],
+    note: `${p.sD} mm across, ${(2 * Math.max(Hc, collar)).toFixed(0)} mm thick when glued. The socket fits a tip about ${p.tipD} mm across. Gold or silk filament suits it.`};
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+const viewer = new Lamp.Viewer($('canvas'));
+let timer = 0;
+const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
+let shownKind = '';
+function update() {
+  // Flat things are seen from above, hanger up; baubles from the side.
+  if (p.kind !== shownKind) { shownKind = p.kind; viewer.pitch = p.kind === 'ball' ? 0.25 : 1.2; viewer.yaw = p.kind === 'ball' ? -0.6 : -Math.PI / 2; }
+  on('kind', p.kind); on('shape', p.shape); on('scene', p.scene); on('form', p.form); on('pattern', p.pattern); on('print', p.print); on('starstyle', p.starStyle); on('puff', p.puff);
+  for (const k of ['flat', 'ball', 'flake', 'star', 'puff']) $(k + 'Box').classList.toggle('hidden', p.kind !== k);
+  $('pictureBox').classList.toggle('hidden', p.scene !== 'picture');
+  $('hangerBox').classList.toggle('hidden', p.kind === 'star');
+  longRow.classList.toggle('hidden', p.form === 'ball');
+  for (const r of [depthRow, countRow, $('stripeRow')]) r.classList.toggle('hidden', p.pattern === 'plain' || p.pattern === 'litho');
+  $('lithoBox').classList.toggle('hidden', p.pattern !== 'litho');
+  $('printBox').classList.toggle('hidden', p.pattern === 'litho');
+  turnsRow.classList.toggle('hidden', p.pattern !== 'twist');
+  footRow.classList.toggle('hidden', p.print !== 'whole');
+  clearTimeout(timer);
+  timer = setTimeout(render, 120);
+}
+// Everything to add: [{name, parts}], with the preview's colours and a line about it.
+function build(res) {
+  if (p.kind === 'flat') { const o = flatOrnament(res); return {...o, objects: [{name: 'Ornament', parts: o.parts}]}; }
+  if (p.kind === 'flake') { const o = snowflake(res); return {...o, objects: [{name: 'Snowflake', parts: o.parts}]}; }
+  if (p.kind === 'ball') return bauble(res);
+  if (p.kind === 'puff') return puffed(res);
+  return treeStar(res);
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+function render() {
+  let built;
+  try { built = build(Math.max(0.35, p.res)); }
+  catch (e) { $('problem').textContent = 'Something went wrong drawing it: ' + e.message; $('problem').classList.remove('hidden'); return; }
+  const shown = [], gap = 8;
+  let x = 0;
+  for (const o of built.look || built.objects) {
+    const sheets = o.parts.flatMap(q => q.sheets), [lo, hi] = Lamp.bounds(sheets);
+    o.parts.forEach((q, k) => shown.push({sheets: Lamp.moved(q.sheets, x - lo[0], 0, q.extruder ? 0.02 : 0), colour: built.colours[Math.min(k, built.colours.length - 1)], glow: q.glow}));
+    x += hi[0] - lo[0] + gap;
+  }
+  viewer.show(shown, !!built.glow, false);
+  const problems = [...built.problems];
+  $('problem').innerHTML = problems.join('<br>');
+  $('problem').classList.toggle('hidden', !problems.length);
+  $('facts').textContent = built.note + (p.copies > 1 ? ` ${p.copies} copies are added.` : '');
+}
+window.fromApp = message => {
+  if (message.type === 'printer') { printer = message; update(); }
+  else if (message.type === 'image') {
+    if (message.error || !message.data) { if (message.error) $('pictureName').textContent = message.error; return; }
+    const img = new Image();
+    img.onload = () => { picture = {img, name: message.name}; maskCache.key = '';
+      $('pictureName').textContent = message.name; for (const e of document.querySelectorAll('.lithoName')) e.textContent = message.name;
+      if (p.kind === 'flat') p.scene = 'picture'; update(); };
+    img.src = message.data;
+  }
+};
+$('pick').onclick = $('lithoPick').onclick = () => post({cmd: 'pick_image'});
+$('cancel').onclick = () => post({cmd: 'close'});
+$('add').onclick = () => {
+  const built = build(p.res), objects = [];
+  for (let c = 0; c < p.copies; ++c) objects.push(...built.objects);
+  const first = objects[0];
+  post(Lamp.addMessage(first.name, first.parts, objects.slice(1)));
+};
+update();
+post({cmd: 'ready'});
+</script>
+</body>
+</html>
