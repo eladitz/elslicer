@@ -317,7 +317,7 @@ const Maker *find(const std::vector<Maker> &makers, const std::string &id)
 
 // ---------------------------------------------------------------------------------------------------------------
 static fs::path catalog_path() { return folder() / "catalog.json"; }
-json            cached_catalog() { return read_json(catalog_path(), json()); }
+json            cached_catalog() { return read_json(catalog_path(), json::object()); }
 
 void fetch_catalog(std::function<void(const json &, const std::string &)> done)
 {
@@ -373,7 +373,7 @@ int updates_available()
     const std::vector<Maker> have = installed();
     int                      n    = 0;
     for (const json &e : catalog.value("makers", json::array()))
-        if (const Maker *m = find(have, e.value("id", "")); m && m->source != "local" && e.value("min_api", 1) <= API &&
+        if (const Maker *m = find(have, e.value("id", "")); m && e.value("min_api", 1) <= API &&
                                                              compare_versions(e.value("version", ""), m->version) > 0)
             ++n;
     return n;

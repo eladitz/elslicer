@@ -61,7 +61,7 @@ function card(m, tags, acts) {
 }
 function draw() {
   const entries = (catalog && catalog.makers) || [], byId = Object.fromEntries(entries.map(e => [e.id, e]));
-  const fresh = installed.filter(m => m.source !== 'local' && byId[m.id] && newer(byId[m.id].version, m.version) && (byId[m.id].min_api || 1) <= 1);
+  const fresh = installed.filter(m => byId[m.id] && newer(byId[m.id].version, m.version) && (byId[m.id].min_api || 1) <= 1);
   $('updatesHead').classList.toggle('hidden', !fresh.length);
   $('updates').innerHTML = '';
   for (const m of fresh) {

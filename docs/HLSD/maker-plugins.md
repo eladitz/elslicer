@@ -66,6 +66,8 @@ inputs, never pictures. A page with settings outside `p` declares `MAKER_STATE_E
 - Downloads are checked against the catalogue's sha256 before they are installed.
 - Once a day, when the Make menu is first built, the catalogue is fetched in the background. The menu then shows
   how many updates there are. Nothing updates without the user's click.
+- A maker installed from a file is offered the catalogue's version too when it is newer; updating it makes it a
+  catalogue maker.
 
 ## Menus
 
