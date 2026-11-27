@@ -190,7 +190,7 @@ const Lamp = (() => {
       new ResizeObserver(() => this.draw()).observe(canvas);
     }
 
-    // parts: [{sheets, colour: [r, g, b], glow}]. glow: colour each point by how much light gets through its thickness.
+    // parts: [{sheets, colour: [r, g, b], glow, light}]. glow: colour each point by how much light gets through its thickness.
     // flip: show it turned over, as it hangs rather than as it prints.
     show(parts, glow, flip) {
       const gl = this.gl;
@@ -225,13 +225,16 @@ const Lamp = (() => {
           }
           // Only parts light shines through glow; mounts and stands stay plain.
           const t = glow && part.glow !== false ? thickness(s) : null, half = s.nu * s.nv;
-          let thinnest = Infinity;
-          if (t) for (const v of t) thinnest = Math.min(thinnest, v);
+          // part.full: the thickness that shows the full light; the sheet's thinnest point otherwise.
+          let thinnest = part.full ?? Infinity;
+          if (t && part.full == null) for (const v of t) thinnest = Math.min(thinnest, v);
           for (let v = 0; v < n; ++v) {
             let r = part.colour[0], g = part.colour[1], b = part.colour[2];
             if (t) {
               const light = 1.15 * Math.exp(-0.9 * Math.max(0, t[v % half] - thinnest));
-              r = 1.0 * light + 0.05; g = 0.78 * light + 0.04; b = 0.45 * light + 0.03;
+              // part.light: the colour the light takes through this part; a warm bulb otherwise.
+              const tint = part.light || [1.0, 0.78, 0.45];
+              r = tint[0] * light + 0.05; g = tint[1] * light + 0.04; b = tint[2] * light + 0.03;
             }
             col[3 * v] = r; col[3 * v + 1] = g; col[3 * v + 2] = b;
             if (!flat(v)) for (let a = 0; a < 3; ++a) { lo[a] = Math.min(lo[a], pos[3 * v + a]); hi[a] = Math.max(hi[a], pos[3 * v + a]); }
