@@ -189,9 +189,10 @@ function ask(question, shown) {
   const r = elai.ask(question);
   // A question that names a setting is answered with it; the AI would only swap it for a similar one.
   if (aiReady() && r.kind !== 'chat' && r.kind !== 'setting') {
-    const request = ElaiAI.build(elai, history, question, {context: setupText()});
-    // Nothing to choose from: the AI couldn't help, so Elslicer's own reply stands.
-    if (request.choices.length) return askAI(question, r, request);
+    const writes = aiWrites();
+    const request = ElaiAI.build(elai, history, question, {context: setupText(), write: writes});
+    // An AI that only chooses can't help with nothing to choose from, so Elslicer's own reply stands.
+    if (writes || request.choices.length) return askAI(question, r, request);
   }
   offline(r);
   remember(question, r);
@@ -222,6 +223,11 @@ function aiReady() {
   const apple = aiSettings.choice.provider === 'apple';
   return !apple || !aiPanel.apple || aiPanel.apple.ok;
 }
+// Apple's on-device model is small, so it only chooses among the written answers; the others answer in their own words.
+function aiWrites() {
+  const p = aiSettings && aiSettings.providers.find(p => p.id === aiSettings.choice.provider);
+  return aiReady() && !!p && p.kind !== 'apple';
+}
 function aiName() {
   const p = aiSettings && aiSettings.providers.find(p => p.id === aiSettings.choice.provider);
   return p ? p.label : 'the AI';
@@ -240,7 +246,7 @@ function askAI(question, r, request) {
   const id = nextId++;
   const bubble = add(`<p class="thinking">Thinking…</p>`);
   waiting.set(id, {question, r, bubble, request});
-  post({cmd: 'ai_ask', id, instructions: request.instructions, prompt: request.prompt, choices: request.choices});
+  post({cmd: 'ai_ask', id, instructions: request.instructions, prompt: request.prompt, choices: request.choices, write: !!request.write});
 }
 function setupText() {
   if (!ctx) return '';
@@ -252,6 +258,7 @@ function setupText() {
 function answerAI(wait, reply) {
   wait.bubble.remove();
   const checked = ElaiAI.check(reply, wait.request, elai);
+  if (wait.request.write && reply.text && reply.text.trim()) return answerWritten(wait, reply.text, checked);
   let r;
   if (checked.topic) r = {kind: 'topic', topic: checked.topic, also: wait.r.kind === 'topic' && wait.r.topic !== checked.topic ? [wait.r.topic] : []};
   else if (checked.setting) r = {kind: 'setting', setting: checked.setting, mode: wait.r.mode,
@@ -261,6 +268,32 @@ function answerAI(wait, reply) {
   else r = {kind: 'none', topics: wait.request.topics.slice(0, 3), settings: []};
   offline(r);
   remember(wait.question, r);
+}
+// The AI's own words, with the buttons of the written answer it chose, if any.
+function formatted(text) {
+  const inline = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/`([^`]+)`/g, '<b>$1</b>');
+  return text.trim().split(/\n\s*\n/).map(block => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length && lines.every(l => /^([-*•]|\d+[.)])\s+/.test(l)))
+      return `<ul>${lines.map(l => `<li>${inline(l.replace(/^([-*•]|\d+[.)])\s+/, ''))}</li>`).join('')}</ul>`;
+    return lines.map(l => /^([-*•]|\d+[.)])\s+/.test(l) ? `<p>• ${inline(l.replace(/^([-*•]|\d+[.)])\s+/, ''))}</p>` : `<p>${inline(l)}</p>`).join('');
+  }).join('');
+}
+function answerWritten(wait, text, checked) {
+  let actions = [], more = '';
+  if (checked.topic) {
+    actions = checked.topic.actions ? checked.topic.actions(helpers) : [];
+    more = `<a data-ask="topic:${esc(checked.topic.id)}">${esc(checked.topic.title)}</a>`;
+  } else if (checked.setting) {
+    actions = [{label: 'Show me the setting', show: checked.setting.key}];
+    more = `<a data-ask="setting:${esc(checked.setting.key)}">${esc(checked.setting.label)}</a>`;
+  }
+  let html = formatted(text) + buttons(actions);
+  if (more) html += `<div class="also">More: ${more}</div>`;
+  wire(add(html), actions);
+  history.push({role: 'user', text: wait.question});
+  history.push({role: 'elai', text, id: checked.topic ? checked.topic.id : checked.setting ? checked.setting.key : null});
+  if (history.length > 12) history.splice(0, history.length - 12);
 }
 // When the AI can't answer, the written answer still does, with the reason.
 function answerOffline(wait, reason) {

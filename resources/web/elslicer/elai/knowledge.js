@@ -298,4 +298,13 @@ window.ELAI_KNOWLEDGE = [
     answer: () => `<p>Select the part and press <b>F</b>, then click a face to lay it flat on the bed, or <b>R</b> to rotate by hand. The toolbar's <b>Auto orient</b> picks the angle that needs the least support.</p>
       <p>Parts are weakest between layers, and overhangs need support, so the best angle is a balance: big flat faces down, few overhangs, loads along the layers.</p>`,
   },
+  {
+    id: 'mixed_broken', title: 'Mixed filament has invalid or mismatched components',
+    words: ['mixed:3', 'mismatch:3', 'mismatched:3', 'invalid:1', 'component:2', 'components:2', 'mix:1', 're-edit:2', 'blend:1'],
+    needs: ['mixed', 'mismatch', 'mismatched', 'component', 'components'],
+    answer: () => `<p>A <b>mixed filament</b> is a colour made by alternating two or more of your real filaments, layer by layer. The warning means at least one mix can't be printed as it's set up:</p>
+      <ul><li><b>Invalid:</b> it uses a filament you've since removed, so a component is missing.</li>
+      <li><b>Mismatched:</b> its filaments are different materials, such as PLA with PETG. <b>Silk PLA counts as different from plain PLA</b>, because it prints differently.</li></ul>
+      <p><b>To fix it:</b> in the sidebar under <b>Mixed filaments</b>, click the mix's swatch and choose components that exist and are all the same material, or delete the mix if you don't use it. You can also change the filament preset in a slot so the materials match.</p>`,
+  },
 ];

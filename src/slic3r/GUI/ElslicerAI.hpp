@@ -77,8 +77,9 @@ void chat(const Choice &choice, const Request &request, std::function<void(const
 // Apple's on-device model, for Elai, through the elai-local helper; done gets the helper's reply.
 void ask_apple(const json &request, std::function<void(const json &)> done);
 
-// One Elai question with whichever service Elai uses: the AI picks which of the offered answers fits.
-// request is {"instructions", "prompt", "choices": [ids]}; done gets {"ok": true, "pick": id or "none"} or {"ok": false, "reason"}.
+// One Elai question with whichever service Elai uses: the AI picks which of the offered answers fits, and with "write" answers too.
+// request is {"instructions", "prompt", "choices": [ids], "write"}; done gets {"ok": true, "pick": id or "none"} or {"ok": false, "reason"}.
+// With "write" (any service but Apple's), the AI also answers in its own words: the reply adds "text".
 void ask_elai(const json &request, std::function<void(const json &)> done);
 
 // Pages share one settings panel (ai_provider.js). Returns true if cmd was one of its messages.

@@ -12,6 +12,18 @@
     'Choose none if no item fits, or if the message is small talk or thanks.',
   ].join(' ');
 
+  // For a capable AI (not Apple's small on-device model): it answers in its own words, and still names the written
+  // answer that fits, so its buttons can be shown.
+  const WRITE_INSTRUCTIONS = [
+    'You are Elai, the assistant inside Elslicer, a 3D printing slicer based on OrcaSlicer.',
+    'Answer the user\'s latest message yourself, in plain words and at most about 150 words: short paragraphs, or a short list with "- " lines. Use **bold** sparingly.',
+    'When the user quotes a warning or error, explain what it means and how to fix it, step by step.',
+    'Elslicer looked up the reference items below for the message. Use them when they fit: name settings by the label and place they give, and only suggest values you are sure of.',
+    'If you are not sure where something is in Elslicer, say what to look for rather than inventing menu names.',
+    'Use the conversation so far to tell what "it", "that" or a one-word follow-up refers to; a message starting with "no" means the earlier answer was wrong.',
+    'Also choose the one reference item that fits, so Elslicer can show its buttons, or none if none fits or the message is small talk.',
+  ].join(' ');
+
   const plain = html => String(html || '').replace(/<li>/g, '\n- ').replace(/<\/(p|ul|ol|h2)>/g, '\n').replace(/<[^>]*>/g, '')
     .replace(/&gt;/g, '>').replace(/&lt;/g, '<').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/[ \t]+/g, ' ').replace(/\n\s*\n+/g, '\n').trim();
 
@@ -49,7 +61,7 @@
   // The request for one question. history is [{role: 'user' | 'elai', text, id}], oldest first, without this question.
   // id is the topic id or setting key Elai answered with.
   // budget is the most characters the reference may take, so the whole request fits the model's window.
-  function build(elai, history, question, {budget = 6500, context = ''} = {}) {
+  function build(elai, history, question, {budget = 6500, context = '', write = false} = {}) {
     const helpers = textHelpers(elai);
     const lastUser = [...history].reverse().find(m => m.role === 'user');
     // The question alone first, then with the one before, so "no, into two parts" still finds what "it" was.
@@ -76,7 +88,7 @@
       turns.length ? `Conversation so far:\n${turns.join('\n')}` : '',
       `User's latest message: ${question}`,
     ].filter(Boolean).join('\n\n');
-    return {instructions: INSTRUCTIONS, prompt, choices, topics: kept.topics, settings: kept.settings};
+    return {instructions: write ? WRITE_INSTRUCTIONS : INSTRUCTIONS, prompt, choices, topics: kept.topics, settings: kept.settings, write};
   }
 
   // The settings a written answer names or its buttons change.
@@ -98,5 +110,5 @@
     return covering ? {topic: covering, setting: null} : {topic: null, setting: elai.setting(pick)};
   }
 
-  root.ElaiAI = {INSTRUCTIONS, build, check, plain, valueText};
+  root.ElaiAI = {INSTRUCTIONS, WRITE_INSTRUCTIONS, build, check, plain, valueText};
 })(typeof window !== 'undefined' ? window : globalThis);

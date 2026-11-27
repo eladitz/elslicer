@@ -418,31 +418,51 @@ void ask_elai(const json &request, std::function<void(const json &)> done)
         ask_apple(ask, done);
         return;
     }
-    // The same choice Apple's model makes, asked for as a tool call limited to the offered ids.
+    // The same choice Apple's model makes, asked for as a tool call limited to the offered ids. With "write", the
+    // AI also answers in its own words.
+    const bool write = request.value("write", false);
     json choices = request.value("choices", json::array());
     choices.push_back("none");
-    const json tool = {{"name", "pick"},
-                       {"description", "Choose the reference item that answers the user's latest message."},
-                       {"input_schema",
-                        {{"type", "object"},
-                         {"properties", {{"best", {{"type", "string"}, {"enum", choices}, {"description", "The id that answers the latest message, or none"}}}}},
-                         {"required", {"best"}}}}};
+    json properties = {{"best", {{"type", "string"}, {"enum", choices}, {"description", "The id that answers the latest message, or none"}}}};
+    json required   = {"best"};
+    if (write) {
+        properties["text"] = {{"type", "string"}, {"description", "Your answer to the user's latest message"}};
+        required = {"text", "best"};
+    }
+    const std::string name = write ? "answer" : "pick";
+    const json tool = {{"name", name},
+                       {"description", write ? "Answer the user's latest message, and choose the reference item that fits it."
+                                             : "Choose the reference item that answers the user's latest message."},
+                       {"input_schema", {{"type", "object"}, {"properties", properties}, {"required", required}}}};
     Request ask;
-    ask.system     = request.value("instructions", "") + " Reply by calling the pick tool.";
+    ask.system     = request.value("instructions", "") + " Reply by calling the " + name + " tool.";
     ask.messages   = json::array({{{"role", "user"}, {"content", request.value("prompt", "")}}});
     ask.tools      = json::array({tool});
     ask.max_tokens = 4000;
     ask.timeout_s  = 60;
-    chat(now, ask, [done](const Reply &reply) {
+    chat(now, ask, [done, write](const Reply &reply) {
         if (!reply.ok) {
             done({{"ok", false}, {"reason", reply.error}});
             return;
         }
-        for (const json &block : reply.content)
+        std::string said;
+        for (const json &block : reply.content) {
             if (block.value("type", "") == "tool_use" && block.contains("input") && block["input"].is_object()) {
-                done({{"ok", true}, {"pick", block["input"].value("best", "none")}});
+                const json &input = block["input"];
+                json out = {{"ok", true}, {"pick", input.value("best", "none")}};
+                if (write)
+                    out["text"] = input.contains("text") && input["text"].is_string() ? input["text"].get<std::string>() : said;
+                done(out);
                 return;
             }
+            if (block.value("type", "") == "text" && block.contains("text") && block["text"].is_string())
+                said += block["text"].get<std::string>();
+        }
+        // A writing AI that answered without the tool still answered.
+        if (write && !said.empty()) {
+            done({{"ok", true}, {"pick", "none"}, {"text", said}});
+            return;
+        }
         done({{"ok", false}, {"reason", "The AI didn't choose an answer."}});
     });
 }

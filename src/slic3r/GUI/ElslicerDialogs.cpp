@@ -2404,7 +2404,8 @@ protected:
             send(AI::settings_message("elai"));
         } else if (cmd == "ai_ask") {
             const json id = data.value("id", json());
-            AI::ask_elai({{"instructions", data.value("instructions", "")}, {"prompt", data.value("prompt", "")}, {"choices", data.value("choices", json::array())}},
+            AI::ask_elai({{"instructions", data.value("instructions", "")}, {"prompt", data.value("prompt", "")}, {"choices", data.value("choices", json::array())},
+                          {"write", data.value("write", false)}},
                          [send_if_open, id](const json &reply) {
                              json message = reply;
                              message["type"] = "ai_reply";
