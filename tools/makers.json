@@ -8,7 +8,7 @@
   {"id": "card-embosser", "name": "Card Embosser", "page": "card_embosser.html", "version": "1.2.0", "description": "Make rollers that press a pattern, logo or words into business cards as you turn a crank"},
   {"id": "tulle-card", "name": "Tulle Card Wrap", "page": "tulle_card.html", "version": "1.3.0", "description": "Print gold lines onto tulle that fold round a piece of card, with a name on the front, over Art Deco lines, roses, lace, daisies, leaves, hearts, stars, snowflakes or scallops"},
   {"id": "phone-case", "name": "Phone Case", "page": "phone_case.html", "version": "1.3.0", "permissions": ["ai"], "description": "Make a case for your phone, with a pattern, words or a picture on the back, a grip, a card wallet or a stand"},
-  {"id": "lightbox", "name": "Lightbox", "page": "lightbox.html", "version": "1.5.0", "description": "Make a box lit from inside, with your words or a picture on the front"},
+  {"id": "lightbox", "name": "Lightbox", "page": "lightbox.html", "version": "1.6.0", "description": "Make a box lit from inside, with your words or a picture on the front"},
   {"id": "lampshade", "name": "Lampshade", "page": "lampshade.html", "version": "1.2.0", "description": "Make a lampshade that fits your lamp holder, in a shape and pattern you choose"},
   {"id": "lithophane", "name": "Lithophane", "page": "lithophane.html", "version": "1.3.0", "description": "Make a picture that shows when light shines through it: flat, curved, round or as a lamp"}
 ]

@@ -53,6 +53,15 @@
     <div class="field"><label for="font">Font</label><select id="font"></select></div>
     <div class="field"><label for="weight">Weight</label><select id="weight"><option value="400">Regular</option><option value="700">Bold</option><option value="900">Heavy</option></select></div>
   </div>
+  <div id="wordsAtBox">
+    <label class="muted" style="font-size:12px">Words go</label>
+    <div class="seg">
+      <button data-words="below" title="Under the picture">Below</button>
+      <button data-words="above" title="Over the picture">Above</button>
+      <button data-words="left" title="To the left of the picture, lined up against it">Left</button>
+      <button data-words="right" title="To the right of the picture, lined up against it">Right</button>
+    </div>
+  </div>
   <div id="textSliders"></div>
 
   <h3>Picture</h3>
@@ -146,7 +155,7 @@ const FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Arial Black', 'Impact
                'Bradley Hand', 'Marker Felt', 'Chalkboard SE', 'Noteworthy', 'Zapfino'];
 
 const p = {shape: 'circle', W: 120, H: 120, corner: 10, margin: 6, depth: 40, wall: 2, front: 1.2, mode: 'lit',
-           textSize: 26, lineGap: 1.1, picW: 60, picY: 0, threshold: 50, hole: 6, fit: 0.15, base: 'none', res: 0.35,
+           textSize: 26, lineGap: 1.1, picW: 60, picY: 0, wordsAt: 'below', threshold: 50, hole: 6, fit: 0.15, base: 'none', res: 0.35,
            colours: 2, paint: [], paintKey: '', cable: 'hole', look: 'box', split: 'one', skin: 0.4,
            round: 2, keyD: 9.5, keyAt: null, cableX: null,
            keyN: 2, keyFrom: 'auto', keyGap: 60, keyH: 60, keyMid: 0, cableFrom: 'auto', cableAt: 0, plug: 'none', plugW: 12, plugH: 7};
@@ -200,7 +209,7 @@ $('font').value = 'Futura'; $('weight').value = '700';
 for (const id of ['font', 'weight', 'ink', 'sidesColour']) $(id).onchange = update;
 for (const id of ['text', 'invert', 'darkSides', 'glow', 'keyholes']) $(id).oninput = update;
 const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
-choose('shape', 'shape'); choose('mode', 'mode'); choose('base', 'base'); choose('cable', 'cable'); choose('split', 'split'); choose('plug', 'plug');
+choose('shape', 'shape'); choose('mode', 'mode'); choose('base', 'base'); choose('cable', 'cable'); choose('split', 'split'); choose('plug', 'plug'); choose('words', 'wordsAt');
 for (const b of document.querySelectorAll('[data-keyn]')) b.onclick = () => { p.keyN = +b.dataset.keyn; p.keyFrom = 'auto'; p.keyAt = null; update(); };
 for (const b of document.querySelectorAll('[data-look]')) b.onclick = () => { p.look = b.dataset.look; aim(); update(); };
 
@@ -350,20 +359,30 @@ function drawPalette() {
   });
 }
 
-// The design's blocks, picture above words, at scale s: {w, h, draw(g, only)}. only: 'all', 'text', or the number of
-// one of the picture's colours.
+// The design's blocks, the words below, above or beside the picture, at scale s: {w, h, draw(g, only)}, centred on
+// (0, 0) with y up. only: 'all', 'text', or the number of one of the picture's colours. Words beside the picture are
+// centred on it from top to bottom and lined up against it.
 function designBlock(s) {
   const measure = document.createElement('canvas').getContext('2d'), ls = lines(), size = p.textSize * s;
   measure.font = font(size);
   const widths = ls.map(l => measure.measureText(l).width), lh = size * p.lineGap, textH = ls.length ? lh * (ls.length - 1) + size : 0;
   const pc = p.mode === 'colours' ? pictureColours() : null, mask = pc ? pc.union : pictureMask(), pw = mask ? p.picW * s : 0, ph = mask ? pw * mask.height / mask.width : 0, gap = mask && ls.length ? 4 * s : 0;
-  const w = Math.max(pw, ...widths, 0), h = ph + gap + textH;
+  const tw = Math.max(...widths, 0), side = mask && ls.length && (p.wordsAt === 'left' || p.wordsAt === 'right');
+  const w = side ? pw + gap + tw : Math.max(pw, tw), h = side ? Math.max(ph, textH) : ph + gap + textH;
+  // Each block's left and top edges.
+  let picX = -pw / 2, picTop = h / 2, textX = -tw / 2, textTop = h / 2 - ph - gap, align = 'center';
+  if (side) {
+    picTop = ph / 2; textTop = textH / 2;
+    if (p.wordsAt === 'right') { picX = -w / 2; textX = picX + pw + gap; align = 'left'; }
+    else { textX = -w / 2; picX = textX + tw + gap; align = 'right'; }
+  } else if (p.wordsAt === 'above' && mask) { textTop = h / 2; picTop = h / 2 - textH - gap; }
+  const textAt = align === 'left' ? textX : align === 'right' ? textX + tw : textX + tw / 2;
   const draw = (g, only = 'all') => {
-    const top = h / 2, m = only === 'all' ? mask : only === 'text' ? null : pc && pc.layers[only];
-    if (m) { g.save(); g.translate(-pw / 2, top + p.picY * s); g.scale(1, -1); g.drawImage(m, 0, 0, pw, ph); g.restore(); }
+    const m = only === 'all' ? mask : only === 'text' ? null : pc && pc.layers[only];
+    if (m) { g.save(); g.translate(picX, picTop + p.picY * s); g.scale(1, -1); g.drawImage(m, 0, 0, pw, ph); g.restore(); }
     if (only !== 'all' && only !== 'text') return;
-    g.save(); g.font = font(size); g.textAlign = 'center'; g.textBaseline = 'middle';
-    ls.forEach((l, k) => { const y = top - ph - gap - size / 2 - k * lh; g.save(); g.translate(0, y); g.scale(1, -1); g.fillText(l, 0, 0); g.restore(); });
+    g.save(); g.font = font(size); g.textAlign = align; g.textBaseline = 'middle';
+    ls.forEach((l, k) => { const y = textTop - size / 2 - k * lh; g.save(); g.translate(textAt, y); g.scale(1, -1); g.fillText(l, 0, 0); g.restore(); });
     g.restore();
   };
   return {w, h, draw, empty: !mask && !ls.length};
@@ -698,7 +717,8 @@ function update() {
   const colours = p.mode === 'colours';
   $('paletteBox').classList.toggle('hidden', !colours); thresholdRow.classList.toggle('hidden', colours); $('invertRow').classList.toggle('hidden', colours);
   skinRow.classList.toggle('hidden', p.split !== 'apart');
-  on('plug', p.plug); on('keyn', String(p.keyN));
+  on('plug', p.plug); on('keyn', String(p.keyN)); on('words', p.wordsAt);
+  $('wordsAtBox').classList.toggle('hidden', !picture);
   for (const r of plugRows) r.classList.toggle('hidden', p.plug !== 'custom');
   $('keyBox').classList.toggle('hidden', !$('keyholes').checked); gapRow.classList.toggle('hidden', p.keyN !== 2);
   $('standNote').classList.toggle('hidden', p.base !== 'stand');
