@@ -123,6 +123,8 @@ const fq = {shape: 'rect', length: 100, width: 70, sides: 6, side: 40, height: 5
   finger: 10, thick: 2, hinge: 0.4, outside: 'top', pattern: 'swirl', period: 6, relief: 0.8, inlay: 0.6,
   lid: 'none', lidDepth: 15, fit: 0.3};
 let prints = 'upright', fview = 'flat';
+// Remembered with p by maker_state.js: the flat box's own settings and which kind of box.
+const MAKER_STATE_EXTRA = {get: () => ({fq, prints, fview}), set: v => { Object.assign(fq, v.fq); prints = v.prints; fview = v.fview; }};
 
 function slider(parent, key, label, min, max, step) {
   const row = document.createElement('div');
@@ -643,5 +645,6 @@ syncAll();
 update();
 post({cmd: 'ready'});
 </script>
+<script src="maker_state.js"></script>
 </body>
 </html>

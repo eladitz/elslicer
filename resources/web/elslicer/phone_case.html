@@ -280,6 +280,9 @@ const p = {phone: 'iPhone 16', W: 71.6, H: 147.6, D: 7.8, R: 10, material: 'tpu'
 // seen from the back, and y is the middle's height above the bed. r is the corner radius.
 const adjust = {}, added = [];
 let chosen = 'cam';
+// Remembered with p by maker_state.js: moved and added openings.
+const MAKER_STATE_EXTRA = {get: () => ({adjust, added, chosen}),
+  set: v => { for (const k of Object.keys(adjust)) delete adjust[k]; Object.assign(adjust, v.adjust); added.splice(0, added.length, ...v.added); chosen = v.chosen; slidersFor = ''; }};
 
 const sliders = {};
 function slider(parent, key, label, min, max, step) {
@@ -1337,5 +1340,6 @@ for (const [k, set] of Object.entries(sliders)) set(p[k]);
 update();
 post({cmd: 'ready'});
 </script>
+<script src="maker_state.js"></script>
 </body>
 </html>

@@ -49,6 +49,14 @@ The page posts JSON to `window.wx.postMessage` and receives messages through `wi
 as the input schema of one tool, and returns the tool call's input. A maker that didn't ship with Elslicer asks the
 user once before its first question, because the questions are billed to the user's AI service.
 
+## Last state, Undo and Defaults
+
+`resources/web/elslicer/maker_state.js`, loaded after a page's own script, gives a maker that keeps its settings in
+a global `p` and redraws with `update()` three things: it saves the settings (`store_set` key `last`) a moment
+after each change and restores them from the `store` message when the maker opens; Undo steps back through the
+last ten changes; Defaults puts back the page's starting settings. It keeps `p` and the values of the page's
+inputs, never pictures. A page with settings outside `p` declares `MAKER_STATE_EXTRA = {get, set}`.
+
 ## Catalogue and updates
 
 - `https://ai.itzkin.com/makers/catalog.json` lists the published makers, each with `version`, `sha256`, `size`,

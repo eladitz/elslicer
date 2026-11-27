@@ -71,6 +71,16 @@
 
   <h3>Sky</h3>
   <div class="seg">
+    <button data-show="stars" title="The stars and constellations">Stars</button>
+    <button data-show="moon" title="The moon as it was that night, its phase filling the sky">Moon phase</button>
+    <button data-show="both" title="The stars, with the moon in its phase where it was in the sky">Both</button>
+  </div>
+  <div id="moonBox">
+    <label class="check"><input type="checkbox" id="seas" checked> The moon's dark seas</label>
+    <label class="check"><input type="checkbox" id="phaseWords" checked> The phase in the date line</label>
+    <div id="moonSliders"></div>
+  </div>
+  <div class="seg">
     <button data-sky="dark" title="The sky is a filled circle in the second colour; the stars are holes in it, so they show in the card colour">Dark sky</button>
     <button data-sky="stars" title="Only the stars and lines are in the second colour, on the plain card">Stars only</button>
   </div>
@@ -117,7 +127,7 @@ const TITLE_FONTS = ['Snell Roundhand', 'Savoye LET', 'Zapfino', 'Bradley Hand',
 const BODY_FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Gill Sans', 'Optima', 'Copperplate', 'Didot', 'Georgia',
                     'Baskerville', 'American Typewriter', 'Menlo'];
 const p = {layout: 'classic', width: 100, height: 140, diameter: 100, corner: 4, titleSize: 10, smallSize: 4,
-           sky: 'dark', limit: 5.3, starSize: 100, lineWidth: 0.5, frame: 'single',
+           sky: 'dark', show: 'stars', moonSize: 100, limit: 5.3, starSize: 100, lineWidth: 0.5, frame: 'single',
            base: 2, raise: 0.6, res: 0.2, titleFont: 'Snell Roundhand', bodyFont: 'Avenir Next'};
 
 const sliders = {};
@@ -138,6 +148,7 @@ const cardRows = [slider($('sizeSliders'), 'width', 'Width mm', 60, 240, 1), sli
 const roundRow = slider($('sizeSliders'), 'diameter', 'Across mm', 60, 240, 1);
 slider($('textSliders'), 'titleSize', 'Names mm', 5, 24, 0.5);
 slider($('textSliders'), 'smallSize', 'Small words mm', 2.5, 10, 0.1);
+const moonSizeRow = slider($('moonSliders'), 'moonSize', 'Moon size %', 50, 300, 5);
 slider($('skySliders'), 'limit', 'Faintest star', 3.5, 6, 0.1);
 slider($('skySliders'), 'starSize', 'Star size %', 50, 200, 5);
 slider($('skySliders'), 'lineWidth', 'Line mm', 0.4, 1.2, 0.05);
@@ -160,9 +171,9 @@ $('titleFont').onchange = () => { p.titleFont = $('titleFont').value; update(); 
 $('bodyFont').onchange = () => { p.bodyFont = $('bodyFont').value; update(); };
 for (const id of ['city', 'zone', 'date', 'time']) $(id).onchange = update;
 for (const id of ['placeName', 'lat', 'lon', 'title', 'subtitle', 'details']) $(id).oninput = update;
-for (const id of ['figures', 'grid', 'sparkle', 'stand', 'cardColour', 'inkColour']) $(id).oninput = update;
+for (const id of ['figures', 'grid', 'sparkle', 'stand', 'cardColour', 'inkColour', 'seas', 'phaseWords']) $(id).oninput = update;
 const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
-choose('layout', 'layout'); choose('sky', 'sky'); choose('frame', 'frame');
+choose('layout', 'layout'); choose('sky', 'sky'); choose('frame', 'frame'); choose('show', 'show');
 function sync() { for (const [k, set] of Object.entries(sliders)) set(p[k]); $('titleFont').value = p.titleFont; $('bodyFont').value = p.bodyFont; }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -180,7 +191,8 @@ const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 
 function detailLine(pl) {
   if ($('details').value.trim()) return $('details').value.trim();
   const [y, mo, d] = ($('date').value || '2000-01-01').split('-').map(Number);
-  return [pl.name, `${d} ${MONTHS[mo - 1]} ${y}`, $('time').value].filter(Boolean).join('  ·  ').toUpperCase();
+  const phase = p.show !== 'stars' && $('phaseWords').checked ? moonAt(pl, moment(pl.zone)).name : '';
+  return [pl.name, `${d} ${MONTHS[mo - 1]} ${y}`, $('time').value, phase].filter(Boolean).join('  ·  ').toUpperCase();
 }
 const size = () => p.layout === 'coaster' ? [p.diameter, p.diameter] : [p.width, p.height];
 function outline(g, k, inset) {
@@ -211,6 +223,36 @@ function arcText(g, text, cx, cy, r, sizePx, bottom, spacing) {
     g.restore();
     a += (bottom ? -1 : 1) * step;
   });
+  g.restore();
+}
+
+// The moon at (x, y) mm, radius r, in its phase. The lit part shows in the card's colour on a dark sky (a hole in
+// it), or in the design's colour on a plain card; the unlit part is drawn round with a thin line either way.
+// Seen from the north it waxes from the right; from the south, from the left.
+const SEAS = [[-0.3, -0.35, 0.24, 0.2], [0.15, -0.38, 0.15, 0.14], [0.3, -0.08, 0.17, 0.15], [0.62, -0.25, 0.1, 0.08],
+              [0.5, 0.18, 0.11, 0.14], [-0.2, 0.35, 0.16, 0.12], [-0.62, -0.02, 0.17, 0.32], [-0.45, 0.42, 0.08, 0.08]];
+function drawMoon(g, k, x, y, r, moon, south, dark, lw) {
+  const side = (moon.waxing ? 1 : -1) * (south ? -1 : 1), rx = r * Math.abs(1 - 2 * moon.lit), bulge = moon.lit < 0.5 ? 1 : -1;
+  const lit = new Path2D();
+  if (moon.lit > 0.003) {
+    lit.moveTo(x * k, (y - r) * k);
+    lit.arc(x * k, y * k, r * k, -Math.PI / 2, Math.PI / 2, side < 0);
+    // Back up along the terminator, half an ellipse.
+    for (let i = 0; i <= 48; ++i) { const t = Math.PI / 2 - Math.PI * i / 48; lit.lineTo((x + side * bulge * rx * Math.cos(t)) * k, (y + r * Math.sin(t)) * k); }
+    lit.closePath();
+  }
+  const ink = dark ? 'destination-out' : 'source-over', back = dark ? 'source-over' : 'destination-out';
+  g.save();
+  g.globalCompositeOperation = ink;
+  g.fill(lit);
+  // The seas: darker patches on the lit part, as the other colour.
+  if ($('seas').checked && r > 5 && moon.lit > 0.003) {
+    g.save(); g.clip(lit); g.globalCompositeOperation = back;
+    for (const [sx, sy, ax, ay] of SEAS) { g.beginPath(); g.ellipse((x + sx * r) * k, (y + sy * r) * k, ax * r * k, ay * r * k, 0, 0, 2 * Math.PI); g.fill(); }
+    g.restore();
+  }
+  // The whole disc's edge, so the dark part still shows its round.
+  g.lineWidth = lw * k; g.beginPath(); g.arc(x * k, y * k, r * k, 0, 2 * Math.PI); g.stroke();
   g.restore();
 }
 
@@ -262,6 +304,14 @@ function drawDesign(g, k, sky, pl) {
   if (dark) { clip(g); g.fill(); g.globalCompositeOperation = 'destination-out'; }
   else if (p.layout !== 'full') { g.lineWidth = lw * k; g.stroke(); }
   const X = q => (cx + q[0] * R) * k, Y = q => (cy + q[1] * R) * k;
+  const moon = moonAt(pl, moment(pl.zone)), south = pl.lat < 0;
+  if (p.show === 'moon') {
+    // The moon fills the sky, in its phase.
+    const room = p.layout === 'full' ? Math.min(w / 2 - frameGap - 2.5, cy - frameGap - 2.5) : R;
+    drawMoon(g, k, cx, cy, room * 0.82, moon, south, dark, lw);
+    g.restore();
+    return {cx, cy, R, moon};
+  }
   if ($('grid').checked) {
     g.lineWidth = lw * 0.8 * k; g.setLineDash([lw * 3 * k, lw * 3 * k]);
     for (const alt of [30, 60]) { g.beginPath(); g.arc(cx * k, cy * k, R * Math.tan((90 - alt) / 2 * D2R) * k, 0, 2 * Math.PI); g.stroke(); }
@@ -286,6 +336,22 @@ function drawDesign(g, k, sky, pl) {
     }
     g.beginPath(); g.arc(px, py, r * k, 0, 2 * Math.PI); g.fill();
   }
+  // Both: the moon where it was, if it was up; if not, at the top right of the sky, and the facts say so.
+  if (p.show === 'both') {
+    const up = moon.alt > 0, mr = R * 0.07 * p.moonSize / 100, at = up ? [moon.x, moon.y] : [0.55, -0.55];
+    // Keep the whole moon inside the sky: near the horizon it would be cut by the edge of the card or the circle.
+    const keep = (mr + 2 * lw) / R;
+    if (p.layout === 'full') {
+      const hx = (w / 2 - frameGap - 2.5) / R - keep, hy = (cy - frameGap - 2.5) / R - keep;
+      at[0] = Math.max(-hx, Math.min(hx, at[0])); at[1] = Math.max(-hy, Math.min(hy, at[1]));
+    } else { const d = Math.hypot(at[0], at[1]), most = 1 - keep; if (d > most) { at[0] *= most / d; at[1] *= most / d; } }
+    if (dark) {
+      // Clear a ring of sky round it, so stars and lines don't run into it.
+      g.globalCompositeOperation = 'source-over'; g.beginPath(); g.arc(X(at), Y(at), (mr + 1.2 * lw) * k, 0, 2 * Math.PI); g.fill();
+      g.globalCompositeOperation = 'destination-out';
+    } else { g.save(); g.globalCompositeOperation = 'destination-out'; g.beginPath(); g.arc(X(at), Y(at), (mr + 1.2 * lw) * k, 0, 2 * Math.PI); g.fill(); g.restore(); }
+    drawMoon(g, k, cx + at[0] * R, cy + at[1] * R, mr, moon, south, dark, lw);
+  }
   g.restore();
   if ($('grid').checked) {
     // The compass points, just outside a round sky, or just inside the edge of a full one.
@@ -299,7 +365,7 @@ function drawDesign(g, k, sky, pl) {
       g.fillText(c, (cx + dx * (hx + off)) * k, (cy + dy * (hy + off)) * k));
     g.globalCompositeOperation = 'source-over';
   }
-  return {cx, cy, R};
+  return {cx, cy, R, moon};
 }
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -356,7 +422,10 @@ function build() {
 let built = null, timer = 0;
 const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.classList.toggle('on', b.dataset[attr] === v); };
 function update() {
-  on('layout', p.layout); on('sky', p.sky); on('frame', p.frame);
+  on('layout', p.layout); on('sky', p.sky); on('frame', p.frame); on('show', p.show);
+  $('moonBox').classList.toggle('hidden', p.show === 'stars');
+  moonSizeRow.classList.toggle('hidden', p.show !== 'both');
+  for (const id of ['figures', 'grid', 'sparkle']) $(id).closest('label').classList.toggle('hidden', p.show === 'moon');
   $('customPlace').classList.toggle('hidden', $('city').value !== 'custom');
   for (const r of cardRows) r.classList.toggle('hidden', p.layout === 'coaster');
   roundRow.classList.toggle('hidden', p.layout !== 'coaster');
@@ -398,7 +467,9 @@ function render() {
   g.restore();
   const pl = place(), when = new Date(built.t);
   $('facts').textContent = `${w} × ${h} mm, ${built.size[2].toFixed(1)} mm thick; the sky over ${pl.name || 'the place'} at ` +
-    `${when.toISOString().slice(11, 16)} UTC, ${built.sky.stars.length} stars above the horizon. ` +
+    `${when.toISOString().slice(11, 16)} UTC, ` + (p.show === 'moon' ? '' : `${built.sky.stars.length} stars above the horizon. `) +
+    (p.show !== 'stars' ? `${built.layout.moon.name}, ${Math.round(built.layout.moon.lit * 100)}% lit` +
+      (p.show === 'both' && built.layout.moon.alt <= 0 ? ', below the horizon then, so it is shown at the top right of the sky. ' : '. ') : '') +
     `It prints face up as two parts of one object: Card, then Design from ${p.base} mm. Give Design your second filament in the object list, ` +
     `or with one nozzle add a filament change at ${p.base} mm in the layer slider. ` + ($('stand').checked ? 'The stand is a separate object.' : '');
 }
@@ -415,5 +486,6 @@ sync();
 update();
 post({cmd: 'ready'});
 </script>
+<script src="maker_state.js"></script>
 </body>
 </html>

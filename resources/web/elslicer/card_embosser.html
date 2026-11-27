@@ -119,6 +119,9 @@ const p = {card: 'eu', W: 85, H: 55, thick: 0.35, relief: 0.6, res: 0.25,
            pattern: 'diamonds', size: 6, line: 1, area: 'border', band: 10, border: 'line', inset: 3, bline: 1,
            repeat: 'grid', tileW: 8, tileGap: 2, tileRot: 0};
 let items = [], sel = -1, tab = 'card';
+// Remembered with p by maker_state.js: the words on the card (pictures are too big to keep).
+const MAKER_STATE_EXTRA = {get: () => items.filter(i => i.kind === 'text'),
+  set: v => { items.splice(0, items.length, ...items.filter(i => i.kind !== 'text'), ...v); sel = -1; listItems(); }};
 let tile = null, wanted = 'logo';   // the pattern's picture; which button the next picked picture is for
 
 // ---------------------------------------------------------------------------------------------------------------
@@ -752,5 +755,6 @@ showAll();
 update();
 post({cmd: 'ready'});
 </script>
+<script src="maker_state.js"></script>
 </body>
 </html>

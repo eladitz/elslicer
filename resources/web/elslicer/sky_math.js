@@ -116,3 +116,26 @@ function skyAt(pl, t, limit) {
   return {stars, lines, lst};
 }
 
+
+// The moon at time t from the place: where it is in the same projection as skyAt, and its phase. Low-precision
+// (about a degree in place, an hour or two in phase), plenty for a card. lit: the lit fraction of the disc, 0 to 1;
+// waxing: growing toward full; name: the phase in words.
+function moonAt(pl, t) {
+  const d = t / 86400000 + 2440587.5 - 2451545.0, r = D2R, n360 = a => ((a % 360) + 360) % 360;
+  const g = (357.528 + 0.9856003 * d) * r, sunLon = 280.460 + 0.9856474 * d + 1.915 * Math.sin(g) + 0.020 * Math.sin(2 * g);
+  const Mm = (134.963 + 13.064993 * d) * r, Ms = g, F = (93.272 + 13.229350 * d) * r, Dl = (297.850 + 12.190749 * d) * r;
+  const lon = 218.316 + 13.176396 * d + 6.289 * Math.sin(Mm) + 1.274 * Math.sin(2 * Dl - Mm) + 0.658 * Math.sin(2 * Dl)
+            - 0.186 * Math.sin(Ms) + 0.214 * Math.sin(2 * Mm);
+  const lat = 5.128 * Math.sin(F), eps = 23.439 * r, L = lon * r, B = lat * r;
+  const ra = n360(Math.atan2(Math.sin(L) * Math.cos(eps) - Math.tan(B) * Math.sin(eps), Math.cos(L)) / r);
+  const dec = Math.asin(Math.sin(B) * Math.cos(eps) + Math.cos(B) * Math.sin(eps) * Math.sin(L)) / r;
+  const lst = (280.46061837 + 360.98564736629 * d + pl.lon) % 360, sl = Math.sin(pl.lat * r), cl = Math.cos(pl.lat * r);
+  const H = (lst - ra) * r, dd = dec * r;
+  const alt = Math.asin(Math.max(-1, Math.min(1, sl * Math.sin(dd) + cl * Math.cos(dd) * Math.cos(H))));
+  const az = Math.atan2(-Math.cos(dd) * Math.sin(H), Math.sin(dd) * cl - Math.cos(dd) * sl * Math.cos(H));
+  const rr = Math.tan((Math.PI / 2 - alt) / 2);
+  const E = n360(lon - sunLon), lit = (1 - Math.cos(E * r)) / 2, waxing = E < 180;
+  const name = lit < 0.03 ? 'New moon' : lit > 0.97 ? 'Full moon' : Math.abs(lit - 0.5) < 0.06 ? (waxing ? 'First quarter' : 'Last quarter')
+             : `${waxing ? 'Waxing' : 'Waning'} ${lit < 0.5 ? 'crescent' : 'gibbous'}`;
+  return {x: -rr * Math.sin(az), y: -rr * Math.cos(az), alt, lit, waxing, name};
+}
