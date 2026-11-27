@@ -3,7 +3,10 @@
 // The page keeps its settings in a global `p` and redraws with a global `update()`, like every Elslicer maker.
 // A page with settings elsewhere too declares `MAKER_STATE_EXTRA = {get: () => value, set: value => {...}}`.
 // What is kept: p, the extra, and the values of the page's inputs (text, checkboxes, choices, sliders), so the
-// controls show what was restored. Pictures are not kept: they are too big for a maker's saved values.
+// controls show what was restored. A page that sets MAKER_STATE_PICTURE = true also has the last picture it was
+// given kept (made smaller, under its own key "picture") and given back to it as if just picked, marked kept (and
+// restored when the settings came back too, so the page leaves them as they are); it calls
+// makerPictureGone() when the picture is removed.
 //
 // The state is saved with the maker's own values (store_set "last") a moment after each change, and given back
 // when the maker opens (the "store" message), so it opens as it was left. Undo steps back through the last ten
@@ -87,16 +90,42 @@
     return out;
   };
 
+  // Pictures: at most 1200 pixels across, as JPEG unless they have clear parts, and smaller until they are under
+  // 600 kB, so they fit the maker's saved values.
+  const keepsPicture = () => typeof MAKER_STATE_PICTURE !== 'undefined' && MAKER_STATE_PICTURE;
+  function keepPicture(name, data) {
+    const img = new Image();
+    img.onload = () => {
+      const c = document.createElement('canvas'), g = c.getContext('2d', {willReadFrequently: true});
+      for (let most = 1200; most >= 300; most = Math.round(most * 0.75)) {
+        const s = Math.min(1, most / Math.max(img.width, img.height));
+        c.width = Math.max(1, Math.round(img.width * s)); c.height = Math.max(1, Math.round(img.height * s));
+        g.clearRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        const px = g.getImageData(0, 0, c.width, c.height).data;
+        let clear = false; for (let n = 3; n < px.length && !clear; n += 4) clear = px[n] < 250;
+        const small = clear ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', 0.9);
+        if (small.length < 600000) { send({cmd: 'store_set', key: 'picture', value: {name, data: small}}); return; }
+      }
+    };
+    img.src = data;
+  }
+  window.makerPictureGone = () => send({cmd: 'store_set', key: 'picture', value: null});
+
   // The saved state arrives with the maker's other values when it opens.
   const pageFromApp = window.fromApp;
   window.fromApp = message => {
     if (message && message.type === 'store') {
-      const last = message.data && message.data.last;
+      const last = message.data && message.data.last, pic = message.data && message.data.picture;
       if (last && !ready) { restoring = true; try { restore(last); update(); } finally { restoring = false; } }
       ready = true;
       steps = [snapshot()];
       draw();
+      if (pageFromApp) pageFromApp(message);
+      // The picture last time, given back as if just picked.
+      if (keepsPicture() && pic && pic.data && pageFromApp) pageFromApp({type: 'image', name: pic.name, data: pic.data, kept: true, restored: !!last});
+      return;
     }
+    if (message && message.type === 'image' && !message.error && message.data && !message.kept && keepsPicture()) keepPicture(message.name, message.data);
     if (pageFromApp) pageFromApp(message);
   };
   // Outside Elslicer (a browser) there is no store: start recording straight away.

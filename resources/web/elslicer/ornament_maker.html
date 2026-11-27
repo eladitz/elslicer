@@ -1015,7 +1015,7 @@ window.fromApp = message => {
     const img = new Image();
     img.onload = () => { picture = {img, name: message.name}; maskCache.key = '';
       $('pictureName').textContent = message.name; for (const e of document.querySelectorAll('.lithoName')) e.textContent = message.name;
-      if (p.kind === 'flat') p.scene = 'picture'; update(); };
+      if (p.kind === 'flat' && !message.restored) p.scene = 'picture'; update(); };
     img.src = message.data;
   }
 };
@@ -1030,6 +1030,7 @@ $('add').onclick = () => {
 update();
 post({cmd: 'ready'});
 </script>
+<script>var MAKER_STATE_PICTURE = true;</script>
 <script src="maker_state.js"></script>
 </body>
 </html>

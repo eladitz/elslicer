@@ -87,17 +87,29 @@
   <h3>Back and stand</h3>
   <div id="backSliders"></div>
   <div class="seg">
+    <button data-plug="none" title="Only the cable passes; plug it into the light inside">Cable only</button>
+    <button data-plug="usbc" title="Room for a USB-C plug to pass, 12 × 7 mm">USB-C</button>
+    <button data-plug="usba" title="Room for a USB-A plug to pass, 16 × 9 mm">USB-A</button>
+    <button data-plug="custom" title="Your own size">Custom</button>
+  </div>
+  <div id="plugSliders"></div>
+  <div id="cableSliders"></div>
+  <div class="seg">
     <button data-cable="hole" title="A round hole low in the back">Hole in the back</button>
     <button data-cable="slot" title="A slot up from the bottom edge of the back, so the plug needn't go through">Slot in the back</button>
     <button data-cable="side" title="An opening in the bottom of the sides, at the back edge; the cable lies flat out of the bottom">Out the bottom</button>
   </div>
   <label class="check"><input type="checkbox" id="keyholes"> Keyholes to hang it on a wall</label>
-  <div id="keySliders"></div>
+  <div id="keyBox">
+    <div class="seg"><button data-keyn="1">One keyhole</button><button data-keyn="2">Two keyholes</button></div>
+    <div id="keySliders"></div>
+  </div>
   <p class="muted" style="font-size:12px;margin:2px 0">Drag the keyholes and the cable's way out in the Front view. <a id="keyAuto" style="color:var(--accent);cursor:pointer">Put them back</a></p>
   <div class="seg">
     <button data-base="none">No stand</button>
-    <button data-base="stand" title="A foot with a slot the box stands in">Stand</button>
+    <button data-base="stand" title="A separate foot with a slot along it; the box's bottom edge pushes into the slot">Stand</button>
   </div>
+  <p class="muted hidden" id="standNote" style="font-size:12px;margin:4px 0">The stand is its own print: a foot with a slot as long as the box's bottom edge and as deep as the box. The box's lowest 6 mm push down into the slot and it stands up. It needs a flat stretch along the bottom; for a shape with a pointed bottom, hang it instead.</p>
 
   <h3>Printing</h3>
   <div class="seg">
@@ -136,7 +148,8 @@ const FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Arial Black', 'Impact
 const p = {shape: 'circle', W: 120, H: 120, corner: 10, margin: 6, depth: 40, wall: 2, front: 1.2, mode: 'lit',
            textSize: 26, lineGap: 1.1, picW: 60, picY: 0, threshold: 50, hole: 6, fit: 0.15, base: 'none', res: 0.35,
            colours: 2, paint: [], paintKey: '', cable: 'hole', look: 'box', split: 'one', skin: 0.4,
-           round: 2, keyD: 9.5, keyAt: null, cableX: null};
+           round: 2, keyD: 9.5, keyAt: null, cableX: null,
+           keyN: 2, keyFrom: 'auto', keyGap: 60, keyH: 60, keyMid: 0, cableFrom: 'auto', cableAt: 0, plug: 'none', plugW: 12, plugH: 7};
 
 const sliders = {};
 function slider(parent, key, label, min, max, step) {
@@ -169,6 +182,17 @@ slider($('backSliders'), 'hole', 'Cable mm', 0, 16, 0.5);
 slider($('backSliders'), 'fit', 'Back fit mm', 0, 0.5, 0.05);
 slider($('printSliders'), 'res', 'Detail mm', 0.2, 0.6, 0.01);
 slider($('keySliders'), 'keyD', 'Screw head mm', 6, 14, 0.5);
+// Where the keyholes and the cable go: worked out unless set here or dragged in the Front view. These sliders show
+// where they are; moving one fixes them there.
+const placed = (parent, key, label, min, max, step, what) => { const row = slider(parent, key, label, min, max, step);
+  for (const input of row.querySelectorAll('input')) input.addEventListener('input', () => { p[what] = 'set'; }, true);
+  for (const input of row.querySelectorAll('input')) input.addEventListener('change', () => { p[what] = 'set'; }, true);
+  return row; };
+const gapRow = placed($('keySliders'), 'keyGap', 'Apart mm', 10, 240, 0.5, 'keyFrom');
+placed($('keySliders'), 'keyH', 'Height mm', 5, 240, 0.5, 'keyFrom');
+placed($('keySliders'), 'keyMid', 'Side to side mm', -120, 120, 0.5, 'keyFrom');
+placed($('cableSliders'), 'cableAt', 'Along the bottom mm', -120, 120, 0.5, 'cableFrom');
+const plugRows = [slider($('plugSliders'), 'plugW', 'Plug width mm', 4, 30, 0.5), slider($('plugSliders'), 'plugH', 'Plug height mm', 2, 20, 0.5)];
 const skinRow = slider($('skinRow'), 'skin', 'White skin mm', 0, 0.6, 0.2);
 
 for (const f of FONTS) $('font').add(new Option(f, f));
@@ -176,7 +200,8 @@ $('font').value = 'Futura'; $('weight').value = '700';
 for (const id of ['font', 'weight', 'ink', 'sidesColour']) $(id).onchange = update;
 for (const id of ['text', 'invert', 'darkSides', 'glow', 'keyholes']) $(id).oninput = update;
 const choose = (attr, key) => { for (const b of document.querySelectorAll(`[data-${attr}]`)) b.onclick = () => { p[key] = b.dataset[attr]; update(); }; };
-choose('shape', 'shape'); choose('mode', 'mode'); choose('base', 'base'); choose('cable', 'cable'); choose('split', 'split');
+choose('shape', 'shape'); choose('mode', 'mode'); choose('base', 'base'); choose('cable', 'cable'); choose('split', 'split'); choose('plug', 'plug');
+for (const b of document.querySelectorAll('[data-keyn]')) b.onclick = () => { p.keyN = +b.dataset.keyn; p.keyFrom = 'auto'; p.keyAt = null; update(); };
 for (const b of document.querySelectorAll('[data-look]')) b.onclick = () => { p.look = b.dataset.look; aim(); update(); };
 
 // Starting points: words, shape, font and colours to change from.
@@ -201,7 +226,8 @@ for (const b of document.querySelectorAll('[data-start]')) b.onclick = () => {
   }
   if (s.shape === 'circle') sliders.H(p.W);
   if (!('darkSides' in s)) $('darkSides').checked = false;
-  if (!('keyholes' in s)) { $('keyholes').checked = false; p.cable = 'hole'; p.keyAt = null; p.cableX = null; }
+  if (!('keyholes' in s)) { $('keyholes').checked = false; p.cable = 'hole'; }
+  p.keyAt = null; p.keyFrom = 'auto'; p.cableFrom = 'auto';
   if (b.dataset.start === 'logo' && !picture) post({cmd: 'pick_image'});
   update();
 };
@@ -465,6 +491,9 @@ function field(L, mirror, z) {
   });
 }
 
+// Whether (x, y) is inside a rectangle of half sizes a × b round the origin, with corners of radius r.
+const inRoundRect = (x, y, a, b, r) => { const dx = Math.max(Math.abs(x) - (a - r), 0), dy = Math.max(Math.abs(y) - (b - r), 0);
+  return Math.abs(x) <= a && Math.abs(y) <= b && Math.hypot(dx, dy) <= r; };
 // Clears the parts of a mask smaller than `least` pixels, and gives how many there were.
 function dropSmall(m, W, least) {
   const seen = new Uint8Array(m.length); let count = 0;
@@ -554,21 +583,24 @@ function build(res) {
     for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + i]) return (cv.oy - j) / k; return null; };
   // Unless it was dragged, the cable goes where the bottom is flat for its width and the box is wide enough above
   // it, as near the middle as that allows.
-  let cableX = p.cableX;
+  // The opening's size: the cable, or room for its plug to pass.
+  const PLUGS = {usbc: [12, 7], usba: [16, 9], custom: [p.plugW, p.plugH]}, head = PLUGS[p.plug];
+  const openW = head ? Math.max(head[0], p.hole) : p.hole, openH = head ? Math.max(head[1], p.hole) : p.hole;
+  let cableX = p.cableFrom === 'set' ? p.cableAt : null;
   if (cableX == null && p.hole > 0) {
-    const need = p.hole / 2 + 2, span = Math.max(need, 15), ok = x => { const b0 = bottomAt(x);
+    const need = openW / 2 + 2, span = Math.max(need, 15), ok = x => { const b0 = bottomAt(x);
       if (b0 == null) return false;
       for (let d = -span; d <= span; d += 1) { const b = bottomAt(x + d); if (b == null || Math.abs(b - b0) > 1) return false; }
-      const n = at(x, b0 + p.wall + p.fit + 1.6 + p.hole + 3); return n >= 0 && outline[n] && inward[n] >= need * k; };
+      const n = at(x, b0 + p.wall + p.fit + 1.6 + openH + 3); return n >= 0 && outline[n] && inward[n] >= need * k; };
     const mid = (left + right) / 2;
     for (let d = 0; d <= (right - left) / 2 && cableX == null; d += 0.5) { if (ok(mid - d)) cableX = mid - d; else if (ok(mid + d)) cableX = mid + d; }
     if (cableX == null) cableX = mid;
   }
   if (p.hole > 0) {
-    const cx = Math.max(left + p.wall + p.hole, Math.min(right - p.wall - p.hole, cableX)), ic = Math.round(cx * k + cv.ox);
+    const cx = Math.max(left + p.wall + openW / 2, Math.min(right - p.wall - openW / 2, cableX)), ic = Math.round(cx * k + cv.ox);
     let jc = -1; for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + ic]) { jc = j; break; }
     if (jc >= 0) { const edge = (cv.oy - jc) / k;
-      hole = {x: cx, y: edge + p.wall + p.fit + 1.6 + p.hole / 2 + 2, r: p.hole / 2, edge, h: Math.min(p.hole, D - front - 2)}; }
+      hole = {x: cx, y: edge + p.wall + p.fit + 1.6 + openH / 2 + 2, r: openW / 2, rh: openH / 2, edge, h: Math.min(openH, D - front - 2), plug: !!head}; }
   }
   const sideCut = n => { if (!hole || p.cable !== 'side') return false;
     const x = (n % cv.W - cv.ox) / k, y = (cv.oy - Math.floor(n / cv.W)) / k;
@@ -595,21 +627,30 @@ function build(res) {
   const room = n => n >= 0 && outline[n] && inward[n] >= ring1 + (bossR - 1) * k;
   const fits = (x, y) => room(at(x, y)) && room(at(x, y + KL)) && room(at(x - bossR + 1, y + KL / 2)) && room(at(x + bossR - 1, y + KL / 2));
   if ($('keyholes').checked) {
-    if (p.keyAt && p.keyAt.length) {
-      for (const q of p.keyAt) keys.push([q[0], q[1]]);
-      if (keys.some(q => !fits(q[0], q[1]))) problems.push('A keyhole is too near the edge for its thicker plate; drag it further in.');
+    if (p.keyFrom === 'drag' && p.keyAt && p.keyAt.length) for (const q of p.keyAt) keys.push([q[0], q[1]]);
+    else if (p.keyFrom === 'set') {
+      const y = bottom + p.keyH;
+      if (p.keyN === 2) keys.push([p.keyMid - p.keyGap / 2, y], [p.keyMid + p.keyGap / 2, y]); else keys.push([p.keyMid, y]);
     } else {
-      const y = bottom + (top - bottom) * 0.62, w = (right - left) / 2, mid = (left + right) / 2;
-      let x = null; for (let f = 0.34; f >= 0.1; f -= 0.02) if (fits(mid - w * f, y) && fits(mid + w * f, y)) { x = w * f; break; }
-      if (x !== null) keys.push([mid - x, y], [mid + x, y]); else if (fits(mid, y)) keys.push([mid, y]);
-      else problems.push('There is no room for a keyhole inside the back; make it bigger, or hang it some other way.');
+      // As far apart as fits, from a third of the width each side of the middle inwards, 62% of the way up; or
+      // lower or higher if nothing fits there.
+      const w = (right - left) / 2, mid = (left + right) / 2;
+      for (const up of [0.62, 0.5, 0.72, 0.4, 0.82]) {
+        const y = bottom + (top - bottom) * up;
+        if (p.keyN === 2) { let x = null; for (let f = 0.4; f >= 0.08; f -= 0.01) if (fits(mid - w * f, y) && fits(mid + w * f, y)) { x = w * f; break; }
+          if (x !== null) { keys.push([mid - x, y], [mid + x, y]); break; } }
+        else { let x = null; for (let d = 0; d <= w && x === null; d += 1) { if (fits(mid - d, y)) x = mid - d; else if (fits(mid + d, y)) x = mid + d; }
+          if (x !== null) { keys.push([x, y]); break; } }
+      }
+      if (!keys.length) problems.push('There is no room for a keyhole inside the back; make it bigger, or hang it some other way.');
     }
+    if ((p.keyFrom !== 'auto') && keys.some(q => !fits(q[0], q[1]))) problems.push('A keyhole is too near the edge for its thicker plate; move it further in.');
   }
   const back = field(L, false, n => {
     if (!outline[n]) return null;
     const x = (n % cv.W - cv.ox) / k, y = (cv.oy - Math.floor(n / cv.W)) / k;
     if (hole && p.cable === 'slot' && Math.abs(x - hole.x) < hole.r && y < hole.y) return null;
-    if (hole && p.cable === 'hole' && Math.hypot(x - hole.x, y - hole.y) < hole.r) return null;
+    if (hole && p.cable === 'hole' && (hole.plug ? inRoundRect(x - hole.x, y - hole.y, hole.r, hole.rh, Math.min(hole.r, hole.rh) * 0.6) : Math.hypot(x - hole.x, y - hole.y) < hole.r)) return null;
     let thick = plate;
     for (const [kx, ky] of keys) {
       const dy = Math.max(0, Math.min(KL, y - ky)), d = Math.hypot(x - kx, y - ky - dy);
@@ -641,7 +682,7 @@ function build(res) {
   }
   if (L.block.empty) problems.push('Add words or a picture for the front.');
   if (p.mode !== 'one' && p.mode !== 'colours' && !wanted.length && !L.block.empty) problems.push('The design is too small to show.');
-  return {L, wanted, KR, KS, KL, box, inlays, pieces, apart, skin, seat, dropped, back, stand, problems, hole, keys, bottom, size: [cv.W / k, cv.H / k, D], front, plate};
+  return {L, wanted, KR, KS, KL, top, left, right, box, inlays, pieces, apart, skin, seat, dropped, back, stand, problems, hole, keys, bottom, size: [cv.W / k, cv.H / k, D], front, plate};
 }
 
 const viewer = new Lamp.Viewer($('canvas'));
@@ -657,6 +698,10 @@ function update() {
   const colours = p.mode === 'colours';
   $('paletteBox').classList.toggle('hidden', !colours); thresholdRow.classList.toggle('hidden', colours); $('invertRow').classList.toggle('hidden', colours);
   skinRow.classList.toggle('hidden', p.split !== 'apart');
+  on('plug', p.plug); on('keyn', String(p.keyN));
+  for (const r of plugRows) r.classList.toggle('hidden', p.plug !== 'custom');
+  $('keyBox').classList.toggle('hidden', !$('keyholes').checked); gapRow.classList.toggle('hidden', p.keyN !== 2);
+  $('standNote').classList.toggle('hidden', p.base !== 'stand');
   $('unpick').classList.toggle('hidden', !picture);
   drawPalette();
   clearTimeout(timer);
@@ -708,6 +753,13 @@ function render() {
       x += bhi[0] - blo[0] + 10;
     }
   }
+  // The placing sliders show where things are, worked out or dragged.
+  if (b.keys.length) {
+    const xs = b.keys.map(q => q[0]), ys = b.keys.map(q => q[1]);
+    sliders.keyMid((Math.min(...xs) + Math.max(...xs)) / 2); sliders.keyH(ys.reduce((a, v) => a + v, 0) / ys.length - b.bottom);
+    if (xs.length > 1) sliders.keyGap(Math.max(...xs) - Math.min(...xs));
+  }
+  if (b.hole) sliders.cableAt(b.hole.x);
   const flat = p.look === 'front';
   $('canvas').classList.toggle('hidden', flat); $('flat').classList.toggle('hidden', !flat);
   if (flat) drawFlat(); else viewer.show(parts, glow && p.look === 'box', false);
@@ -726,7 +778,7 @@ function render() {
     print = ` Print the box front down with no supports, and the back flat.` + (n ? ` Each colour is its own part (filament ${Object.values(fil).join(', ')}), inlaid 3 layers deep with a lip on the 4th layer that locks it into the white.` : '');
   }
   $('facts').textContent = `${f1(size[0])} × ${f1(size[1])} × ${f1(size[2] + b.plate)} mm. ${how}${print}` +
-    ` Light it with a USB LED puck or strip inside${b.hole ? `, its cable out through the ${p.cable === 'slot' ? 'slot' : `${f1(p.hole)} mm hole`} in the back` : ''}, then press the back in.` +
+    ` Light it with a USB LED puck or strip inside${b.hole ? `, its cable out through the ${p.cable === 'slot' ? 'slot' : b.hole.plug ? `${f1(2 * b.hole.r)} × ${f1(2 * b.hole.rh)} mm opening` : `${f1(p.hole)} mm hole`} in the back` : ''}, then press the back in.` +
     (b.keys.length === 2 ? ` Hang it from two screws ${f1(b.keys[1][0] - b.keys[0][0])} mm apart through the keyholes.` : b.keys.length ? ' Hang it from a screw through the keyhole.' : '');
 }
 
@@ -754,6 +806,7 @@ function drawFlat() {
   const px = (x, y) => [x0 + (x * k + ox) * s, y0 + (oy - y * k) * s], mm = (u, v) => [((u - x0) / s - ox) / k, (oy - (v - y0) / s) / k];
   flatMap = {px, mm, s: s * k};
   const S = s * k;
+  g.font = `${12 * devicePixelRatio}px -apple-system, sans-serif`; g.textAlign = 'center';
   g.fillStyle = 'rgba(20, 20, 24, .78)'; g.strokeStyle = 'rgba(255, 255, 255, .55)'; g.lineWidth = devicePixelRatio;
   for (const [kx, ky] of b.keys) {
     const [u, v] = px(kx, ky);
@@ -763,9 +816,12 @@ function drawFlat() {
   if (b.hole) {
     const [u, v] = px(b.hole.x, p.cable === 'hole' ? b.hole.y : b.hole.edge);
     g.beginPath();
-    if (p.cable === 'hole') g.arc(u, v, b.hole.r * S, 0, 2 * Math.PI);
+    if (p.cable === 'hole' && b.hole.plug) g.roundRect(u - b.hole.r * S, v - b.hole.rh * S, 2 * b.hole.r * S, 2 * b.hole.rh * S, Math.min(b.hole.r, b.hole.rh) * 0.6 * S);
+    else if (p.cable === 'hole') g.arc(u, v, b.hole.r * S, 0, 2 * Math.PI);
     else if (p.cable === 'slot') g.roundRect(u - b.hole.r * S, v - (b.hole.y - b.hole.edge) * S, 2 * b.hole.r * S, (b.hole.y - b.hole.edge) * S, 2);
     else g.rect(u - b.hole.r * S, v - (p.wall + 1) * S, 2 * b.hole.r * S, (p.wall + 1) * S + 2);
+    if (p.cable === 'side') { g.fill(); g.stroke(); g.fillStyle = 'rgba(255, 255, 255, .6)';
+      g.fillText(`${f1(2 * b.hole.r)} × ${f1(b.hole.h)} mm`, u, v + 16 * devicePixelRatio); g.fillStyle = 'rgba(20, 20, 24, .78)'; g.beginPath(); }
     g.fill(); g.stroke();
   }
   g.fillStyle = 'rgba(255, 255, 255, .5)'; g.font = `${12 * devicePixelRatio}px -apple-system, sans-serif`; g.textAlign = 'center';
@@ -782,7 +838,7 @@ function drawFlat() {
     b.keys.forEach((q, i) => { const d = Math.hypot(x - q[0], y - q[1] - b.KL / 2); if (d < bd) { bd = d; best = {key: i, dx: q[0] - x, dy: q[1] - y}; } });
     if (b.hole) { const d = Math.hypot(x - b.hole.x, y - (p.cable === 'hole' ? b.hole.y : b.hole.edge)); if (d < bd) best = {cable: true, dx: b.hole.x - x}; }
     if (!best) return;
-    if (best.key !== undefined && !(p.keyAt && p.keyAt.length)) p.keyAt = b.keys.map(q => [q[0], q[1]]);
+    if (best.key !== undefined) { p.keyAt = b.keys.map(q => [q[0], q[1]]); p.keyFrom = 'drag'; }
     drag = best; flatCanvas.setPointerCapture(e.pointerId);
   });
   flatCanvas.addEventListener('pointermove', e => {
@@ -790,14 +846,14 @@ function drawFlat() {
     const [u, v] = where(e), [x, y] = flatMap.mm(u, v);
     if (!drag) { const b = built; flatCanvas.style.cursor = b && (b.keys.some(q => Math.hypot(x - q[0], y - q[1] - b.KL / 2) < 12) ||
       (b.hole && Math.hypot(x - b.hole.x, y - (p.cable === 'hole' ? b.hole.y : b.hole.edge)) < 12)) ? 'grab' : 'default'; return; }
-    if (drag.cable) p.cableX = Math.round((x + drag.dx) * 2) / 2;
+    if (drag.cable) { p.cableAt = Math.round((x + drag.dx) * 2) / 2; p.cableFrom = 'set'; }
     else p.keyAt[drag.key] = [Math.round((x + drag.dx) * 2) / 2, Math.round((y + drag.dy) * 2) / 2];
     update();
   });
   flatCanvas.addEventListener('pointerup', () => { drag = null; });
   new ResizeObserver(() => { if (p.look === 'front' && built) drawFlat(); }).observe(flatCanvas);
 }
-$('keyAuto').onclick = () => { p.keyAt = null; p.cableX = null; update(); };
+$('keyAuto').onclick = () => { p.keyAt = null; p.keyFrom = 'auto'; p.cableFrom = 'auto'; update(); };
 
 window.fromApp = message => {
   if (message.type === 'printer') { printer = message; update(); }
@@ -809,7 +865,7 @@ window.fromApp = message => {
   }
 };
 $('pick').onclick = () => post({cmd: 'pick_image'});
-$('unpick').onclick = () => { picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'No picture.'; update(); };
+$('unpick').onclick = () => { if (window.makerPictureGone) makerPictureGone(); picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'No picture.'; update(); };
 $('cancel').onclick = () => post({cmd: 'close'});
 $('add').onclick = () => {
   const full = build(p.res), first = lines()[0], name = first ? `${first} lightbox` : picture ? `${picture.name.replace(/\.[^.]+$/, '')} lightbox` : 'Lightbox';
@@ -823,6 +879,7 @@ for (const [k, set] of Object.entries(sliders)) set(p[k]);
 document.querySelector('[data-start="open"]').click();
 post({cmd: 'ready'});
 </script>
+<script>var MAKER_STATE_PICTURE = true;</script>
 <script src="maker_state.js"></script>
 </body>
 </html>

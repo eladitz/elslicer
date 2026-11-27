@@ -55,7 +55,13 @@ user once before its first question, because the questions are billed to the use
 a global `p` and redraws with `update()` three things: it saves the settings (`store_set` key `last`) a moment
 after each change and restores them from the `store` message when the maker opens; Undo steps back through the
 last ten changes; Defaults puts back the page's starting settings. It keeps `p` and the values of the page's
-inputs, never pictures. A page with settings outside `p` declares `MAKER_STATE_EXTRA = {get, set}`.
+inputs. A page with settings outside `p` declares `MAKER_STATE_EXTRA = {get, set}`.
+
+A page built from a picture sets `MAKER_STATE_PICTURE = true` before loading it, so the last picture is kept too:
+downscaled to at most 1200 px and under 600 kB (the store holds 1 MB), as `store_set` key `picture`. When the maker
+opens it is handed back as an `image` message with `kept: true`, and `restored: true` when the settings came back
+too, so the page doesn't reset settings it would set for a newly picked picture. The page calls
+`makerPictureGone()` when the user removes the picture.
 
 ## Catalogue and updates
 

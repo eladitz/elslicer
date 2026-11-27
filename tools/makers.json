@@ -1,14 +1,14 @@
 [
   {"id": "box-maker", "name": "Box Maker", "page": "box_maker.html", "version": "1.2.0", "description": "Make a tray or box that prints without supports: dividers, lids, a handle or wall screws, or a box that prints flat and folds up"},
   {"id": "bag-maker", "name": "Bag Maker", "page": "bag_maker.html", "version": "1.2.0", "description": "Make a bag with handles and a raised pattern, printed in one piece in TPU"},
-  {"id": "stamp-maker", "name": "Stamp Maker", "page": "stamp_maker.html", "version": "1.2.0", "description": "Make an ink stamp from words, a border and a logo, with a handle"},
+  {"id": "stamp-maker", "name": "Stamp Maker", "page": "stamp_maker.html", "version": "1.3.0", "description": "Make an ink stamp from words, a border and a logo, with a handle"},
   {"id": "star-map", "name": "Star Map", "page": "star_map.html", "version": "1.2.0", "description": "Make a two-colour card of the real night sky over a place, on a date you choose"},
   {"id": "picture-frame", "name": "Picture Frame", "page": "picture_frame.html", "version": "1.2.0", "description": "Make a picture frame that pins together, with a back, clips, a stand and a mat"},
   {"id": "mask", "name": "Mask", "page": "mask_maker.html", "version": "1.2.0", "description": "Make a thin lace carnival mask that prints flat, with loops at the sides for elastic or ribbon"},
   {"id": "card-embosser", "name": "Card Embosser", "page": "card_embosser.html", "version": "1.2.0", "description": "Make rollers that press a pattern, logo or words into business cards as you turn a crank"},
   {"id": "tulle-card", "name": "Tulle Card Wrap", "page": "tulle_card.html", "version": "1.3.0", "description": "Print gold lines onto tulle that fold round a piece of card, with a name on the front, over Art Deco lines, roses, lace, daisies, leaves, hearts, stars, snowflakes or scallops"},
   {"id": "phone-case", "name": "Phone Case", "page": "phone_case.html", "version": "1.3.0", "permissions": ["ai"], "description": "Make a case for your phone, with a pattern, words or a picture on the back, a grip, a card wallet or a stand"},
-  {"id": "lightbox", "name": "Lightbox", "page": "lightbox.html", "version": "1.4.0", "description": "Make a box lit from inside, with your words or a picture on the front"},
+  {"id": "lightbox", "name": "Lightbox", "page": "lightbox.html", "version": "1.5.0", "description": "Make a box lit from inside, with your words or a picture on the front"},
   {"id": "lampshade", "name": "Lampshade", "page": "lampshade.html", "version": "1.2.0", "description": "Make a lampshade that fits your lamp holder, in a shape and pattern you choose"},
-  {"id": "lithophane", "name": "Lithophane", "page": "lithophane.html", "version": "1.2.0", "description": "Make a picture that shows when light shines through it: flat, curved, round or as a lamp"}
+  {"id": "lithophane", "name": "Lithophane", "page": "lithophane.html", "version": "1.3.0", "description": "Make a picture that shows when light shines through it: flat, curved, round or as a lamp"}
 ]

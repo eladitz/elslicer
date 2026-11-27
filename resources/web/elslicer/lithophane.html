@@ -570,7 +570,7 @@ window.fromApp = message => {
   else if (message.type === 'image') {
     if (message.error) { $('pictureName').textContent = message.error; return; }
     const img = new Image();
-    img.onload = () => { image = img; $('thumb').src = message.data; $('pictureName').textContent = message.name; fitHeight(); update(); };
+    img.onload = () => { image = img; $('thumb').src = message.data; $('pictureName').textContent = message.name; if (!message.restored) fitHeight(); update(); };
     img.src = message.data;
   }
 };
@@ -595,6 +595,7 @@ sync();
 update();
 post({cmd: 'ready'});
 </script>
+<script>var MAKER_STATE_PICTURE = true;</script>
 <script src="maker_state.js"></script>
 </body>
 </html>

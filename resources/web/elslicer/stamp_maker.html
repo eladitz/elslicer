@@ -433,7 +433,7 @@ window.fromApp = message => {
   }
 };
 $('pick').onclick = () => post({cmd: 'pick_image'});
-$('unpick').onclick = () => { picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'None'; update(); };
+$('unpick').onclick = () => { if (window.makerPictureGone) makerPictureGone(); picture = null; $('thumb').removeAttribute('src'); $('pictureName').textContent = 'None'; update(); };
 $('cancel').onclick = () => post({cmd: 'close'});
 $('add').onclick = () => {
   if (!built || built.problem) return;
@@ -444,6 +444,7 @@ sync();
 update();
 post({cmd: 'ready'});
 </script>
+<script>var MAKER_STATE_PICTURE = true;</script>
 <script src="maker_state.js"></script>
 </body>
 </html>
