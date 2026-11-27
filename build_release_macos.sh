@@ -316,6 +316,8 @@ function verify_python_runtime() {
 }
 
 function build_slicer() {
+    # Elslicer's makers, packed as the plugins shipped inside the app (resources/makers/*.elmaker).
+    python3 "$PROJECT_DIR/tools/publish_makers.py" --bundle
     # iterate over two architectures: x86_64 and arm64
     for _ARCH in x86_64 arm64; do
         # if ARCH is universal or equal to _ARCH

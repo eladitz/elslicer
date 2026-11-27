@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Makers</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: flex; flex-direction: column; height: 100vh; box-sizing: border-box; }
+  .list { flex: 1; overflow-y: auto; padding-right: 6px; }
+  h3 { margin: 18px 0 8px; font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  .maker { display: grid; grid-template-columns: 1fr auto; gap: 4px 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; margin: 6px 0; }
+  .maker b { font-size: 14px; }
+  .maker .about { color: var(--muted); font-size: 12px; grid-column: 1; }
+  .maker .tag { font-size: 11px; color: var(--muted); margin-left: 8px; font-weight: normal; }
+  .maker .tag.new { color: var(--accent); }
+  .maker .acts { grid-row: 1 / span 2; grid-column: 2; display: flex; gap: 6px; }
+  .acts button { padding: 5px 12px; font-size: 12px; }
+  #status { min-height: 18px; font-size: 13px; margin: 8px 0 0; }
+  .ask { font-size: 12px; color: var(--muted); }
+  .ask a { color: var(--accent); cursor: pointer; }
+</style>
+</head>
+<body>
+<h2 style="margin:0 0 4px">Makers</h2>
+<p class="muted" style="margin:0">Makers design a model from a few choices and add it to the plate. They install and update here, without a new Elslicer.</p>
+<p id="status" class="muted"></p>
+<div class="list">
+  <h3 id="updatesHead" class="hidden">Updates</h3>
+  <div id="updates"></div>
+  <h3>Installed</h3>
+  <div id="installed"></div>
+  <h3>On ai.itzkin.com</h3>
+  <div id="available"><p class="muted" style="font-size:13px">Looking…</p></div>
+  <p class="ask">Would you like to make makers of your own? <a id="poll">Say so on ai.itzkin.com/makers</a>, so we know whether to open it up.</p>
+</div>
+<div class="footer">
+  <button id="fromFile" title="A .elmaker package, or a single page made with maker_sdk.js">Install from a file…</button>
+  <button id="close" class="primary">Close</button>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+let installed = [], catalog = null, busy = new Set(), checkError = '', sure = null;
+
+// Version strings compared part by part, so 1.2.10 is newer than 1.2.9.
+const newer = (a, b) => { const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let k = 0; k < Math.max(x.length, y.length); ++k) { if ((x[k] || 0) !== (y[k] || 0)) return (x[k] || 0) > (y[k] || 0); } return false; };
+const esc = t => String(t ?? '').replace(/[&<>"]/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;'}[c]));
+const FROM = {bundled: 'came with Elslicer', catalog: 'from ai.itzkin.com', local: 'installed from a file'};
+
+function card(m, tags, acts) {
+  const div = document.createElement('div');
+  div.className = 'maker';
+  div.innerHTML = `<div><b>${esc(m.name)}</b>${tags}</div><div class="about">${esc(m.description)}</div><div class="acts"></div>`;
+  for (const [label, cls, fn] of acts) {
+    const b = document.createElement('button');
+    b.textContent = label; if (cls) b.className = cls; b.onclick = fn; b.disabled = busy.has(m.id);
+    div.querySelector('.acts').appendChild(b);
+  }
+  return div;
+}
+function draw() {
+  const entries = (catalog && catalog.makers) || [], byId = Object.fromEntries(entries.map(e => [e.id, e]));
+  const fresh = installed.filter(m => m.source !== 'local' && byId[m.id] && newer(byId[m.id].version, m.version) && (byId[m.id].min_api || 1) <= 1);
+  $('updatesHead').classList.toggle('hidden', !fresh.length);
+  $('updates').innerHTML = '';
+  for (const m of fresh) {
+    const e = byId[m.id];
+    $('updates').appendChild(card(m, `<span class="tag new">${esc(m.version)} → ${esc(e.version)}</span>`,
+      [[busy.has(m.id) ? 'Updating…' : 'Update', 'primary', () => install(m.id)]]));
+  }
+  $('installed').innerHTML = installed.length ? '' : '<p class="muted" style="font-size:13px">None.</p>';
+  for (const m of installed)
+    $('installed').appendChild(card(m, `<span class="tag">${esc(m.version)} · ${FROM[m.source] || ''}${(m.permissions || []).includes('ai') ? ' · may ask the AI service' : ''}</span>`,
+      [['Open', '', () => post({cmd: 'open', id: m.id})], [sure === m.id ? 'Sure? Remove' : 'Remove', '', () => { if (sure === m.id) { sure = null; post({cmd: 'remove', id: m.id}); } else { sure = m.id; draw(); } }]]));
+  const have = new Set(installed.map(m => m.id)), more = entries.filter(e => !have.has(e.id));
+  if (!catalog) { $('available').innerHTML = `<p class="muted" style="font-size:13px">${checkError ? 'Couldn\'t reach ai.itzkin.com: ' + esc(checkError) : 'Looking…'}</p>`; return; }
+  $('available').innerHTML = more.length ? '' : '<p class="muted" style="font-size:13px">You have every maker there.</p>';
+  for (const e of more) {
+    const tooNew = (e.min_api || 1) > 1;
+    $('available').appendChild(card(e, `<span class="tag">${esc(e.version)}${e.author ? ' · by ' + esc(e.author) : ''}${(e.permissions || []).includes('ai') ? ' · may ask the AI service' : ''}</span>`,
+      tooNew ? [['Needs a newer Elslicer', '', () => {}]] : [[busy.has(e.id) ? 'Installing…' : 'Install', 'primary', () => install(e.id)]]));
+  }
+}
+function install(id) { busy.add(id); $('status').textContent = ''; draw(); post({cmd: 'install', id}); }
+
+window.fromApp = message => {
+  if (message.type === 'state') { installed = message.installed || []; if (message.catalog && message.catalog.makers) catalog = catalog || message.catalog; draw(); }
+  else if (message.type === 'catalog') { if (message.catalog && message.catalog.makers) catalog = message.catalog; checkError = message.error || ''; draw(); }
+  else if (message.type === 'done') {
+    busy.delete(message.id);
+    $('status').className = message.error ? 'note warn' : 'muted';
+    const name = (installed.find(m => m.id === message.id) || {}).name || message.file || 'The maker';
+    $('status').textContent = message.error ? message.error : `${name} is installed. It's in the Make menu.`;
+    draw();
+  }
+};
+$('fromFile').onclick = () => post({cmd: 'install_file'});
+$('close').onclick = () => post({cmd: 'close'});
+$('poll').onclick = () => post({cmd: 'link'});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

@@ -60,20 +60,14 @@ std::optional<HeadWear> choose_head_wear(const std::string &name, const std::vec
                                          std::function<std::pair<int, bool>(const HeadWear &)> preview);
 // Makes a box that prints flat with grooved fold lines and folds up by hand, and adds it to the plate.
 void show_fold_box_dialog();
-// Makes a tray or box that prints upright without supports, with dividers, a lid, a handle or wall screws, and adds it.
-void show_box_maker_dialog();
-void show_stamp_maker_dialog();
-void show_bag_maker_dialog();
-// Makes a two-colour card of the real night sky over a place at a moment, and adds it with a stand.
-void show_star_map_dialog();
-// Makes a picture frame from mitred sides that pin together, with a back, clips, a stand and a mat, and adds it.
-void show_picture_frame_dialog();
-// Makes a thin lace carnival mask that prints flat, with loops for elastic or ribbon, and adds it.
-void show_mask_maker_dialog();
-// Makes a lampshade from a shape and a surface pattern, with a mount for the lamp holder it fits, and adds it.
-void show_lampshade_dialog();
-// Makes a flat, curved, round or lamp lithophane from a picture, and adds it.
-void show_lithophane_dialog();
+// Opens an installed maker plugin (see ElslicerMakers.hpp) by its id.
+void show_maker(const std::string &id);
+// The makers installed and the ones on ai.itzkin.com, to install, update or remove.
+void show_get_makers();
+// Fills a Make menu with the installed makers, the built-in Folding Box and Origami Animal, and Get More Makers;
+// it is filled again whenever makers are installed or removed. handler receives the menu commands.
+void append_make_menu(class wxMenu *menu, class wxEvtHandler *handler);
+void refresh_make_menus();
 // Adds smaller copies of the selected hollow object that each fit inside the one before, like nesting dolls.
 void show_nesting_doll_dialog();
 bool can_make_nesting_doll();

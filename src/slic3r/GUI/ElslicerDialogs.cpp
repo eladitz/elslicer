@@ -1,5 +1,6 @@
 #include "ElslicerDialogs.hpp"
 #include "ElslicerAI.hpp"
+#include "ElslicerMakers.hpp"
 
 #include "GUI.hpp"
 #include "GUI_App.hpp"
@@ -36,6 +37,7 @@
 
 #include <set>
 
+#include <boost/algorithm/string/predicate.hpp>
 #include <boost/filesystem.hpp>
 #include <boost/nowide/fstream.hpp>
 #include <boost/log/trivial.hpp>
@@ -48,6 +50,8 @@
 #include <wx/base64.h>
 #include <wx/filedlg.h>
 #include <wx/filename.h>
+#include <wx/filesys.h>
+#include <wx/weakref.h>
 #include <wx/image.h>
 #include <wx/mstream.h>
 #include <wx/utils.h>
@@ -71,15 +75,25 @@ namespace Slic3r { namespace GUI {
 namespace {
 
 // A dark window holding one page from resources/web/elslicer.
+// A page anywhere on disk, such as an installed maker's, rather than one of the app's own.
+struct PageFile
+{
+    boost::filesystem::path path;
+};
+
 class WebPageDialog : public DPIDialog
 {
 public:
     WebPageDialog(const wxString &title, const std::string &page, const wxSize &size)
+        : WebPageDialog(title, PageFile{boost::filesystem::path(resources_dir()) / "web/elslicer" / page}, size)
+    {}
+    WebPageDialog(const wxString &title, const PageFile &page, const wxSize &size)
         : DPIDialog(wxGetApp().mainframe, wxID_ANY, title, wxDefaultPosition, wxDefaultSize, wxCAPTION | wxCLOSE_BOX | wxRESIZE_BORDER)
     {
         SetBackgroundColour(wxColour(24, 25, 28));
-        const std::string path = (boost::filesystem::path(resources_dir()) / "web/elslicer" / page).make_preferred().string();
-        m_browser = WebView::CreateWebView(this, "file://" + from_u8(path));
+        // As a URL, with any spaces in the path (Application Support) escaped.
+        const wxString url = wxFileSystem::FileNameToURL(wxFileName(from_u8(boost::filesystem::path(page.path).make_preferred().string())));
+        m_browser = WebView::CreateWebView(this, url);
         auto *sizer = new wxBoxSizer(wxVERTICAL);
         if (m_browser != nullptr) {
             sizer->Add(m_browser, 1, wxEXPAND);
@@ -2874,6 +2888,7 @@ class SheetMakerDialog : public WebPageDialog
 {
 public:
     SheetMakerDialog(const wxString &title, const std::string &page) : WebPageDialog(title, page, wxSize(1060, 760)) {}
+    SheetMakerDialog(const wxString &title, const PageFile &page) : WebPageDialog(title, page, wxSize(1060, 760)) {}
 
 protected:
     void on_message(const std::string &cmd, const json &data) override
@@ -2884,7 +2899,8 @@ protected:
             send({{"type", "printer"},
                   {"bed", {bed.size().x(), bed.size().y()}},
                   {"height", config.opt_float("printable_height")},
-                  {"layer", config.opt_float("layer_height")}});
+                  {"layer", config.opt_float("layer_height")},
+                  {"api", Makers::API}});
         } else if (cmd == "pick_image")
             pick_image();
         else if (cmd == "add")
@@ -2977,55 +2993,267 @@ private:
     }
 };
 
+// An installed maker plugin. Besides the calls every maker page makes (ready, pick_image, add, close) it may keep
+// saved values of its own (store_set, sent back at start as {type: "store", data}) and, when its maker.json asks for
+// "ai", put one question to the AI service chosen in AI Setup, answered as JSON matching the page's schema.
+class MakerDialog : public SheetMakerDialog
+{
+public:
+    explicit MakerDialog(const Makers::Maker &maker)
+        : SheetMakerDialog(from_u8(maker.name), PageFile{maker.page()}), m_maker(maker), m_alive(std::make_shared<bool>(true))
+    {}
+    ~MakerDialog() override { *m_alive = false; }
+
+protected:
+    void on_message(const std::string &cmd, const json &data) override
+    {
+        if (cmd == "store_set") {
+            if (!Makers::store_set(m_maker.id, data.value("key", std::string()), data.contains("value") ? data["value"] : json()))
+                BOOST_LOG_TRIVIAL(warning) << "Maker " << m_maker.id << ": its saved values weren't kept (over 1 MB?)";
+        } else if (cmd == "ai") {
+            // Not on the stack of the page's message: asking first may show a dialog.
+            std::weak_ptr<bool> alive = m_alive;
+            wxGetApp().CallAfter([this, alive, data] {
+                if (!alive.expired())
+                    ask(data);
+            });
+        } else {
+            SheetMakerDialog::on_message(cmd, data);
+            if (cmd == "ready") {
+                send({{"type", "maker"}, {"id", m_maker.id}, {"version", m_maker.version}, {"api", Makers::API}});
+                send({{"type", "store"}, {"data", Makers::store(m_maker.id)}});
+            }
+        }
+    }
+
+private:
+    Makers::Maker         m_maker;
+    std::shared_ptr<bool> m_alive;
+
+    void ask(const json &data)
+    {
+        const std::string id   = data.value("id", std::string());
+        const auto        fail = [&](const std::string &error) { send({{"type", "ai"}, {"id", id}, {"error", error}}); };
+        if (!m_maker.may("ai"))
+            return fail(_u8L("This maker isn't allowed to use the AI service."));
+        if (!AI::usable("setup"))
+            return fail(_u8L("Choose an AI service in AI Setup first (Elslicer menu), then try again."));
+        // A maker from outside asks once before it spends the user's AI credit; the ones shipped with Elslicer say so on their page.
+        const std::string allowed = "elslicer_maker_ai_" + m_maker.id;
+        if (m_maker.source != "bundled" && wxGetApp().app_config->get(allowed) != "1") {
+            // TRN %1% is a maker's name, %2% the AI service, such as "Claude (Anthropic)".
+            MessageDialog ok(this, format_wxstr(_L("%1% wants to ask your AI service, %2%. Each question is billed by that service. Allow it for this maker?"),
+                                                from_u8(m_maker.name), from_u8(AI::provider_label("setup"))),
+                             _L("Use the AI service?"), wxYES_NO | wxICON_QUESTION);
+            if (ok.ShowModal() != wxID_YES)
+                return fail(_u8L("Not allowed."));
+            wxGetApp().app_config->set(allowed, "1");
+        }
+        AI::Request request;
+        request.system = data.value("system", std::string());
+        request.tools  = json::array({{{"name", data.value("name", std::string("answer"))},
+                                       {"description", data.value("description", std::string("The answer."))},
+                                       {"input_schema", data.value("schema", json{{"type", "object"}})}}});
+        request.messages   = json::array({{{"role", "user"}, {"content", data.value("prompt", std::string())}}});
+        request.max_tokens = std::clamp(data.value("max_tokens", 2000), 100, 8000);
+        request.timeout_s  = 90;
+        std::weak_ptr<bool> alive = m_alive;
+        AI::chat(AI::choice("setup"), request, [this, alive, id](const AI::Reply &reply) {
+            if (alive.expired())
+                return;
+            if (!reply.ok) {
+                send({{"type", "ai"}, {"id", id}, {"error", reply.error}});
+                return;
+            }
+            for (const json &block : reply.content)
+                if (block.value("type", "") == "tool_use") {
+                    send({{"type", "ai"}, {"id", id}, {"answer", block.value("input", json::object())}, {"provider", AI::provider_label("setup")}});
+                    return;
+                }
+            std::string text;
+            for (const json &block : reply.content)
+                text += block.value("text", "");
+            send({{"type", "ai"}, {"id", id}, {"error", text.empty() ? _u8L("The AI service gave no answer.") : text}});
+        });
+    }
+};
+
+// Get More Makers: the makers installed and the ones in the catalogue on ai.itzkin.com, to install, update or remove.
+class MakersDialog : public WebPageDialog
+{
+public:
+    MakersDialog() : WebPageDialog(_L("Makers"), "makers.html", wxSize(860, 680)), m_alive(std::make_shared<bool>(true)) {}
+    ~MakersDialog() override { *m_alive = false; }
+    std::string open_after;
+
+protected:
+    void on_message(const std::string &cmd, const json &data) override
+    {
+        const std::string   id    = data.value("id", std::string());
+        std::weak_ptr<bool> alive = m_alive;
+        if (cmd == "ready") {
+            send_state();
+            Makers::fetch_catalog([this, alive](const json &catalog, const std::string &error) {
+                if (alive.expired())
+                    return;
+                wxGetApp().app_config->set("elslicer_makers_checked", std::to_string(time(nullptr)));
+                refresh_make_menus();
+                send({{"type", "catalog"}, {"catalog", catalog}, {"error", error}});
+            });
+        } else if (cmd == "install") {
+            const json catalog = Makers::cached_catalog();
+            for (const json &entry : catalog.is_object() ? catalog.value("makers", json::array()) : json::array())
+                if (entry.value("id", "") == id) {
+                    Makers::download(entry, [this, alive, id](const std::string &error) {
+                        if (alive.expired())
+                            return;
+                        refresh_make_menus();
+                        send_state();
+                        send({{"type", "done"}, {"id", id}, {"error", error}});
+                    });
+                    return;
+                }
+            send({{"type", "done"}, {"id", id}, {"error", _u8L("That maker isn't in the catalogue.")}});
+        } else if (cmd == "remove") {
+            Makers::remove(id);
+            refresh_make_menus();
+            send_state();
+        } else if (cmd == "open") {
+            open_after = id;
+            wxGetApp().CallAfter([this, alive] {
+                if (!alive.expired())
+                    EndModal(wxID_OK);
+            });
+        } else if (cmd == "install_file") {
+            wxGetApp().CallAfter([this, alive] {
+                if (!alive.expired())
+                    install_from_file();
+            });
+        } else if (cmd == "link")
+            wxLaunchDefaultBrowser("https://ai.itzkin.com/makers/");
+    }
+
+private:
+    std::shared_ptr<bool> m_alive;
+
+    void send_state()
+    {
+        json list = json::array();
+        for (const Makers::Maker &m : Makers::installed())
+            list.push_back({{"id", m.id}, {"name", m.name}, {"description", m.description}, {"version", m.version},
+                            {"author", m.author}, {"source", m.source}, {"permissions", m.permissions}});
+        send({{"type", "state"}, {"installed", list}, {"catalog", Makers::cached_catalog()}, {"api", Makers::API}});
+    }
+
+    void install_from_file()
+    {
+        wxFileDialog dialog(this, _L("Install a maker"), wxEmptyString, wxEmptyString,
+                            _L("Makers") + " (*.elmaker;*.html;*.htm)|*.elmaker;*.html;*.htm", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+        if (dialog.ShowModal() != wxID_OK)
+            return;
+        const std::string path  = into_u8(dialog.GetPath());
+        const bool        page  = boost::iends_with(path, ".html") || boost::iends_with(path, ".htm");
+        const std::string error = page ? Makers::install_page(path) : Makers::install_file(path, "local");
+        refresh_make_menus();
+        send_state();
+        send({{"type", "done"}, {"id", ""}, {"error", error}, {"file", into_u8(wxFileName(dialog.GetPath()).GetFullName())}});
+    }
+};
+
 } // namespace
 
-void show_lampshade_dialog()
+void show_maker(const std::string &id)
 {
-    SheetMakerDialog dialog(_L("Lampshade"), "lampshade.html");
-    dialog.ShowModal();
+    const std::vector<Makers::Maker> makers = Makers::installed();
+    if (const Makers::Maker *maker = Makers::find(makers, id)) {
+        MakerDialog dialog(*maker);
+        dialog.ShowModal();
+    } else
+        show_error(wxGetApp().mainframe, _L("That maker isn't installed. Find it in Make > Get More Makers."));
 }
 
-void show_lithophane_dialog()
+void show_get_makers()
 {
-    SheetMakerDialog dialog(_L("Lithophane"), "lithophane.html");
-    dialog.ShowModal();
+    std::string open;
+    {
+        MakersDialog dialog;
+        dialog.ShowModal();
+        open = dialog.open_after;
+    }
+    if (!open.empty())
+        show_maker(open);
 }
 
-void show_box_maker_dialog()
+// The Make menus, filled from the installed makers and the ones built in, and filled again when makers change.
+namespace {
+struct MakeMenu
 {
-    SheetMakerDialog dialog(_L("Box Maker"), "box_maker.html");
-    dialog.ShowModal();
+    wxWeakRef<wxMenu> menu;
+    wxEvtHandler     *handler;
+};
+std::vector<MakeMenu> make_menus;
+
+void fill_make_menu(wxMenu *menu, wxEvtHandler *handler)
+{
+    while (menu->GetMenuItemCount() > 0)
+        menu->Destroy(menu->FindItemByPosition(0));
+    struct Item
+    {
+        wxString              name, help;
+        std::function<void()> open;
+    };
+    std::vector<Item> items;
+    for (const Makers::Maker &m : Makers::installed()) {
+        const std::string id = m.id;
+        items.push_back({from_u8(m.name), from_u8(m.description), [id] { show_maker(id); }});
+    }
+    // These two work on the selected object too, so they stay part of Elslicer.
+    items.push_back({_L("Folding Box"), _L("Make a box that prints flat and folds up by hand, without glue"), [] { show_fold_box_dialog(); }});
+    items.push_back({_L("Origami Animal"), _L("Make a folded animal or mask, or fold up the selected object, from flat sheets"), [] { show_origami_dialog(); }});
+    std::sort(items.begin(), items.end(), [](const Item &a, const Item &b) { return a.name.CmpNoCase(b.name) < 0; });
+    for (const Item &item : items) {
+        const auto open = item.open;
+        append_menu_item(menu, wxID_ANY, item.name + dots, item.help, [open](wxCommandEvent &) { open(); }, "", handler);
+    }
+    menu->AppendSeparator();
+    const int updates = Makers::updates_available();
+    const wxString more = updates > 0 ? format_wxstr(_L_PLURAL("Get More Makers (%1% update)", "Get More Makers (%1% updates)", updates), updates)
+                                      : _L("Get More Makers");
+    append_menu_item(menu, wxID_ANY, more + dots, _L("Install, update or remove makers, from ai.itzkin.com"),
+                     [](wxCommandEvent &) { show_get_makers(); }, "", handler);
+}
+} // namespace
+
+void append_make_menu(wxMenu *menu, wxEvtHandler *handler)
+{
+    make_menus.erase(std::remove_if(make_menus.begin(), make_menus.end(), [](const MakeMenu &m) { return !m.menu; }), make_menus.end());
+    make_menus.push_back({menu, handler});
+    fill_make_menu(menu, handler);
+    // Once a day, see whether the catalogue has newer makers, so the menu can say so.
+    static bool checked = false;
+    if (!checked) {
+        checked = true;
+        const std::string last = wxGetApp().app_config->get("elslicer_makers_checked");
+        const time_t      now  = time(nullptr);
+        if (last.empty() || now - std::atoll(last.c_str()) > 24 * 3600)
+            wxGetApp().CallAfter([now] {
+                Makers::fetch_catalog([now](const json &catalog, const std::string &) {
+                    if (!catalog.is_null()) {
+                        wxGetApp().app_config->set("elslicer_makers_checked", std::to_string(now));
+                        refresh_make_menus();
+                    }
+                });
+            });
+    }
 }
 
-void show_stamp_maker_dialog()
+void refresh_make_menus()
 {
-    SheetMakerDialog dialog(_L("Stamp Maker"), "stamp_maker.html");
-    dialog.ShowModal();
+    for (const MakeMenu &m : make_menus)
+        if (m.menu)
+            fill_make_menu(m.menu, m.handler);
 }
 
-void show_bag_maker_dialog()
-{
-    SheetMakerDialog dialog(_L("Bag Maker"), "bag_maker.html");
-    dialog.ShowModal();
-}
-
-void show_star_map_dialog()
-{
-    SheetMakerDialog dialog(_L("Star Map"), "star_map.html");
-    dialog.ShowModal();
-}
-
-void show_picture_frame_dialog()
-{
-    SheetMakerDialog dialog(_L("Picture Frame"), "picture_frame.html");
-    dialog.ShowModal();
-}
-
-void show_mask_maker_dialog()
-{
-    SheetMakerDialog dialog(_L("Mask Maker"), "mask_maker.html");
-    dialog.ShowModal();
-}
 
 namespace {
 

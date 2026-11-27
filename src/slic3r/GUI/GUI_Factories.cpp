@@ -1698,28 +1698,8 @@ MenuFactory::MenuFactory()
 // Elslicer's tools that add models, in a Make submenu under Add Models in the plate's right-click menus.
 static void append_menu_items_make_models(wxMenu* menu, wxWindow* parent)
 {
-    const auto can_add = []() { return wxGetApp().plater()->can_add_model(); };
     auto make = new wxMenu();
-    append_menu_item(make, wxID_ANY, _L("Box Maker") + dots, _L("Make a tray or box that prints without supports: dividers, lids, a handle or wall screws"),
-        [](wxCommandEvent&) { show_box_maker_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Bag Maker") + dots, _L("Make a bag with handles and a raised pattern, printed in one piece in TPU"),
-        [](wxCommandEvent&) { show_bag_maker_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Stamp Maker") + dots, _L("Make an ink stamp from words, a border and a logo, with a handle"),
-        [](wxCommandEvent&) { show_stamp_maker_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Star Map") + dots, _L("Make a two-colour card of the real night sky over a place, on a date you choose"),
-        [](wxCommandEvent&) { show_star_map_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Picture Frame") + dots, _L("Make a picture frame that pins together, with a back, clips, a stand and a mat"),
-        [](wxCommandEvent&) { show_picture_frame_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Mask") + dots, _L("Make a thin lace carnival mask that prints flat, with loops at the sides for elastic or ribbon"),
-        [](wxCommandEvent&) { show_mask_maker_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Folding Box") + dots, _L("Make a box that prints flat and folds up by hand, without glue"),
-        [](wxCommandEvent&) { show_fold_box_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Lampshade") + dots, _L("Make a lampshade that fits your lamp holder, in a shape and pattern you choose"),
-        [](wxCommandEvent&) { show_lampshade_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Lithophane") + dots, _L("Make a picture that shows when light shines through it: flat, curved, round or as a lamp"),
-        [](wxCommandEvent&) { show_lithophane_dialog(); }, "", make, can_add, parent);
-    append_menu_item(make, wxID_ANY, _L("Origami Animal") + dots, _L("Make a folded animal or mask, or fold up the selected object, from flat sheets"),
-        [](wxCommandEvent&) { show_origami_dialog(); }, "", make, can_add, parent);
+    append_make_menu(make, make);
     append_submenu(menu, make, wxID_ANY, _L_CONTEXT("Make", "Menu"), "", "menu_add_part", []() { return true; }, parent);
     append_menu_item(menu, wxID_ANY, _L("Nesting Doll Copy") + dots, _L("Add smaller copies of the selected hollow object that fit inside it"),
         [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "menu_add_part", menu, []() { return can_make_nesting_doll(); }, parent);

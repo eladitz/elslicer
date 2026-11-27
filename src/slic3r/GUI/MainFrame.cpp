@@ -3911,26 +3911,7 @@ void MainFrame::init_menubar_as_editor()
         [](wxCommandEvent&) { show_nesting_doll_dialog(); }, "", nullptr, []() { return can_make_nesting_doll(); }, this);
     // Make: the pages that design a model from a few choices and add it to the plate.
     auto make_menu = new wxMenu();
-    append_menu_item(make_menu, wxID_ANY, _L("Box Maker") + dots, _L("Make a tray or box that prints without supports: dividers, lids, a handle or wall screws"),
-        [](wxCommandEvent&) { show_box_maker_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Bag Maker") + dots, _L("Make a bag with handles and a raised pattern, printed in one piece in TPU"),
-        [](wxCommandEvent&) { show_bag_maker_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Stamp Maker") + dots, _L("Make an ink stamp from words, a border and a logo, with a handle"),
-        [](wxCommandEvent&) { show_stamp_maker_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Star Map") + dots, _L("Make a two-colour card of the real night sky over a place, on a date you choose"),
-        [](wxCommandEvent&) { show_star_map_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Picture Frame") + dots, _L("Make a picture frame that pins together, with a back, clips, a stand and a mat"),
-        [](wxCommandEvent&) { show_picture_frame_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Mask") + dots, _L("Make a thin lace carnival mask that prints flat, with loops at the sides for elastic or ribbon"),
-        [](wxCommandEvent&) { show_mask_maker_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Folding Box") + dots, _L("Make a box that prints flat and folds up by hand, without glue"),
-        [](wxCommandEvent&) { show_fold_box_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Lampshade") + dots, _L("Make a lampshade that fits your lamp holder, in a shape and pattern you choose"),
-        [](wxCommandEvent&) { show_lampshade_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Lithophane") + dots, _L("Make a picture that shows when light shines through it: flat, curved, round or as a lamp"),
-        [](wxCommandEvent&) { show_lithophane_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
-    append_menu_item(make_menu, wxID_ANY, _L("Origami Animal") + dots, _L("Make a folded animal or mask, or fold up the selected object, from flat sheets"),
-        [](wxCommandEvent&) { show_origami_dialog(); }, "", nullptr, [this]() { return m_plater->is_view3D_shown(); }, this);
+    append_make_menu(make_menu, make_menu);
     m_menubar->Append(make_menu, wxString::Format("&%s", _L_CONTEXT("Make", "Menu")));
     m_menubar->Append(elslicer_menu, wxString::Format("&%s", _L("Print Tools")));
     if (helpMenu)

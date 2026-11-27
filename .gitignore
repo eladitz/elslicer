@@ -55,3 +55,6 @@ __pycache__/
 /.test/
 docs/superpowers/
 ctest_results.xml
+
+# Elslicer makers packed at build time by tools/publish_makers.py --bundle
+/resources/makers/

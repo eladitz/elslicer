@@ -585,6 +585,8 @@ set(SLIC3R_GUI_SOURCES
     GUI/ElslicerAI.cpp
     GUI/ElslicerAI.hpp
     GUI/ElslicerDialogs.hpp
+    GUI/ElslicerMakers.cpp
+    GUI/ElslicerMakers.hpp
     GUI/WebGuideDialog.cpp
     GUI/WebGuideDialog.hpp
     GUI/WebUserLoginDialog.cpp
