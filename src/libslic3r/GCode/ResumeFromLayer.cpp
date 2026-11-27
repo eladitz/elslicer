@@ -148,6 +148,26 @@ std::string fmt(double value)
     return s;
 }
 
+// Adds `shift` to the Z of a move, keeping the rest of the line as it is.
+std::string shift_z(const std::string &line, double shift)
+{
+    const std::string code = strip_comment(line);
+    const std::string cmd  = command_of(code);
+    if (cmd != "G0" && cmd != "G1" && cmd != "G2" && cmd != "G3")
+        return line;
+    const std::size_t end = line.find(';');
+    for (std::size_t i = 1; i < std::min(end, line.size()); ++i) {
+        if ((line[i] == 'Z' || line[i] == 'z') && std::isspace(static_cast<unsigned char>(line[i - 1]))) {
+            char        *stop  = nullptr;
+            const double value = std::strtod(line.c_str() + i + 1, &stop);
+            if (stop == line.c_str() + i + 1)
+                return line;
+            return line.substr(0, i + 1) + fmt(value + shift) + line.substr(stop - line.c_str());
+        }
+    }
+    return line;
+}
+
 } // namespace
 
 std::vector<Layer> scan_layers(const std::string &path)
@@ -201,8 +221,12 @@ ZMethod method_for_printer(const std::string &gcode_flavor, const std::string &p
         verified = false;
         return ZMethod::G92;
     }
-    if (gcode_flavor == "klipper")
+    if (gcode_flavor == "klipper") {
+        // Flashforge's profiles say Klipper, but their stock firmware is their own build of it.
+        if (printer_model.find("Flashforge") != std::string::npos)
+            verified = false;
         return ZMethod::Klipper;
+    }
     if (gcode_flavor == "marlin" || gcode_flavor == "marlin2" || gcode_flavor == "reprapfirmware")
         return ZMethod::G92;
     return ZMethod::None;
@@ -227,17 +251,37 @@ Result write_resume_file(const Options &o)
     const std::vector<Layer> layers = scan_layers(o.source);
     if (layers.empty())
         return fail("No layer markers found. Slice the model with Orca or Elslicer first.");
-    if (o.layer < 2 || o.layer > int(layers.size()))
+    int chosen = o.layer;
+    if (o.from_z > 0.) {
+        // The first layer whose bottom is at or above the part's top. Its bottom is the layer below's top.
+        chosen = 0;
+        for (std::size_t i = 1; i < layers.size(); ++i)
+            if (layers[i - 1].z >= o.from_z - 0.005) {
+                chosen = int(i) + 1;
+                break;
+            }
+        if (chosen == 0)
+            return fail("The newly sliced print is no taller than what's already printed, so there's nothing left to print.");
+    }
+    if (chosen < 2 || chosen > int(layers.size()))
         return fail("Choose a layer between 2 and " + std::to_string(layers.size()) + ".");
 
-    const Layer &first = layers[o.layer - 1];
-    const Layer &prev  = layers[o.layer - 2];
+    const Layer &first = layers[chosen - 1];
+    const Layer &prev  = layers[chosen - 2];
     if (first.z <= 0. || prev.z <= 0.)
         return fail("The file doesn't record the height of this layer.");
     if (first.z <= prev.z)
         return fail("Layer heights go backwards here, which usually means objects are printed one at a time. Continuing isn't safe.");
-    r.declared_z  = prev.z;
-    r.layers_left = int(layers.size()) - o.layer + 1;
+    for (std::size_t i = chosen; i < layers.size(); ++i)
+        if (layers[i].z < layers[i - 1].z - 1e-6)
+            return fail("Layer heights go backwards later in the file, which usually means objects are printed one at a time. Continuing isn't safe.");
+    const double shift = o.from_z > 0. ? o.from_z - prev.z : 0.;
+    if (std::abs(shift) > 0.3)
+        return fail("The new layers don't line up with the part's top. Check the layer height.");
+    r.declared_z  = prev.z + shift;
+    r.layers_left = int(layers.size()) - chosen + 1;
+    r.first_layer = chosen;
+    r.z_shift     = shift;
 
     // First pass: read the state up to the chosen layer, and check everything after it.
     State       state;
@@ -315,14 +359,21 @@ Result write_resume_file(const Options &o)
 
         for (const std::string &line : header)
             out << line << '\n';
-        out << "; Elslicer: continue from layer " << o.layer << " of " << layers.size() << " (Z=" << fmt(first.z) << ")\n";
-        out << "; The nozzle must be at Z=" << fmt(prev.z) << " (touching the top of layer " << prev.number << ") when this job starts.\n";
+        out << "; Elslicer: continue from layer " << chosen << " of " << layers.size() << " (Z=" << fmt(first.z + shift) << ")\n";
+        if (shift != 0.)
+            out << "; Every height below is moved by " << fmt(shift) << " mm so the first layer sits on the part's top at Z=" << fmt(o.from_z) << "\n";
+        if (o.method == ZMethod::Kept)
+            out << "; The printer must still know its height from the print that was paused and cancelled.\n";
+        else
+            out << "; The nozzle must be at Z=" << fmt(prev.z + shift) << " (touching the top of layer " << prev.number << ") when this job starts.\n";
         out << "; Bed first, so the part stays stuck\n";
         if (state.chamber > 0.)
             out << "M141 S" << fmt(state.chamber) << '\n';
         out << "M190 S" << fmt(state.bed) << '\n';
-        out << "; Set the height without homing Z\n";
-        out << (o.method == ZMethod::Klipper ? "SET_KINEMATIC_POSITION Z=" : "G92 Z") << fmt(prev.z) << '\n';
+        if (o.method != ZMethod::Kept) {
+            out << "; Set the height without homing Z\n";
+            out << (o.method == ZMethod::Klipper ? "SET_KINEMATIC_POSITION Z=" : "G92 Z") << fmt(prev.z + shift) << '\n';
+        }
         out << "G91\nG1 Z" << fmt(o.clearance) << " F600\nG90\n";
         out << "G28 X Y\n";
         out << "; Nozzles\n";
@@ -344,7 +395,7 @@ Result write_resume_file(const Options &o)
         for (const auto &[key, code] : state.sticky)
             out << code << '\n';
         out << "G1 X" << fmt(first_x) << " Y" << fmt(first_y) << " F6000\n";
-        out << "G1 Z" << fmt(first.z) << " F600\n";
+        out << "G1 Z" << fmt(first.z + shift) << " F600\n";
         if (state.feed > 0.)
             out << "G1 F" << fmt(state.feed) << '\n';
         out << "; Original file continues\n";
@@ -354,7 +405,7 @@ Result write_resume_file(const Options &o)
         std::size_t   number = 0;
         while (std::getline(in, line)) {
             if (number >= first.line)
-                out << line << '\n';
+                out << (shift != 0. ? shift_z(line, shift) : line) << '\n';
             ++number;
         }
         if (!out.good()) {

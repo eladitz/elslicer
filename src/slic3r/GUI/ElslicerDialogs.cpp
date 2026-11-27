@@ -5,6 +5,7 @@
 #include "GUI.hpp"
 #include "GUI_App.hpp"
 #include "GUI_ObjectList.hpp"
+#include "GLToolbar.hpp"
 #include "GUI_Utils.hpp"
 #include "format.hpp"
 #include "I18N.hpp"
@@ -1984,6 +1985,218 @@ void show_open_chooser_dialog()
     // Choosing what to print with leads straight on to how to print it.
     if (dialog.chosen())
         show_ai_setup_dialog();
+}
+
+namespace {
+
+// What the next send needs to continue a paused print, set by the change-settings window.
+std::map<std::string, std::string> s_continuation;
+
+// "Pause to change setting": the printer paused at the end of a layer. The user changes print settings,
+// and the plate is sliced again and sent so that it carries on from the next layer.
+class ChangeSettingsDialog : public WebPageDialog
+{
+public:
+    static void open(const json &paused)
+    {
+        if (s_open == nullptr)
+            s_open = new ChangeSettingsDialog();
+        s_open->m_paused = paused;
+        s_open->find_height();
+        s_open->Show();
+        s_open->Raise();
+        if (s_open->m_ready)
+            s_open->send_state();
+    }
+
+    ~ChangeSettingsDialog() override
+    {
+        if (s_open == this)
+            s_open = nullptr;
+    }
+
+protected:
+    void on_message(const std::string &cmd, const json &data) override
+    {
+        if (cmd == "ready") {
+            m_ready = true;
+            send_state();
+        } else if (cmd == "check") {
+            if (data.contains("layer"))
+                m_paused["layer"] = data.at("layer").get<int>();
+            find_height();
+            send_state();
+        } else if (cmd == "apply") {
+            std::vector<std::pair<std::string, std::string>> changes;
+            json rows = json::array();
+            const PrintJournal::Settings current = PrintJournal::settings_from(wxGetApp().preset_bundle->full_config());
+            for (const auto &[key, value] : data.at("changes").items())
+                rows.push_back(describe_change(key, value.get<std::string>(), current, &changes));
+            json dropped = json::array();
+            if (!changes.empty())
+                dropped = load_print_changes(changes, "Changed mid-print ");
+            send_state();
+            send({{"type", "applied"}, {"rows", rows}, {"dropped", dropped}});
+        } else if (cmd == "send") {
+            if (m_z <= 0.)
+                return;
+            const DynamicPrintConfig &printer = wxGetApp().preset_bundle->printers.get_edited_preset().config;
+            double bed_x = 0., bed_y = 0.;
+            if (const auto *area = printer.option<ConfigOptionPoints>("printable_area"))
+                for (const Vec2d &point : area->values) {
+                    bed_x = std::max(bed_x, point.x());
+                    bed_y = std::max(bed_y, point.y());
+                }
+            std::string nozzles;
+            for (const json &temp : m_paused.value("nozzles", json::array()))
+                nozzles += (nozzles.empty() ? "" : ",") + std::to_string(temp.is_number() ? int(temp.get<double>()) : -1);
+            s_continuation = {{"continueFromZ", std::to_string(m_z)},
+                              {"continueBedX", std::to_string(bed_x)},
+                              {"continueBedY", std::to_string(bed_y)},
+                              {"continueBed", std::to_string(int(m_paused.value("bed", 0.)))},
+                              {"continueChamber", std::to_string(int(m_paused.value("chamber", 0.)))},
+                              {"continueNozzles", nozzles}};
+            // Slice with the new settings first: the file name and the send window need a finished slice.
+            m_waited = 0;
+            wxPostEvent(wxGetApp().plater(), SimpleEvent(EVT_GLTOOLBAR_SLICE_PLATE));
+            send({{"type", "slicing"}});
+            m_slice_timer.Start(500);
+        }
+    }
+
+private:
+    ChangeSettingsDialog() : WebPageDialog(_L("Pause to Change Setting"), "change_settings.html", wxSize(600, 720))
+    {
+        Bind(wxEVT_CLOSE_WINDOW, [this](wxCloseEvent &) {
+            m_slice_timer.Stop();
+            s_continuation.clear();
+            Destroy();
+        });
+        m_slice_timer.Bind(wxEVT_TIMER, [this](wxTimerEvent &) { check_slice(); });
+    }
+
+    // Waits for the slice started by "send", then opens the usual send window.
+    void check_slice()
+    {
+        Plater    *plater = wxGetApp().plater();
+        PartPlate *plate  = plater->get_partplate_list().get_curr_plate();
+        ++m_waited;
+        if (plater->is_background_process_slicing() || plate == nullptr || !plate->is_slice_result_ready_for_print()) {
+            // Slicing stopped without a result, such as an error shown in the 3D view: 5 s idle after a 3 s start.
+            m_idle_checks = m_waited > 6 && !plater->is_background_process_slicing() ? m_idle_checks + 1 : 0;
+            if (m_idle_checks >= 10 || m_waited > 2 * 60 * 15) {
+                m_slice_timer.Stop();
+                m_idle_checks = 0;
+                s_continuation.clear();
+                send({{"type", "slice_failed"}});
+            }
+            return;
+        }
+        m_slice_timer.Stop();
+        m_idle_checks = 0;
+        Hide();
+        // The usual send asks about filament slots; then the upload continues the print.
+        wxGetApp().CallAfter([] {
+            wxGetApp().plater()->send_gcode_legacy(PLATE_CURRENT_IDX, nullptr);
+            // Cancelled before the upload took it, so nothing is waiting any more.
+            s_continuation.clear();
+        });
+    }
+
+    // The height of the top of the last finished layer, from the file that's printing.
+    void find_height()
+    {
+        m_z = 0.;
+        m_from.clear();
+        m_problem.clear();
+        const int layer  = m_paused.value("layer", 0);
+        const int layers = m_paused.value("layers", 0);
+        const auto try_file = [&](const std::string &path, const std::string &from) {
+            if (m_z > 0. || path.empty() || !boost::filesystem::exists(path))
+                return;
+            const std::vector<ResumeFromLayer::Layer> found = ResumeFromLayer::scan_layers(path);
+            if (int(found.size()) != layers || layer < 1 || layer >= layers)
+                return;
+            m_z    = found[layer - 1].z;
+            m_from = from;
+        };
+        // A copy of what was last sent, if the printer is printing that file.
+        const boost::filesystem::path folder(journal_folder());
+        std::string sent_name;
+        {
+            boost::nowide::ifstream in((folder / "last_sent.txt").string());
+            std::getline(in, sent_name);
+        }
+        const std::string printing = m_paused.value("file", "");
+        const auto stem = [](const std::string &name) { return boost::filesystem::path(name).stem().stem().string(); };
+        if (!sent_name.empty() && !printing.empty() && stem(sent_name).substr(0, 20) == stem(printing).substr(0, 20))
+            try_file((folder / "last_sent.gcode").string(), "the file that was sent");
+        // Otherwise the plate as sliced now, while it still has the print's settings.
+        PartPlate *plate = wxGetApp().plater()->get_partplate_list().get_curr_plate();
+        if (plate != nullptr && plate->is_slice_result_valid())
+            try_file(plate->get_tmp_gcode_path(), "the plate sliced in Elslicer");
+        if (m_z <= 0.) {
+            if (layer < 1 || layer >= layers)
+                m_problem = "The printer didn't say which layer it finished.";
+            else
+                m_problem = "Elslicer doesn't have this print's layers. Open the project that's printing, slice it with the settings it was sent with "
+                            "(the layer count must be " + std::to_string(layers) + "), then press Check again.";
+        }
+    }
+
+    void send_state()
+    {
+        const DynamicPrintConfig &print = wxGetApp().preset_bundle->prints.get_edited_preset().config;
+        const auto value = [&print](const std::string &key) { return print.has(key) ? print.opt_serialize(key) : std::string(); };
+        send({{"type", "state"},
+              {"paused", m_paused},
+              {"z", m_z},
+              {"from", m_from},
+              {"problem", m_problem},
+              {"preset", wxGetApp().preset_bundle->prints.get_edited_preset().name},
+              {"settings", {{"layer_height", value("layer_height")},
+                            {"sparse_infill_density", value("sparse_infill_density")},
+                            {"sparse_infill_pattern", value("sparse_infill_pattern")},
+                            {"wall_loops", value("wall_loops")}}},
+              {"patterns", infill_patterns()}});
+    }
+
+    static json infill_patterns()
+    {
+        json list = json::array();
+        if (const ConfigOptionDef *def = print_config_def.get("sparse_infill_pattern"))
+            for (size_t i = 0; i < def->enum_values.size(); ++i)
+                list.push_back({{"value", def->enum_values[i]}, {"label", i < def->enum_labels.size() ? into_u8(_(def->enum_labels[i])) : def->enum_values[i]}});
+        return list;
+    }
+
+    static inline ChangeSettingsDialog *s_open{nullptr};
+    wxTimer     m_slice_timer;
+    int         m_waited{0};
+    int         m_idle_checks{0};
+    json        m_paused;
+    double      m_z{0.};
+    std::string m_from, m_problem;
+    bool        m_ready{false};
+};
+
+} // namespace
+
+void show_change_settings_dialog(const json &paused)
+{
+    ChangeSettingsDialog::open(paused);
+}
+
+bool print_continuation_waiting()
+{
+    return !s_continuation.empty();
+}
+
+std::map<std::string, std::string> take_print_continuation()
+{
+    std::map<std::string, std::string> taken;
+    taken.swap(s_continuation);
+    return taken;
 }
 
 void show_resume_dialog(int layer)

@@ -69,6 +69,7 @@ private:
     Slic3r::Utils::SerialMessage printStatusCommand      = {"~M27\r\n", Slic3r::Utils::Command};
     Slic3r::Utils::SerialMessage saveFileCommand         = {"~M29\r\n",Slic3r::Utils::Command};
     bool upload_local_api(PrintHostUpload upload_data, ProgressFn progress_fn, ErrorFn error_fn) const;
+    bool prepare_continuation(PrintHostUpload &upload_data, wxString &error) const;
     bool test_local_api(wxString& msg) const;
     bool request_local_api_json(const std::string& path, const std::string& body, std::string& response_body, wxString& error_msg) const;
     std::string make_http_url(const std::string& path) const;

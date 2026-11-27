@@ -358,10 +358,57 @@ function buildSetupRows() {
   updaters.push(detail => row.classList.toggle('hidden', String(detail.status).toLowerCase() !== 'ready'));
 }
 
+// "Pause to change setting": waits for the layer being printed to finish, pauses, then opens the window
+// where the print's settings change and the rest is sent again. What the print was using is kept for that.
+let armed = null;
+let changing = null;
+
+function heatNow(detail) {
+  const nozzles = Array.isArray(detail.nozzleTargetTemps) ? detail.nozzleTargetTemps.slice() : [detail.leftTargetTemp];
+  return {bed: Number(detail.platTargetTemp) || 0, chamber: Number(detail.chamberTargetTemp) || 0, nozzles};
+}
+
+function armPause() {
+  if (!latest || !(latest.printLayer > 0)) {
+    note('The printer isn\'t reporting its layer, so it can\'t pause at the end of one.', 'warn', 6);
+    return;
+  }
+  armed = {layer: latest.printLayer, file: latest.printFileName || '', ...heatNow(latest)};
+  note(`Pausing when layer ${armed.layer} finishes…`);
+  drawJobButtons(String(latest.status).toLowerCase());
+}
+
+function openChange() {
+  if (!changing && latest) changing = {layer: Math.max(1, (latest.printLayer || 1) - 1), file: latest.printFileName || '', ...heatNow(latest)};
+  if (!changing) return;
+  changing.layers = latest ? latest.targetPrintLayer : changing.layers;
+  post({cmd: 'change_settings', ...changing});
+}
+
+function watchLayer(detail, status) {
+  if (armed && status !== 'printing') {
+    armed = null;
+    if (!/paus/.test(status)) note('');
+  }
+  if (armed && detail.printLayer > armed.layer) {
+    changing = {...armed, layer: detail.printLayer - 1, layers: detail.targetPrintLayer, opened: false};
+    armed = null;
+    sending = false;
+    command('jobCtl_cmd', {jobID: '', action: 'pause'}, `Layer ${changing.layer} finished, pausing`, d => /paus/i.test(d.status));
+  }
+  if (changing && !changing.opened && (status === 'paused' || status === 'pause')) {
+    changing.opened = true;
+    openChange();
+  }
+  if (changing && !printing(status)) changing = null;
+}
+
 function drawJobButtons(status) {
   const items = [];
   if (status === 'printing') {
     items.push(button('Pause', () => command('jobCtl_cmd', {jobID: '', action: 'pause'}, 'Pause', detail => /paus/i.test(detail.status))));
+    // "Pause to change setting" is off: the AD5X runs its own homing and bed probing at the start of
+    // every network job, whatever the file says, which drives the nozzle into a part on the bed.
   } else if (status === 'paused' || status === 'pause') {
     items.push(button('Resume', () => command('jobCtl_cmd', {jobID: '', action: 'continue'}, 'Resume', detail => !/paus/i.test(detail.status)), 'primary'));
   }
@@ -561,6 +608,7 @@ function showDetail(detail) {
     $('jobText').textContent = parts.join(' · ');
   }
   const lowered = status.toLowerCase();
+  watchLayer(detail, lowered);
   drawJobButtons(lowered);
   if (lowered !== 'completed' && lowered !== 'cancel') $('clearAsk').classList.add('hidden');
   $('printRows').classList.toggle('hidden', !printing(lowered));
@@ -622,8 +670,11 @@ window.fromApp = message => {
 };
 
 $('connection').onclick = () => post({cmd: 'connection'});
-post({cmd: 'refresh'});
-setInterval(() => post({cmd: 'refresh'}), 3000);
+// Every second while waiting for a layer to finish, so the pause lands close to its end.
+(function poll() {
+  post({cmd: 'refresh'});
+  setTimeout(poll, armed ? 1000 : 3000);
+})();
 </script>
 </body>
 </html>

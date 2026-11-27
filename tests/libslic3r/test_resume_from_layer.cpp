@@ -169,6 +169,35 @@ TEST_CASE("Printers map to the right method", "[ResumeFromLayer]")
     CHECK(verified);
     CHECK(method_for_printer("klipper", "Flashforge Creator 5", verified) == ZMethod::G92);
     CHECK_FALSE(verified);
+    CHECK(method_for_printer("klipper", "Flashforge AD5X", verified) == ZMethod::Klipper);
+    CHECK_FALSE(verified);
     CHECK(method_for_printer("marlin", "Bambu Lab P1S", verified) == ZMethod::None);
     CHECK(method_for_printer("sailfish", "Old printer", verified) == ZMethod::None);
+}
+
+TEST_CASE("A print sliced again continues on the part's top", "[ResumeFromLayer]")
+{
+    // First layer 0.2 mm, then 0.28 mm layers: layer n's top is 0.2 + 0.28 * (n - 1).
+    std::ostringstream gcode;
+    gcode << "M140 S60\nM104 S210\nG28\nM83\n;LAYER_CHANGE\n;Z:0.2\n;HEIGHT:0.2\nG1 Z0.2\nG1 X10 Y10 E1\n";
+    for (int n = 2; n <= 30; ++n) {
+        const double z = 0.2 + 0.28 * (n - 1);
+        gcode << ";LAYER_CHANGE\n;Z:" << z << "\n;HEIGHT:0.28\nG1 Z" << z << " F600\nG1 X" << 10 + n << " Y20 E0.5\n";
+    }
+    Files   f(gcode.str());
+    Options o = f.options(0, ZMethod::Kept);
+    o.from_z  = 5.0; // the old print's top
+    const Result r = write_resume_file(o);
+    REQUIRE(r.ok);
+    // Layer 19's top is 5.24, the first at or above 5.0, so layer 20 is printed 0.24 mm lower.
+    CHECK(r.first_layer == 20);
+    CHECK_THAT(r.z_shift, Catch::Matchers::WithinAbs(-0.24, 1e-6));
+    const std::string out = f.output();
+    CHECK(out.find("SET_KINEMATIC_POSITION") == std::string::npos);
+    CHECK(out.find("G92 Z") == std::string::npos);
+    CHECK(out.find("G1 Z5.28 F600") != std::string::npos); // layer 20, its top at 5.0 + 0.28
+    CHECK(out.find("G1 Z5.52") == std::string::npos);
+
+    o.from_z = 20.;
+    CHECK_FALSE(write_resume_file(o).ok);
 }

@@ -47,11 +47,14 @@
 #include "libslic3r/PrintConfig.hpp"
 #include "slic3r/GUI/GUI.hpp"
 #include "slic3r/GUI/I18N.hpp"
+#include "slic3r/GUI/format.hpp"
 #include "Http.hpp"
 #include "TCPConsole.hpp"
 #include "SerialMessage.hpp"
 #include "SerialMessageType.hpp"
 #include "slic3r/GUI/PrinterWebViewHandler.hpp"
+#include "libslic3r/GCode/ResumeFromLayer.hpp"
+#include "libslic3r/Utils.hpp"
 
 namespace fs = boost::filesystem;
 using json = nlohmann::json;
@@ -609,8 +612,126 @@ bool Flashforge::parse_material_slots(const std::string& body, std::vector<Flash
     return true;
 }
 
+namespace {
+
+// Elslicer: the printer's state in lower case, or empty if it didn't answer.
+std::string flashforge_state(const std::string &host, const std::string &serial, const std::string &code)
+{
+    std::string body, error;
+    if (!GUI::read_flashforge_details_sync(host, serial, code, body, error))
+        return {};
+    const nlohmann::json parsed = nlohmann::json::parse(body, nullptr, false);
+    if (!parsed.is_object())
+        return {};
+    const nlohmann::json &detail = parsed.contains("detail") ? parsed["detail"] : parsed;
+    std::string status = detail.value("status", "");
+    boost::algorithm::to_lower(status);
+    return status;
+}
+
+// Waits up to `seconds` for the printer to report a state that `wanted` accepts.
+template<class Wanted>
+bool wait_for_state(const std::string &host, const std::string &serial, const std::string &code, int seconds, Wanted wanted)
+{
+    for (int i = 0; i < seconds; ++i) {
+        if (wanted(flashforge_state(host, serial, code)))
+            return true;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
+    return false;
+}
+
+// Elslicer: keeps a copy of each file sent, so a print paused later can be matched to its layer heights.
+void keep_sent_copy(const fs::path &source, const std::string &name)
+{
+    const fs::path folder = fs::path(data_dir()) / "print_journal";
+    boost::system::error_code ec;
+    fs::create_directories(folder, ec);
+    fs::copy_file(source, folder / "last_sent.gcode", fs::copy_options::overwrite_existing, ec);
+    if (!ec)
+        std::ofstream((folder / "last_sent.txt").string()) << name;
+}
+
+} // namespace
+
+// Elslicer: "Pause to change setting". The print was paused at the end of a layer and sliced again with new
+// settings. Cuts the new file at the part's top, then, as late as possible so a mistake leaves the old print
+// paused, cancels the old print, keeps the heaters on and marks the bed clear (the part stays on it).
+bool Flashforge::prepare_continuation(PrintHostUpload &upload_data, wxString &error) const
+{
+    // Off: the AD5X homes Z and probes the bed at the start of every network job, whatever the file says,
+    // which drives the nozzle into the part. Tried on 2026-11-16. Never send a continuation.
+    error = _L("Continuing a paused print isn't available on this printer: it homes and probes the bed at the start of every job.");
+    return false;
+    using namespace Slic3r::ResumeFromLayer;
+    auto &info = upload_data.extended_info;
+    if (upload_data.use_3mf || upload_data.post_action != PrintHostPostUploadAction::StartPrint) {
+        error = _L("Continuing needs the print sent as G-code and started straight away.");
+        return false;
+    }
+    Options options;
+    options.source = upload_data.source_path.string();
+    options.target = (upload_data.source_path.parent_path() / (upload_data.source_path.stem().string() + "_continue.gcode")).string();
+    options.method = ZMethod::Kept;
+    options.from_z = std::atof(info["continueFromZ"].c_str());
+    options.bed_x  = std::atof(info["continueBedX"].c_str());
+    options.bed_y  = std::atof(info["continueBedY"].c_str());
+    const Result result = write_resume_file(options);
+    if (!result.ok) {
+        error = GUI::format_wxstr(_L("Couldn't make the continuation, so the paused print was left as it is: %1%"), result.error);
+        return false;
+    }
+    BOOST_LOG_TRIVIAL(info) << "[Flashforge] continuing from new layer " << result.first_layer << ", heights moved " << result.z_shift;
+
+    const std::string status = flashforge_state(m_host, m_serial_number, m_check_code);
+    if (status != "pause" && status != "paused") {
+        error = _L("The printer isn't paused any more, so nothing was cancelled or sent.");
+        return false;
+    }
+    std::string body, problem;
+    GUI::send_flashforge_control_sync(m_host, m_serial_number, m_check_code, "jobCtl_cmd", {{"jobID", ""}, {"action", "cancel"}}, body, problem);
+    const auto stopped = [](const std::string &now) { return now == "cancel" || now == "completed" || now == "ready" || now == "error"; };
+    if (!wait_for_state(m_host, m_serial_number, m_check_code, 60, stopped)) {
+        error = _L("The printer didn't stop the paused print, so the continuation wasn't sent.");
+        return false;
+    }
+    // Back to the temperatures the print was using, so the part stays stuck while the new file starts.
+    nlohmann::json nozzles = nlohmann::json::array();
+    std::stringstream list(info["continueNozzles"]);
+    for (std::string item; std::getline(list, item, ',');)
+        nozzles.push_back(item.empty() ? -1 : std::atoi(item.c_str()));
+    while (nozzles.size() < 4)
+        nozzles.push_back(-1);
+    const int bed     = std::atoi(info["continueBed"].c_str());
+    const int chamber = std::atoi(info["continueChamber"].c_str());
+    GUI::send_flashforge_control_sync(m_host, m_serial_number, m_check_code, "temperatureCtl_cmd",
+                                      {{"platform", bed > 0 ? bed : -200}, {"chamber", chamber > 0 ? chamber : -200}, {"nozzles", nozzles}}, body, problem);
+    GUI::send_flashforge_control_sync(m_host, m_serial_number, m_check_code, "stateCtrl_cmd", {{"action", "setClearPlatform"}}, body, problem);
+    if (!wait_for_state(m_host, m_serial_number, m_check_code, 30, [](const std::string &now) { return now == "ready"; })) {
+        error = _L("The old print was stopped, but the printer didn't become ready, so the continuation wasn't sent. "
+                   "Mark the bed clear on the printer's screen without removing the part, then send again.");
+        return false;
+    }
+    upload_data.source_path = options.target;
+    // Levelling or calibrating would drive the nozzle into the part.
+    info["levelingBeforePrint"] = "0";
+    info["flowCalibration"]      = "0";
+    info["firstLayerInspection"] = "0";
+    return true;
+}
+
 bool Flashforge::upload_local_api(PrintHostUpload upload_data, ProgressFn progress_fn, ErrorFn error_fn) const
 {
+    if (upload_data.extended_info.count("continueFromZ") != 0) {
+        wxString problem;
+        if (!prepare_continuation(upload_data, problem)) {
+            error_fn(problem);
+            return false;
+        }
+    }
+    // A .gcode.3mf holds its G-code inside, which can't be read for layer heights.
+    if (!upload_data.use_3mf && upload_data.source_path.extension() == ".gcode")
+        keep_sent_copy(upload_data.source_path, upload_data.upload_path.filename().string());
     bool        res            = true;
     std::string material_map_b64;
     std::string material_map_json = "[]";

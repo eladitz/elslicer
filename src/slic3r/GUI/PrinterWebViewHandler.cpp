@@ -554,6 +554,9 @@ public:
         }
         else if (cmd == "control")
             control(message);
+        else if (cmd == "change_settings")
+            // Not on the stack of the web view's own message.
+            wxGetApp().CallAfter([message] { show_change_settings_dialog(message); });
     }
 
 private:

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pause to Change Setting</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  .setter { display: flex; align-items: center; gap: 8px; padding: 4px 0; flex-wrap: wrap; }
+  .setter > label { width: 150px; color: var(--muted); }
+  .setter input { width: 90px; padding: 4px 8px; }
+  .setter .now { color: var(--muted); }
+</style>
+</head>
+<body>
+<h1>Pause to change setting</h1>
+<p id="where" class="sub">Reading the print…</p>
+
+<div id="problem" class="note bad hidden"></div>
+
+<div class="panel">
+  <h2>Where it stopped</h2>
+  <div class="row">
+    <label for="layer">Last finished layer</label>
+    <input id="layer" type="number" min="1" style="width:80px">
+    <button id="check">Check again</button>
+  </div>
+  <p id="height" class="muted" style="margin:10px 0 0"></p>
+</div>
+
+<div class="panel">
+  <h2>New settings for the rest of the print</h2>
+  <p class="muted" style="margin-top:0">These change the print settings in Elslicer (<span id="preset"></span>). This window can stay open: anything else you change in Elslicer's print settings counts too.</p>
+  <div class="setter"><label for="layer_height">Layer height</label><input id="layer_height" type="number" step="0.02" min="0.04"> <span class="muted">mm</span> <span class="now" id="now_layer_height"></span></div>
+  <div class="setter"><label for="sparse_infill_density">Infill</label><input id="sparse_infill_density" type="number" step="5" min="0" max="100"> <span class="muted">%</span> <span class="now" id="now_sparse_infill_density"></span></div>
+  <div class="setter"><label for="sparse_infill_pattern">Infill pattern</label><select id="sparse_infill_pattern"></select> <span class="now" id="now_sparse_infill_pattern"></span></div>
+  <div class="setter"><label for="wall_loops">Walls</label><input id="wall_loops" type="number" step="1" min="1" max="10"> <span class="now" id="now_wall_loops"></span></div>
+  <div class="row" style="justify-content:flex-end"><button id="apply">Apply</button></div>
+  <div id="applied"></div>
+</div>
+
+<div class="panel">
+  <h2>What happens when you send</h2>
+  <ol class="muted" style="margin:0;padding-left:20px">
+    <li>Elslicer slices the plate with the new settings and shows the usual send window.</li>
+    <li>It keeps only the layers above the part, lined up with its top.</li>
+    <li>It cancels the paused print, puts the heaters straight back to the print's temperatures and tells the printer the bed is clear. The part stays on the bed.</li>
+    <li>It sends the rest. The printer heats, lifts, homes X and Y only, primes in a corner and carries on. Bed levelling is switched off for this job.</li>
+  </ol>
+  <div class="note warn" style="margin-top:12px"><strong>Not proven on this printer yet.</strong> If the printer homes Z or levels by itself when the job starts, the nozzle could hit the part. Watch the start and stop it on the printer's screen if the nozzle heads down to the bed. If the printer has forgotten its height, it refuses to move instead.</div>
+  <label class="check"><input type="checkbox" id="sure"> <span>The part is still stuck to the bed, and I'll watch the start.</span></label>
+</div>
+
+<div class="footer">
+  <button id="close">Close</button>
+  <button id="send" class="primary" disabled>Slice and send the rest…</button>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const post = message => window.wx.postMessage(JSON.stringify(message));
+const KEYS = ['layer_height', 'sparse_infill_density', 'sparse_infill_pattern', 'wall_loops'];
+let state = null;
+
+function plain(key, value) {
+  return key === 'sparse_infill_density' ? String(value).replace('%', '') : value;
+}
+
+function refresh() {
+  $('send').disabled = !(state && state.z > 0 && $('sure').checked);
+}
+
+window.fromApp = message => {
+  if (message.type === 'state') {
+    state = message;
+    const paused = message.paused || {};
+    $('where').textContent = `${paused.file || 'The print'} is paused after layer ${paused.layer} of ${paused.layers}.`;
+    if (document.activeElement !== $('layer')) $('layer').value = paused.layer;
+    $('layer').max = Math.max(1, (paused.layers || 2) - 1);
+    $('problem').classList.toggle('hidden', !message.problem);
+    $('problem').textContent = message.problem;
+    $('height').textContent = message.z > 0
+      ? `Its top is at ${message.z.toFixed(2)} mm, from ${message.from}. The new layers start there.`
+      : '';
+    $('preset').textContent = message.preset;
+    const select = $('sparse_infill_pattern');
+    if (!select.options.length) {
+      for (const pattern of message.patterns || []) {
+        const option = document.createElement('option');
+        option.value = pattern.value;
+        option.textContent = pattern.label;
+        select.append(option);
+      }
+    }
+    const label = value => ((message.patterns || []).find(p => p.value === value) || {}).label || value;
+    for (const key of KEYS) {
+      const value = plain(key, message.settings[key]);
+      $(`now_${key}`).textContent = value !== '' ? `now ${key === 'sparse_infill_pattern' ? label(value) : value}` : '';
+      if (document.activeElement !== $(key) && !$(key).dataset.edited) $(key).value = value;
+    }
+    refresh();
+  } else if (message.type === 'slicing') {
+    $('send').disabled = true;
+    $('send').textContent = 'Slicing…';
+  } else if (message.type === 'slice_failed') {
+    $('send').textContent = 'Slice and send the rest…';
+    refresh();
+    $('problem').classList.remove('hidden');
+    $('problem').textContent = 'Slicing with the new settings didn\'t finish. Check the message in Elslicer\'s main window, fix it and send again. The print is still paused.';
+  } else if (message.type === 'applied') {
+    const box = $('applied');
+    box.replaceChildren();
+    for (const row of message.rows) {
+      const line = document.createElement('div');
+      line.className = 'note ' + (row.accepted ? 'good' : 'warn');
+      line.textContent = row.accepted ? `${row.label}: ${row.after}` : `${row.label} not changed: ${row.note || 'not allowed'}`;
+      box.append(line);
+    }
+    if (message.dropped.length) {
+      const line = document.createElement('div');
+      line.className = 'note warn';
+      line.textContent = `Elslicer didn't keep: ${message.dropped.join(', ')}`;
+      box.append(line);
+    }
+    KEYS.forEach(key => { $(key).dataset.edited = ''; });
+  }
+};
+
+KEYS.forEach(key => { $(key).oninput = $(key).onchange = () => { $(key).dataset.edited = '1'; }; });
+$('apply').onclick = () => {
+  const changes = {};
+  for (const key of KEYS) {
+    const value = $(key).value.trim();
+    if (value === '' || String(plain(key, state.settings[key])) === value) continue;
+    changes[key] = key === 'sparse_infill_density' ? `${value}%` : value;
+  }
+  if (Object.keys(changes).length) post({cmd: 'apply', changes});
+};
+$('check').onclick = () => post({cmd: 'check', layer: parseInt($('layer').value, 10) || 0});
+$('sure').onchange = refresh;
+$('close').onclick = () => post({cmd: 'close'});
+$('send').onclick = () => post({cmd: 'send'});
+post({cmd: 'ready'});
+</script>
+</body>
+</html>

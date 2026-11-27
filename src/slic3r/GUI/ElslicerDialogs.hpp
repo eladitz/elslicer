@@ -1,12 +1,15 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
 #include "libslic3r/Point.hpp"
+
+#include <nlohmann/json.hpp>
 
 namespace Slic3r { namespace GUI {
 
@@ -87,6 +90,12 @@ void start_donation_prompt();
 void open_donation_page();
 // The user just asked for a pause from this app, so the print journal needn't alert them to it.
 void journal_expect_pause();
+// "Pause to change setting": the printer paused after finishing a layer. `paused` holds layer, layers, file
+// and the bed, chamber and nozzle temperatures the print was using.
+void show_change_settings_dialog(const nlohmann::json &paused);
+// Whether the next send continues a paused print, and the upload fields that tell it how (taken once).
+bool print_continuation_waiting();
+std::map<std::string, std::string> take_print_continuation();
 // A print was just sent to the printer with these settings.
 void journal_print_sent(const std::string &file, const std::string &model_name);
 // Shows what past prints suggest, if anything. False means the user changed settings or cancelled, so don't send.

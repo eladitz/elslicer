@@ -21554,12 +21554,15 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
     PrintHostJob upload_job(physical_printer_config);
     if (upload_job.empty())
         return;
-    if (!support_check_before_print() || !journal_check_before_print() || !printer_ready_check_before_print())
+    // Elslicer: continuing a paused print with changed settings. Past prints' tips don't apply mid-print.
+    const bool continuing = print_continuation_waiting();
+    if (!support_check_before_print() || (!continuing && !journal_check_before_print()) || !printer_ready_check_before_print())
         return;
 
     // Orca: the use_3mf printer option makes us send a .gcode.3mf to the printer
     const auto* use_3mf_opt = physical_printer_config->option<ConfigOptionBool>("use_3mf");
-    const bool  use_3mf     = use_3mf_opt != nullptr && use_3mf_opt->value;
+    // Elslicer: a continuation is cut out of plain G-code, so it's always sent as that.
+    const bool  use_3mf     = !continuing && use_3mf_opt != nullptr && use_3mf_opt->value;
 
     upload_job.upload_data.use_3mf = use_3mf;
     // Orca: the concrete plate to export/send (PLATE_CURRENT_IDX resolves to the current plate).
@@ -21724,6 +21727,21 @@ void Plater::send_gcode_legacy(int plate_idx, Export3mfProgressFn proFn)
         upload_job.upload_data.group       = pDlg->group();
         upload_job.upload_data.storage     = pDlg->storage();
         upload_job.upload_data.extended_info = pDlg->extendedInfo();
+        if (continuing) {
+            // Only the Flashforge network upload knows how to continue; anything else would start the print over on top of the part.
+            const auto *ff_serial = physical_printer_config->option<ConfigOptionString>("flashforge_serial_number");
+            if (dynamic_cast<Flashforge *>(upload_job.printhost.get()) == nullptr || ff_serial == nullptr || ff_serial->value.empty()) {
+                take_print_continuation();
+                show_error(this, _L("Continuing a paused print works only with a Flashforge printer connected over the network."), false);
+                return;
+            }
+            if (use_3mf || upload_job.upload_data.post_action != PrintHostPostUploadAction::StartPrint) {
+                show_error(this, _L("To continue the paused print, choose to start printing straight away."), false);
+                return;
+            }
+            for (const auto &[key, value] : take_print_continuation())
+                upload_job.upload_data.extended_info[key] = value;
+        }
         if (upload_job.upload_data.post_action == PrintHostPostUploadAction::StartPrint)
             journal_print_sent(pDlg->filename().string(), p->model.objects.front()->name);
         // Orca: gcode inside a .gcode.3mf is index-coded (Metadata/plate_<N>.gcode) and a bundle may
