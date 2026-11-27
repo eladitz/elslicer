@@ -87,10 +87,13 @@
   <h3>Back and stand</h3>
   <div id="backSliders"></div>
   <div class="seg">
-    <button data-cable="hole" title="A round hole low in the middle of the back">Cable hole</button>
-    <button data-cable="slot" title="A slot up from the bottom edge of the back, so the plug needn't go through">Cable slot</button>
+    <button data-cable="hole" title="A round hole low in the back">Hole in the back</button>
+    <button data-cable="slot" title="A slot up from the bottom edge of the back, so the plug needn't go through">Slot in the back</button>
+    <button data-cable="side" title="An opening in the bottom of the sides, at the back edge; the cable lies flat out of the bottom">Out the bottom</button>
   </div>
   <label class="check"><input type="checkbox" id="keyholes"> Keyholes to hang it on a wall</label>
+  <div id="keySliders"></div>
+  <p class="muted" style="font-size:12px;margin:2px 0">Drag the keyholes and the cable's way out in the Front view. <a id="keyAuto" style="color:var(--accent);cursor:pointer">Put them back</a></p>
   <div class="seg">
     <button data-base="none">No stand</button>
     <button data-base="stand" title="A foot with a slot the box stands in">Stand</button>
@@ -112,10 +115,11 @@
 </div>
 <div class="view">
   <div class="row">
-    <div class="seg" style="margin:0"><button data-look="box" title="Put together, as it stands or hangs">Lightbox</button><button data-look="plates" title="The parts as they print">Plates</button></div>
+    <div class="seg" style="margin:0"><button data-look="front" title="The front, flat, with the keyholes and the cable's way out; drag them to move them">Front</button><button data-look="box" title="Put together, as it stands or hangs">Lightbox</button><button data-look="plates" title="The parts as they print">Plates</button></div>
     <label class="check" style="margin:0 0 0 14px"><input type="checkbox" id="glow" checked> Light on</label>
   </div>
   <canvas id="canvas"></canvas>
+  <canvas id="flat" class="hidden" style="cursor:default"></canvas>
   <div id="facts"></div>
 </div>
 
@@ -131,7 +135,8 @@ const FONTS = ['Avenir Next', 'Futura', 'Helvetica Neue', 'Arial Black', 'Impact
 
 const p = {shape: 'circle', W: 120, H: 120, corner: 10, margin: 6, depth: 40, wall: 2, front: 1.2, mode: 'lit',
            textSize: 26, lineGap: 1.1, picW: 60, picY: 0, threshold: 50, hole: 6, fit: 0.15, base: 'none', res: 0.35,
-           colours: 2, paint: [], paintKey: '', cable: 'hole', look: 'box', split: 'one', skin: 0.4};
+           colours: 2, paint: [], paintKey: '', cable: 'hole', look: 'box', split: 'one', skin: 0.4,
+           round: 2, keyD: 9.5, keyAt: null, cableX: null};
 
 const sliders = {};
 function slider(parent, key, label, min, max, step) {
@@ -155,13 +160,15 @@ slider($('pictureSliders'), 'picY', 'Up or down mm', -60, 60, 1);
 const wRow = slider($('shapeSliders'), 'W', 'Width mm', 50, 250, 1);
 const hRow = slider($('shapeSliders'), 'H', 'Height mm', 40, 250, 1);
 const cornerRow = slider($('shapeSliders'), 'corner', 'Corners mm', 0, 40, 1);
-const marginRow = slider($('shapeSliders'), 'margin', 'Border mm', 3, 20, 0.5);
+const marginRow = slider($('shapeSliders'), 'margin', 'Border mm', 1, 20, 0.2);
+const roundRow = slider($('shapeSliders'), 'round', 'Round off mm', 0, 10, 0.5);
 slider($('shapeSliders'), 'depth', 'Depth mm', 20, 80, 1);
 slider($('shapeSliders'), 'wall', 'Sides mm', 1.2, 4, 0.1);
 slider($('shapeSliders'), 'front', 'Front mm', 0.8, 2.4, 0.1);
-slider($('backSliders'), 'hole', 'Cable hole mm', 0, 14, 0.5);
+slider($('backSliders'), 'hole', 'Cable mm', 0, 16, 0.5);
 slider($('backSliders'), 'fit', 'Back fit mm', 0, 0.5, 0.05);
 slider($('printSliders'), 'res', 'Detail mm', 0.2, 0.6, 0.01);
+slider($('keySliders'), 'keyD', 'Screw head mm', 6, 14, 0.5);
 const skinRow = slider($('skinRow'), 'skin', 'White skin mm', 0, 0.6, 0.2);
 
 for (const f of FONTS) $('font').add(new Option(f, f));
@@ -174,7 +181,7 @@ for (const b of document.querySelectorAll('[data-look]')) b.onclick = () => { p.
 
 // Starting points: words, shape, font and colours to change from.
 const STARTS = {
-  logo:   {text: '', shape: 'contour', margin: 8, picW: 110, picY: 0, depth: 30, mode: 'colours', ink: '#1d3a9a', darkSides: true, sidesColour: '#1c1c1f',
+  logo:   {text: '', shape: 'contour', margin: 5.6, round: 2, keyAt: null, cableX: null, picW: 110, picY: 0, depth: 30, mode: 'colours', ink: '#1d3a9a', darkSides: true, sidesColour: '#1c1c1f',
            keyholes: true, cable: 'slot', base: 'none'},
   open:   {text: 'Yes!\nOPEN', shape: 'circle', W: 130, font: 'Futura', weight: '900', textSize: 30, mode: 'lit', ink: '#2f8f4e', base: 'stand'},
   air:    {text: 'ON AIR', shape: 'rect', W: 170, H: 70, corner: 6, font: 'Impact', weight: '400', textSize: 40, mode: 'dark', ink: '#d0302a', base: 'stand'},
@@ -194,7 +201,7 @@ for (const b of document.querySelectorAll('[data-start]')) b.onclick = () => {
   }
   if (s.shape === 'circle') sliders.H(p.W);
   if (!('darkSides' in s)) $('darkSides').checked = false;
-  if (!('keyholes' in s)) { $('keyholes').checked = false; p.cable = 'hole'; }
+  if (!('keyholes' in s)) { $('keyholes').checked = false; p.cable = 'hole'; p.keyAt = null; p.cableX = null; }
   if (b.dataset.start === 'logo' && !picture) post({cmd: 'pick_image'});
   update();
 };
@@ -345,19 +352,61 @@ function canvasFor(k, x0, x1, y0, y1) {
 }
 const alphaOf = c => { const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data, out = new Uint8Array(c.width * c.height);
   for (let n = 0; n < out.length; ++n) out[n] = d[4 * n + 3] > 127; return out; };
-// Distance in pixels from each pixel inside to the nearest one outside (a chamfer distance, near enough).
+// Distance in pixels from each pixel inside to the nearest one outside: the exact Euclidean distance, by
+// Felzenszwalb and Huttenlocher's two passes of lower envelopes of parabolas.
 function distance(inside, W, H) {
-  const f = new Float32Array(W * H), D = Math.SQRT2;
-  for (let n = 0; n < f.length; ++n) f[n] = inside[n] ? 1e9 : 0;
-  for (let j = 0; j < H; ++j) for (let i = 0; i < W; ++i) { const n = j * W + i; if (!f[n]) continue; let v = f[n];
-    if (i > 0) v = Math.min(v, f[n - 1] + 1);
-    if (j > 0) { v = Math.min(v, f[n - W] + 1); if (i > 0) v = Math.min(v, f[n - W - 1] + D); if (i < W - 1) v = Math.min(v, f[n - W + 1] + D); }
-    f[n] = v; }
-  for (let j = H - 1; j >= 0; --j) for (let i = W - 1; i >= 0; --i) { const n = j * W + i; if (!f[n]) continue; let v = f[n];
-    if (i < W - 1) v = Math.min(v, f[n + 1] + 1);
-    if (j < H - 1) { v = Math.min(v, f[n + W] + 1); if (i > 0) v = Math.min(v, f[n + W - 1] + D); if (i < W - 1) v = Math.min(v, f[n + W + 1] + D); }
-    f[n] = v; }
-  return f;
+  const INF = 1e20, f = new Float64Array(Math.max(W, H)), d = new Float64Array(Math.max(W, H));
+  const v = new Int32Array(Math.max(W, H)), z = new Float64Array(Math.max(W, H) + 1), g = new Float64Array(W * H);
+  const pass = (n, get, set) => {
+    for (let q = 0; q < n; ++q) f[q] = get(q);
+    let k = 0; v[0] = 0; z[0] = -INF; z[1] = INF;
+    for (let q = 1; q < n; ++q) {
+      let s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]);
+      while (s <= z[k]) { --k; s = ((f[q] + q * q) - (f[v[k]] + v[k] * v[k])) / (2 * q - 2 * v[k]); }
+      ++k; v[k] = q; z[k] = s; z[k + 1] = INF;
+    }
+    k = 0;
+    for (let q = 0; q < n; ++q) { while (z[k + 1] < q) ++k; d[q] = (q - v[k]) ** 2 + f[v[k]]; }
+    for (let q = 0; q < n; ++q) set(q, d[q]);
+  };
+  for (let i = 0; i < W; ++i) pass(H, j => inside[j * W + i] ? INF : 0, (j, val) => { g[j * W + i] = val; });
+  const out = new Float32Array(W * H);
+  for (let j = 0; j < H; ++j) pass(W, i => g[j * W + i], (i, val) => { out[j * W + i] = Math.sqrt(val); });
+  return out;
+}
+// Fills the holes in a mask: everything not reached from its edge.
+function fillHoles(m, W, H) {
+  const seen = new Uint8Array(m.length), stack = [];
+  for (let i = 0; i < W; ++i) stack.push(i, (H - 1) * W + i);
+  for (let j = 0; j < H; ++j) stack.push(j * W, j * W + W - 1);
+  while (stack.length) { const n = stack.pop(); if (seen[n] || m[n]) continue; seen[n] = 1; const i = n % W;
+    if (i > 0) stack.push(n - 1); if (i < W - 1) stack.push(n + 1); if (n >= W) stack.push(n - W); if (n + W < m.length) stack.push(n + W); }
+  for (let n = 0; n < m.length; ++n) if (!seen[n]) m[n] = 1;
+  return m;
+}
+// Where to move each grid point so the mesh's edges follow the masks' true outlines rather than the grid's
+// stair steps: for points on an edge, the step along the blurred signed distance to where it crosses zero.
+function edgeShift(masks, W, H) {
+  const dx = new Float32Array(W * H), dy = new Float32Array(W * H), done = new Uint8Array(W * H);
+  for (const m of masks) {
+    const din = distance(m, W, H), dout = distance(m.map(v => 1 - v), W, H), s = new Float32Array(W * H);
+    for (let n = 0; n < s.length; ++n) s[n] = m[n] ? din[n] - 0.5 : 0.5 - dout[n];
+    // A light blur takes the stair steps out of the distance, leaving the shape.
+    for (let pass = 0; pass < 2; ++pass) {
+      const c = new Float32Array(s);
+      for (let j = 1; j < H - 1; ++j) for (let i = 1; i < W - 1; ++i) { const n = j * W + i;
+        s[n] = (4 * c[n] + 2 * (c[n - 1] + c[n + 1] + c[n - W] + c[n + W]) + c[n - W - 1] + c[n - W + 1] + c[n + W - 1] + c[n + W + 1]) / 16; }
+    }
+    for (let j = 1; j < H - 1; ++j) for (let i = 1; i < W - 1; ++i) {
+      const n = j * W + i;
+      if (done[n] || (m[n] === m[n - 1] && m[n] === m[n + 1] && m[n] === m[n - W] && m[n] === m[n + W])) continue;
+      const gx = (s[n + 1] - s[n - 1]) / 2, gy = (s[n + W] - s[n - W]) / 2, g2 = Math.max(gx * gx + gy * gy, 0.25);
+      let ax = -s[n] * gx / g2, ay = -s[n] * gy / g2;
+      const l = Math.hypot(ax, ay); if (l > 0.7) { ax *= 0.7 / l; ay *= 0.7 / l; }
+      dx[n] = ax; dy[n] = ay; done[n] = 1;
+    }
+  }
+  return {dx, dy};
 }
 
 // The front's outline and design as masks, and how far in from the edge each pixel is.
@@ -371,7 +420,7 @@ function layout(k) {
     const s = Math.min(1, room[0] / Math.max(1e-6, block.w), room[1] / Math.max(1e-6, block.h));
     if (s < 1) block = designBlock(s);
   } else block = designBlock(1);
-  const half = shaped ? [W / 2, H / 2] : [block.w / 2 + p.margin + p.wall + 3, block.h / 2 + p.margin + p.wall + 3];
+  const half = shaped ? [W / 2, H / 2] : [block.w / 2 + p.margin + p.wall + p.round + 3, block.h / 2 + p.margin + p.wall + p.round + 3];
   const cv = canvasFor(k, -half[0] - 2, half[0] + 2, -half[1] - 2, half[1] + 2);
   const [designC, dg] = cv.make();
   block.draw(dg);
@@ -384,19 +433,13 @@ function layout(k) {
     og.fill();
     outline = alphaOf(oc);
   } else {
-    // Round the design: everything within the border, smoothed by growing a little further and shrinking back,
-    // with any holes filled.
-    const smooth = p.margin * 0.8, grow = (p.margin + p.wall + smooth) * k, out = new Uint8Array(design.length);
+    // The border: everything within the border's width of the design, the same width all round, with the holes
+    // filled. Round off closes notches narrower than twice its size: grown that much further and shrunk back.
+    const grow = (p.margin + p.wall) * k, round = p.round * k;
     const far = distance(design.map(v => 1 - v), cv.W, cv.H);
-    const big = far.map(v => v <= grow ? 1 : 0), back = distance(big, cv.W, cv.H);
-    for (let n = 0; n < out.length; ++n) out[n] = back[n] > smooth * k ? 1 : 0;
-    const seen = new Uint8Array(out.length), stack = [];
-    for (let i = 0; i < cv.W; ++i) stack.push(i, (cv.H - 1) * cv.W + i);
-    for (let j = 0; j < cv.H; ++j) stack.push(j * cv.W, j * cv.W + cv.W - 1);
-    while (stack.length) { const n = stack.pop(); if (seen[n] || out[n]) continue; seen[n] = 1; const i = n % cv.W;
-      if (i > 0) stack.push(n - 1); if (i < cv.W - 1) stack.push(n + 1); if (n >= cv.W) stack.push(n - cv.W); if (n + cv.W < out.length) stack.push(n + cv.W); }
-    for (let n = 0; n < out.length; ++n) if (!seen[n]) out[n] = 1;
-    outline = out;
+    let out = far.map(v => v <= grow + round ? 1 : 0);
+    if (round > 0) { const back = distance(out, cv.W, cv.H); out = back.map(v => v > round ? 1 : 0); }
+    outline = fillHoles(out, cv.W, cv.H);
   }
   const inward = distance(outline, cv.W, cv.H);
   const inside = m => { for (let n = 0; n < m.length; ++n) if (!outline[n] || inward[n] < p.wall * k) m[n] = 0; return m; };
@@ -405,15 +448,19 @@ function layout(k) {
   const only = which => { const [c, g] = cv.make(); block.draw(g, which); return inside(alphaOf(c)); };
   const pc = p.mode === 'colours' ? pictureColours() : null;
   const layers = pc ? pc.layers.map((_, c) => only(c)) : [], words = pc && lines().length ? only('text') : null;
-  return {cv, outline, design, inward, block, layers, words};
+  // The outer edge, the inside of the sides and the design's edge follow their true lines, in that order.
+  const wallIn = new Uint8Array(outline.length); for (let n = 0; n < wallIn.length; ++n) wallIn[n] = outline[n] && inward[n] >= p.wall * k;
+  const shift = edgeShift([outline, wallIn, design], cv.W, cv.H);
+  return {cv, outline, design, inward, block, layers, words, shift};
 }
 
 // A height field over the layout's grid: z(n) gives [bottom, top] or null where there is nothing. mirror: as seen
 // from behind.
 function field(L, mirror, z) {
   const {W, H, ox, oy, k} = L.cv;
+  const {dx, dy} = L.shift;
   return Lamp.sheet(W, H, false, (i, j, front) => {
-    const n = j * W + i, x = (i - ox) / k, y = (oy - j) / k, h = z(n) || [0, 0];
+    const n = j * W + i, x = (i + dx[n] - ox) / k, y = (oy - j - dy[n]) / k, h = z(n) || [0, 0];
     return [mirror ? -x : x, y, front ? h[1] : h[0]];
   });
 }
@@ -495,10 +542,41 @@ function build(res) {
         lip && outline[n] && inward[n] >= wallPx && !anyColour(n) && nearest(n) === c ? [ink, ink + lip] : null)});
     });
   }
+  let jb = -1, jt = -1, i0 = cv.W, i1 = -1;
+  for (let n = 0; n < outline.length; ++n) if (outline[n]) { const j = Math.floor(n / cv.W), i = n % cv.W; if (jt < 0) jt = j; jb = j; i0 = Math.min(i0, i); i1 = Math.max(i1, i); }
+  const bottom = (cv.oy - jb) / k, top = (cv.oy - jt) / k, left = (i0 - cv.ox) / k, right = (i1 - cv.ox) / k;
+  const at = (x, y) => { const i = Math.round(x * k + cv.ox), j = Math.round(cv.oy - y * k); return i < 0 || j < 0 || i >= cv.W || j >= cv.H ? -1 : j * cv.W + i; };
+  // The way out for the cable, at p.cableX along the bottom: a hole low in the back, a slot up from the back's
+  // bottom edge, or an opening in the bottom of the sides at their back edge, which the back closes over.
+  let hole = null;
+  // Its own bottom edge at x, in mm, or null where there is none.
+  const bottomAt = x => { const i = Math.round(x * k + cv.ox); if (i < 0 || i >= cv.W) return null;
+    for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + i]) return (cv.oy - j) / k; return null; };
+  // Unless it was dragged, the cable goes where the bottom is flat for its width and the box is wide enough above
+  // it, as near the middle as that allows.
+  let cableX = p.cableX;
+  if (cableX == null && p.hole > 0) {
+    const need = p.hole / 2 + 2, span = Math.max(need, 15), ok = x => { const b0 = bottomAt(x);
+      if (b0 == null) return false;
+      for (let d = -span; d <= span; d += 1) { const b = bottomAt(x + d); if (b == null || Math.abs(b - b0) > 1) return false; }
+      const n = at(x, b0 + p.wall + p.fit + 1.6 + p.hole + 3); return n >= 0 && outline[n] && inward[n] >= need * k; };
+    const mid = (left + right) / 2;
+    for (let d = 0; d <= (right - left) / 2 && cableX == null; d += 0.5) { if (ok(mid - d)) cableX = mid - d; else if (ok(mid + d)) cableX = mid + d; }
+    if (cableX == null) cableX = mid;
+  }
+  if (p.hole > 0) {
+    const cx = Math.max(left + p.wall + p.hole, Math.min(right - p.wall - p.hole, cableX)), ic = Math.round(cx * k + cv.ox);
+    let jc = -1; for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + ic]) { jc = j; break; }
+    if (jc >= 0) { const edge = (cv.oy - jc) / k;
+      hole = {x: cx, y: edge + p.wall + p.fit + 1.6 + p.hole / 2 + 2, r: p.hole / 2, edge, h: Math.min(p.hole, D - front - 2)}; }
+  }
+  const sideCut = n => { if (!hole || p.cable !== 'side') return false;
+    const x = (n % cv.W - cv.ox) / k, y = (cv.oy - Math.floor(n / cv.W)) / k;
+    return Math.abs(x - hole.x) < hole.r && y < hole.edge + p.wall + p.fit + 1.6 + 1; };
   // The box: front and sides in one, printed front down; with pieces, a pocket and seat for each.
   const box = field(L, true, n => {
     if (!outline[n]) return null;
-    if (inward[n] < wallPx) return [0, D];
+    if (inward[n] < wallPx) return sideCut(n) ? [0, D - hole.h] : [0, D];
     if (apart && anyColour(n)) return skin > 0 ? [0, skin] : null;
     if (apart && seatOf[n] >= 0) return [0, front - seat];
     return one && design[n] ? [0, thin] : [0, front];
@@ -509,39 +587,37 @@ function build(res) {
   }
   // The back: a plate over the whole outline with a ring that presses inside the sides, a way out for the cable low
   // in the middle (a hole, or a slot up from the edge), and keyholes to hang it by, with the plate thicker round them.
-  const at = (x, y) => { const i = Math.round(x * k + cv.ox), j = Math.round(cv.oy - y * k); return i < 0 || j < 0 || i >= cv.W || j >= cv.H ? -1 : j * cv.W + i; };
   const ring0 = (p.wall + p.fit) * k, ring1 = ring0 + 1.6 * k, plate = 1.2, plug = 4, boss = 2;
-  let jb = -1, jt = -1, i0 = cv.W, i1 = -1;
-  for (let n = 0; n < outline.length; ++n) if (outline[n]) { const j = Math.floor(n / cv.W), i = n % cv.W; if (jt < 0) jt = j; jb = j; i0 = Math.min(i0, i); i1 = Math.max(i1, i); }
-  const bottom = (cv.oy - jb) / k, top = (cv.oy - jt) / k, left = (i0 - cv.ox) / k, right = (i1 - cv.ox) / k;
-  let hole = null;
-  if (p.hole > 0) {
-    const ic = Math.round(cv.ox);
-    let jc = -1; for (let j = cv.H - 1; j >= 0; --j) if (outline[j * cv.W + ic]) { jc = j; break; }
-    if (jc >= 0) hole = {x: 0, y: (cv.oy - jc) / k + p.wall + p.fit + 1.6 + p.hole / 2 + 2, r: p.hole / 2, edge: (cv.oy - jc) / k};
-  }
-  // Keyholes: a 9.5 mm head hole with a 4.5 mm slot 8 mm up from it, for a screw or nail. Two a third of the way
-  // in, if there is room inside the ring for their thicker plate, else one in the middle.
-  const keys = [];
+  // Keyholes: a head hole of p.keyD with a slot half as wide going 8 mm up from it, for a screw or nail; the box
+  // hangs with the screw at the top of the slot. Where they were dragged to, or else two a third of the way in,
+  // if there is room inside the ring for their thicker plate, else one in the middle.
+  const keys = [], KR = p.keyD / 2, KS = Math.max(2, p.keyD * 0.24), KL = 8, bossR = KR + 3;
+  const room = n => n >= 0 && outline[n] && inward[n] >= ring1 + (bossR - 1) * k;
+  const fits = (x, y) => room(at(x, y)) && room(at(x, y + KL)) && room(at(x - bossR + 1, y + KL / 2)) && room(at(x + bossR - 1, y + KL / 2));
   if ($('keyholes').checked) {
-    const y = bottom + (top - bottom) * 0.62, room = n => n >= 0 && outline[n] && inward[n] >= ring1 + 9 * k;
-    const fits = x => room(at(x, y)) && room(at(x, y + 8)) && room(at(x - 7, y + 4)) && room(at(x + 7, y + 4));
-    const w = (right - left) / 2, mid = (left + right) / 2;
-    let x = null; for (let f = 0.34; f >= 0.12; f -= 0.02) if (fits(mid - w * f) && fits(mid + w * f)) { x = w * f; break; }
-    if (x !== null) keys.push([mid - x, y], [mid + x, y]); else if (fits(mid)) keys.push([mid, y]);
-    else problems.push('There is no room for a keyhole inside the back; make it bigger, or hang it some other way.');
+    if (p.keyAt && p.keyAt.length) {
+      for (const q of p.keyAt) keys.push([q[0], q[1]]);
+      if (keys.some(q => !fits(q[0], q[1]))) problems.push('A keyhole is too near the edge for its thicker plate; drag it further in.');
+    } else {
+      const y = bottom + (top - bottom) * 0.62, w = (right - left) / 2, mid = (left + right) / 2;
+      let x = null; for (let f = 0.34; f >= 0.1; f -= 0.02) if (fits(mid - w * f, y) && fits(mid + w * f, y)) { x = w * f; break; }
+      if (x !== null) keys.push([mid - x, y], [mid + x, y]); else if (fits(mid, y)) keys.push([mid, y]);
+      else problems.push('There is no room for a keyhole inside the back; make it bigger, or hang it some other way.');
+    }
   }
   const back = field(L, false, n => {
     if (!outline[n]) return null;
     const x = (n % cv.W - cv.ox) / k, y = (cv.oy - Math.floor(n / cv.W)) / k;
-    if (hole && (p.cable === 'slot' ? Math.abs(x - hole.x) < hole.r && y < hole.y : Math.hypot(x - hole.x, y - hole.y) < hole.r)) return null;
+    if (hole && p.cable === 'slot' && Math.abs(x - hole.x) < hole.r && y < hole.y) return null;
+    if (hole && p.cable === 'hole' && Math.hypot(x - hole.x, y - hole.y) < hole.r) return null;
     let thick = plate;
     for (const [kx, ky] of keys) {
-      const dy = Math.max(0, Math.min(8, y - ky)), d = Math.hypot(x - kx, y - ky - dy);
-      if (Math.hypot(x - kx, y - ky) < 4.75 || (y >= ky && y <= ky + 8 && Math.abs(x - kx) < 2.25)) return null;
-      if (d < 8) thick = plate + boss;
+      const dy = Math.max(0, Math.min(KL, y - ky)), d = Math.hypot(x - kx, y - ky - dy);
+      if (Math.hypot(x - kx, y - ky) < KR || (y >= ky && y <= ky + KL && Math.abs(x - kx) < KS / 2) || Math.hypot(x - kx, y - ky - KL) < KS / 2) return null;
+      if (d < bossR) thick = plate + boss;
     }
-    return inward[n] >= ring0 && inward[n] < ring1 ? [0, plate + plug] : [0, thick];
+    // The ring that presses in, left out where the cable comes through the sides.
+    return inward[n] >= ring0 && inward[n] < ring1 && !sideCut(n) ? [0, plate + plug] : [0, thick];
   });
   // The stand: a foot with a slot as wide as the box is 6 mm up from its lowest point.
   let stand = null;
@@ -565,7 +641,7 @@ function build(res) {
   }
   if (L.block.empty) problems.push('Add words or a picture for the front.');
   if (p.mode !== 'one' && p.mode !== 'colours' && !wanted.length && !L.block.empty) problems.push('The design is too small to show.');
-  return {box, inlays, pieces, apart, skin, seat, dropped, back, stand, problems, hole, keys, bottom, size: [cv.W / k, cv.H / k, D], front, plate};
+  return {L, wanted, KR, KS, KL, box, inlays, pieces, apart, skin, seat, dropped, back, stand, problems, hole, keys, bottom, size: [cv.W / k, cv.H / k, D], front, plate};
 }
 
 const viewer = new Lamp.Viewer($('canvas'));
@@ -577,7 +653,7 @@ const on = (attr, v) => { for (const b of document.querySelectorAll(`[data-${att
 function update() {
   on('shape', p.shape); on('mode', p.mode); on('base', p.base); on('cable', p.cable); on('split', p.split); on('look', p.look);
   wRow.classList.toggle('hidden', p.shape === 'contour'); hRow.classList.toggle('hidden', p.shape !== 'rect');
-  cornerRow.classList.toggle('hidden', p.shape !== 'rect'); marginRow.classList.toggle('hidden', p.shape !== 'contour');
+  cornerRow.classList.toggle('hidden', p.shape !== 'rect'); marginRow.classList.toggle('hidden', p.shape !== 'contour'); roundRow.classList.toggle('hidden', p.shape !== 'contour');
   const colours = p.mode === 'colours';
   $('paletteBox').classList.toggle('hidden', !colours); thresholdRow.classList.toggle('hidden', colours); $('invertRow').classList.toggle('hidden', colours);
   skinRow.classList.toggle('hidden', p.split !== 'apart');
@@ -632,7 +708,9 @@ function render() {
       x += bhi[0] - blo[0] + 10;
     }
   }
-  viewer.show(parts, glow && p.look === 'box', false);
+  const flat = p.look === 'front';
+  $('canvas').classList.toggle('hidden', flat); $('flat').classList.toggle('hidden', !flat);
+  if (flat) drawFlat(); else viewer.show(parts, glow && p.look === 'box', false);
   const fil = filaments(b), n = Object.keys(fil).length;
   const how = {lit: 'The design shows as light through the white front, with the colour round it.',
                dark: 'The design is in colour on a lit white front.',
@@ -651,6 +729,75 @@ function render() {
     ` Light it with a USB LED puck or strip inside${b.hole ? `, its cable out through the ${p.cable === 'slot' ? 'slot' : `${f1(p.hole)} mm hole`} in the back` : ''}, then press the back in.` +
     (b.keys.length === 2 ? ` Hang it from two screws ${f1(b.keys[1][0] - b.keys[0][0])} mm apart through the keyholes.` : b.keys.length ? ' Hang it from a screw through the keyhole.' : '');
 }
+
+// The Front view: the front as it looks, flat, with what is on the back drawn through it: the keyholes and the
+// cable's way out, which drag to move.
+let flatMap = null;
+function drawFlat() {
+  const b = built, L = b.L, {W, H, ox, oy, k} = L.cv, c = $('flat'), g = c.getContext('2d');
+  const cw = Math.max(1, Math.round(c.clientWidth * devicePixelRatio)), ch = Math.max(1, Math.round(c.clientHeight * devicePixelRatio));
+  if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+  g.fillStyle = '#212226'; g.fillRect(0, 0, cw, ch);
+  // The front's picture, one pixel a grid point.
+  const img = new ImageData(W, H), sides = $('darkSides').checked ? rgb($('sidesColour').value) : [0.82, 0.82, 0.8];
+  const wallPx = p.wall * k, colours = b.wanted.map(w => ({m: w.m, c: rgb(w.colour)}));
+  for (let n = 0; n < W * H; ++n) {
+    if (!L.outline[n]) continue;
+    let c3 = L.inward[n] < wallPx ? sides : [0.97, 0.96, 0.93];
+    if (L.inward[n] >= wallPx) { for (const q of colours) if (q.m[n]) { c3 = q.c; break; } if (p.mode === 'one' && L.design[n]) c3 = [1, 0.98, 0.9]; }
+    img.data.set([c3[0] * 255, c3[1] * 255, c3[2] * 255, 255], 4 * n);
+  }
+  const tmp = document.createElement('canvas'); tmp.width = W; tmp.height = H; tmp.getContext('2d').putImageData(img, 0, 0);
+  const s = Math.min((cw - 40) / W, (ch - 40) / H), x0 = (cw - W * s) / 2, y0 = (ch - H * s) / 2;
+  g.imageSmoothingEnabled = true; g.drawImage(tmp, x0, y0, W * s, H * s);
+  // mm (front view, y up) to canvas pixels, and back.
+  const px = (x, y) => [x0 + (x * k + ox) * s, y0 + (oy - y * k) * s], mm = (u, v) => [((u - x0) / s - ox) / k, (oy - (v - y0) / s) / k];
+  flatMap = {px, mm, s: s * k};
+  const S = s * k;
+  g.fillStyle = 'rgba(20, 20, 24, .78)'; g.strokeStyle = 'rgba(255, 255, 255, .55)'; g.lineWidth = devicePixelRatio;
+  for (const [kx, ky] of b.keys) {
+    const [u, v] = px(kx, ky);
+    g.beginPath(); g.arc(u, v, b.KR * S, 0, 2 * Math.PI); g.fill(); g.stroke();
+    g.beginPath(); g.roundRect(u - b.KS / 2 * S, v - b.KL * S - b.KS / 2 * S, b.KS * S, b.KL * S + b.KS / 2 * S, b.KS / 2 * S); g.fill(); g.stroke();
+  }
+  if (b.hole) {
+    const [u, v] = px(b.hole.x, p.cable === 'hole' ? b.hole.y : b.hole.edge);
+    g.beginPath();
+    if (p.cable === 'hole') g.arc(u, v, b.hole.r * S, 0, 2 * Math.PI);
+    else if (p.cable === 'slot') g.roundRect(u - b.hole.r * S, v - (b.hole.y - b.hole.edge) * S, 2 * b.hole.r * S, (b.hole.y - b.hole.edge) * S, 2);
+    else g.rect(u - b.hole.r * S, v - (p.wall + 1) * S, 2 * b.hole.r * S, (p.wall + 1) * S + 2);
+    g.fill(); g.stroke();
+  }
+  g.fillStyle = 'rgba(255, 255, 255, .5)'; g.font = `${12 * devicePixelRatio}px -apple-system, sans-serif`; g.textAlign = 'center';
+  g.fillText(b.keys.length || b.hole ? 'Seen from the front; the keyholes and the cable\'s way out are on the back. Drag them to move them.' : 'Seen from the front.', cw / 2, ch - 10 * devicePixelRatio);
+}
+{
+  let drag = null;
+  const flatCanvas = $('flat');
+  const where = e => { const r = flatCanvas.getBoundingClientRect(); return [(e.clientX - r.left) * devicePixelRatio, (e.clientY - r.top) * devicePixelRatio]; };
+  flatCanvas.addEventListener('pointerdown', e => {
+    if (!flatMap || !built) return;
+    const [u, v] = where(e), [x, y] = flatMap.mm(u, v), b = built;
+    let best = null, bd = 12;
+    b.keys.forEach((q, i) => { const d = Math.hypot(x - q[0], y - q[1] - b.KL / 2); if (d < bd) { bd = d; best = {key: i, dx: q[0] - x, dy: q[1] - y}; } });
+    if (b.hole) { const d = Math.hypot(x - b.hole.x, y - (p.cable === 'hole' ? b.hole.y : b.hole.edge)); if (d < bd) best = {cable: true, dx: b.hole.x - x}; }
+    if (!best) return;
+    if (best.key !== undefined && !(p.keyAt && p.keyAt.length)) p.keyAt = b.keys.map(q => [q[0], q[1]]);
+    drag = best; flatCanvas.setPointerCapture(e.pointerId);
+  });
+  flatCanvas.addEventListener('pointermove', e => {
+    if (!flatMap) return;
+    const [u, v] = where(e), [x, y] = flatMap.mm(u, v);
+    if (!drag) { const b = built; flatCanvas.style.cursor = b && (b.keys.some(q => Math.hypot(x - q[0], y - q[1] - b.KL / 2) < 12) ||
+      (b.hole && Math.hypot(x - b.hole.x, y - (p.cable === 'hole' ? b.hole.y : b.hole.edge)) < 12)) ? 'grab' : 'default'; return; }
+    if (drag.cable) p.cableX = Math.round((x + drag.dx) * 2) / 2;
+    else p.keyAt[drag.key] = [Math.round((x + drag.dx) * 2) / 2, Math.round((y + drag.dy) * 2) / 2];
+    update();
+  });
+  flatCanvas.addEventListener('pointerup', () => { drag = null; });
+  new ResizeObserver(() => { if (p.look === 'front' && built) drawFlat(); }).observe(flatCanvas);
+}
+$('keyAuto').onclick = () => { p.keyAt = null; p.cableX = null; update(); };
 
 window.fromApp = message => {
   if (message.type === 'printer') { printer = message; update(); }
